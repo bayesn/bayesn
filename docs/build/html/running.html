@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Running BayeSN Jobs &mdash; bayesn 0.1.0 documentation</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="_static/documentation_options.js?v=01f34227"></script>
+        <script src="_static/doctools.js?v=888ff710"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Defining Filters" href="filters.html" />
+    <link rel="prev" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            bayesn
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="intro.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Running BayeSN Jobs</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#specifying-input-to-bayesn">Specifying input to BayeSN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-yaml-files">Example yaml files</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#training-example">Training example</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#fitting-example">Fitting example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#specifying-data-to-use">Specifying data to use</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="filters.html">Defining Filters</a></li>
+<li class="toctree-l1"><a class="reference internal" href="output.html">Output</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">Reference / API</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">bayesn</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Running BayeSN Jobs</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/running.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="running-bayesn-jobs">
+<span id="running-bayesn"></span><h1>Running BayeSN Jobs<a class="headerlink" href="#running-bayesn-jobs" title="Link to this heading"></a></h1>
+<p>BayeSN jobs are run just by running the script <code class="docutils literal notranslate"><span class="pre">run_bayesn</span></code> (after installation, this script can be called from any
+directory), with the specific job defined by an input yaml file which allow you to specify e.g. whether you want to run
+model training or fitting, which data you want to use and where your filters are defined. To run a job, you can just run
+the following command, making sure to specify the path to your <code class="docutils literal notranslate"><span class="pre">input.yaml</span></code> file.</p>
+<p><code class="docutils literal notranslate"><span class="pre">run_bayesn</span> <span class="pre">--input</span> <span class="pre">PATH\TO\input.yaml</span></code></p>
+<p>The <code class="docutils literal notranslate"><span class="pre">input.yaml</span></code> therefore underpins this code. Examples and explanations of all the keys are given below. Please note,
+if you do not specify <code class="docutils literal notranslate"><span class="pre">--input</span></code>, the code will look for a file called <code class="docutils literal notranslate"><span class="pre">input.yaml</span></code> in the directory where you run this
+command from.</p>
+<section id="specifying-input-to-bayesn">
+<h2>Specifying input to BayeSN<a class="headerlink" href="#specifying-input-to-bayesn" title="Link to this heading"></a></h2>
+<p>The keys which can be specified are described below. Depending on whether you are training or fitting, different keys will be required:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">name</span></code>: Specifies the name of the folder that the output of the run will be saved in. In tandem with <cite>outputdir</cite>, this will specify exactly where the results are saved.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">outputdir</span></code>: The directory in which to save the output folder.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mode</span></code>: The BayeSN mode to use, can be used to specify whether you want to train or fit.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">load_model</span></code>: The existing BayeSN to use if you are fitting. You can either specify one of the built-in models (one of ‘M20_model’, ‘T21_model’ or ‘W22_model’) or use a path to a model you have trained yourself (defined by a bayesn.yaml file, see details of the output below).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_warmup</span></code>: The number of warmup steps for HMC. Typically 500 is sufficient for training and 250 for fitting for convergence, but you may need to increase this.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_samples</span></code>: The number of posterior samples to take.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">num_chains</span></code>: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">filters</span></code>: Path to a yaml file describing the filters you want to use. For more details, please see <a class="reference internal" href="filters.html#filters"><span class="std std-ref">Defining Filters</span></a>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chain_method</span></code>: The method to use for running multiple chains in numpyro. If ‘sequential’, chains will be run one-after-the-other until all are complete. If ‘parallel’, the chains will be run in parallel over multiple devices - with 4 chains and a node with 4 GPUs, the chains will be run simultaneously in parallel. If ‘vectorized’, chains will be run in parallel on a single device which may or may not be quicker than running them sequentially depending on the device you are using, and may result in memory issues unless you are using a large GPU.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">initialisation</span></code>: The strategy used to initialise the HMC chains. Must be one of:</p>
+<ul>
+<li><p>‘median’: Initialise chains to the prior media with some additonal scatter between chains applied by numpyro.</p></li>
+<li><p>‘sample’: Initialise chains to random samples from the priors.</p></li>
+<li><p>‘T21’: Should only be used when training the model. Will initialise some global parameters to those of the T21 BayeSN model, specifically W0 and W1. This is useful just to stop these complex, multidimensional parameters starting in a very bad region of parameter space. Other parameters are random samples from the priors. If using different wavelength knots to T21, the inital values for W0 and W1 matrices will be determined by cubic spline interpolation of the originals if within the wavelength range covered by T21, and initialised to 0 otherwise.</p></li>
+<li><p>‘M20’: The same as above but using the M20 model rather than T21.</p></li>
+</ul>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">l_knots</span></code>: The wavelength knot locations for the 2d cubic spline surfaces that define the BayeSN model. These only need to be specified when training, as they are already specified in the model definition when fitting.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tau_knots</span></code>: The rest-frame phase knot locations for the 2d cubic spline surfaces that define the BayeSN model. These only need to be specified when training, as they are already specified in the model definition when fitting.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">map</span></code>: A set of <code class="docutils literal notranslate"><span class="pre">key:</span> <span class="pre">value</span></code> pairs specifying a mapping between filter names. You will want to use this if the filter names in the data files you are using do not match the names in your <cite>filters.yaml</cite> file (see below). For example, if your data files use the filter names _griz_ and you want ensure that you use DES filters you can set <code class="docutils literal notranslate"><span class="pre">map:</span> <span class="pre">{g:</span> <span class="pre">g_DES,</span> <span class="pre">r:</span> <span class="pre">r_DES,</span> <span class="pre">i:</span> <span class="pre">i_DES,</span> <span class="pre">z:</span> <span class="pre">z_DES}</span></code>, and just make sure that the filter names _g_DES_ etc. are in your <code class="docutils literal notranslate"><span class="pre">filters.yaml</span></code> file. If the filter names in your data files already match those in <code class="docutils literal notranslate"><span class="pre">filters.yaml</span></code>, this is not required.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data_table</span></code>: The path to a table providing paths to data files and metadata for each SN - see below for the required format. This should be used <strong>only</strong> if working with real data, as if you are using an SNANA simulation we can expect all files to be located in the same folder and be confident about the information contained in the headers - in this case, use the <code class="docutils literal notranslate"><span class="pre">data_dir</span></code> key instead.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data_root</span></code>: A root directory which will be pre-pended to all file paths in input_table. Not required if using <code class="docutils literal notranslate"><span class="pre">data_dir</span></code>, only for <code class="docutils literal notranslate"><span class="pre">data_table</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data_dir</span></code>: The path to a directory containing that the output of an SNANA simulation you wish to use an input data. This should be used <strong>only</strong> if you are using the output of an SNANA simulation, where the data structure is more predictable and standard than using real data. Otherwise, use a combination of <code class="docutils literal notranslate"><span class="pre">data_table</span></code> and <code class="docutils literal notranslate"><span class="pre">data_root</span></code> instead.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">yamloutputfile</span></code>: The name of an output yaml file, required only for SNANA runs to check job success, which will be saved in <code class="docutils literal notranslate"><span class="pre">outputdir</span></code>. If not specified, defaults to <cite>output.yaml</cite>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">drop_bands</span></code>: A list of bands which are present in the data files that you are using which you do not wish to include in the analysis, optional.</p></li>
+</ul>
+<p>You can see an example of input.yaml files for training and fitting below.</p>
+</section>
+<section id="example-yaml-files">
+<h2>Example yaml files<a class="headerlink" href="#example-yaml-files" title="Link to this heading"></a></h2>
+<section id="training-example">
+<h3>Training example<a class="headerlink" href="#training-example" title="Link to this heading"></a></h3>
+<p>This example demonstrates the input.yaml that could be used to train the BayeSN model presented in Thorp+2021.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T21_training_example</span>
+<span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">training</span>
+<span class="nt">num_chains</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span>
+<span class="nt">num_warmup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+<span class="nt">num_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+<span class="nt">filters</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/filters.yaml</span>
+<span class="nt">chain_method</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parallel</span>
+<span class="nt">initialisation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T21</span>
+<span class="nt">l_knots</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">3500.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">4900.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">6200.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">7700.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">8700.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">9500.0</span><span class="p p-Indicator">]</span>
+<span class="nt">tau_knots</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">-10.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">10.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">20.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">30.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">40.0</span><span class="p p-Indicator">]</span>
+<span class="nt">map</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">g</span><span class="p">:</span><span class="w"> </span><span class="nv">g_PS1</span><span class="p p-Indicator">,</span><span class="nt"> r</span><span class="p">:</span><span class="w"> </span><span class="nv">r_PS1</span><span class="p p-Indicator">,</span><span class="nt"> i</span><span class="p">:</span><span class="w"> </span><span class="nv">i_PS1</span><span class="p p-Indicator">,</span><span class="nt"> z</span><span class="p">:</span><span class="w"> </span><span class="nv">z_PS1</span><span class="p p-Indicator">}</span>
+<span class="nt">data_root</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/DATA/ROOT</span>
+<span class="nt">input_table</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T21_training_set.txt</span>
+<span class="nt">outputdir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/OUTPUT/DIR</span>
+<span class="nt">yamloutputfile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test_out.yaml</span>
+</pre></div>
+</div>
+</section>
+<section id="fitting-example">
+<h3>Fitting example<a class="headerlink" href="#fitting-example" title="Link to this heading"></a></h3>
+<p>This example demonstrates the input.yaml that could be used to fit some SNANA simulations using a custom BayeSN model defined in a bayesn.yaml file.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M20_training_example</span>
+<span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fitting</span>
+<span class="nt">load_model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/CUSTOM/bayesn.yaml</span>
+<span class="nt">num_chains</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span>
+<span class="nt">num_warmup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span>
+<span class="nt">num_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">250</span>
+<span class="nt">filters</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/filters.yaml</span>
+<span class="nt">chain_method</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parallel</span>
+<span class="nt">initialisation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">median</span>
+<span class="nt">data_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/SNANA/SIMULATION</span>
+<span class="nt">outputdir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/PATH/TO/OUTPUT/DIR</span>
+<span class="nt">yamloutputfile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test_out.yaml</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="specifying-data-to-use">
+<h2>Specifying data to use<a class="headerlink" href="#specifying-data-to-use" title="Link to this heading"></a></h2>
+<p>As discussed above, if you are using the output an SNANA simulation as input you need only pass the location of the
+SNANA output to the <code class="docutils literal notranslate"><span class="pre">data_dir</span></code> key in the input file. However, if you are using real data, you may want to use data
+spanning multiple surveys which means you won’t necessarily be able to point to a single directory. In this case, you
+should use the keys <code class="docutils literal notranslate"><span class="pre">data_table</span></code> and <code class="docutils literal notranslate"><span class="pre">data_root</span></code> in the input. <code class="docutils literal notranslate"><span class="pre">data_table</span></code> should contain file paths to the data
+for each SN as well as associated metadata for the SN, with the following structure:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>SNID SEARCH_PEAKMJD REDSHIFT_CMB REDSHIFT_CMB_ERR files
+SN1 57400   0.02    0.0001  survey1/SN1.txt
+SN2 57500   0.03    0.0001  survey1/SN2.txt
+SN3 57600   0.04    0.0001  survey1/SN3.txt,survey2/SN3.txt
+SN4 57700   0.05    0.0001  survey3/SN3_optical.txt,survey3/SN3_NIR.txt
+SN5 57800   0.06    0.0001  survey4/SN4.txt
+</pre></div>
+</div>
+<p>The table allows for multiple files per object if required, the file names just need to be separated by commas in the
+files columns. This approach allows you to read in data from multiple surveys, including cases where the same object has
+observations from multiple surveys which are contained in different data files. This is also relevant for cases where
+one object may have both optical and NIR data which are contained in different files.</p>
+<p>The table should include CMB-frame redshifts and associated uncertainties. This will be used to fix distance when
+training, although distance is a free parameter when fitting with redshift used only to determine filter responses and
+phase. The time of B-band maximum, SEARCH_PEAKMJD, need only be a rough estimate when fitting as the model will also
+infer the time of maximum, using a uniform prior covering 10 rest-frame days either side of the specified
+SEARCH_PEAKMJD.</p>
+<p>The key <code class="docutils literal notranslate"><span class="pre">data_root</span></code> simply specifies the location that the file paths in <code class="docutils literal notranslate"><span class="pre">data_table</span></code> are defined with respect to.
+For example, with <code class="docutils literal notranslate"><span class="pre">data_root:</span> <span class="pre">/data/photometry/</span></code>, the full file path for the first file in the table above will be
+<code class="docutils literal notranslate"><span class="pre">/data/photometry/survey1/SN1.txt</span></code> and similar for the rest.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="filters.html" class="btn btn-neutral float-right" title="Defining Filters" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, Matthew Grayling, Stephen Thorp, Kaisey Mandel.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

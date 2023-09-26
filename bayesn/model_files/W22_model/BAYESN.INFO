@@ -1,0 +1,31 @@
+DOCUMENTATION:
+    PURPOSE:  BayeSN model for simulations and light-curve fitting
+    REF:
+    - AUTHOR: Ward et al., 2022 (this model version)
+      ADS:    https://ui.adsabs.harvard.edu/abs/2022arXiv220910558W/abstract
+    - AUTHOR: Mandel et al., 2022 (BayeSN model)
+      ADS:    https://ui.adsabs.harvard.edu/abs/2022MNRAS.510.3939M/abstract
+    INTENT: Alternative
+    USAGE_KEY: GENMODEL, FITMODEL_NAME
+    USAGE_CODE: snlc_sim.exe snlc_fit.exe
+    VALIDATE_SCIENCE: Ward+22, Mandel+22, Thorp+21
+    NOTES:
+    - Trained on Foundation DR1 (Foley+18, Jones+19) and Avelino+19 compilation
+    - Training data includes BgVrizYJH
+    - Milky Way extinction based on SF11
+    VERSION:
+    - DATE: 2021-06-10
+    - TIME: 13:52:16
+    - AUTHOR: S. Thorp, G. Narayan
+DOCUMENTATION_END:
+
+RESTLAMBDA_RANGE: 3000 18500
+
+# Range of light curve shape values in training set
+THETA1_RANGE: -1.49 2.77
+
+# Nominal population parameter values from model training
+M0: -19.5  # Normalisation factor
+SIGMA0: 0.094  # Grey residual scatter
+RV: 2.659  # Host galaxy dust law RV (assuming F99)
+TAUA: 0.252  # Mean host galaxy dust extinction

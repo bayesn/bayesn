@@ -1,0 +1,8 @@
+include bayesn/data/hsiao.h5
+include bayesn/model_files/M20_model/BAYESN.INFO
+include bayesn/model_files/M20_model/BAYESN.YAML
+include bayesn/model_files/T21_model/BAYESN.INFO
+include bayesn/model_files/T21_model/BAYESN.YAML
+include bayesn/model_files/W22_model/BAYESN.INFO
+include bayesn/model_files/W22_model/BAYESN.YAML
+include bayesn/model_files/README.md
