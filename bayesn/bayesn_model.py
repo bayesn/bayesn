@@ -4,6 +4,8 @@ BayeSN Optical+NIR SED model.
 """
 
 import os
+import subprocess
+
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
@@ -39,6 +41,7 @@ from astropy.io import fits
 import ruamel.yaml as yaml
 import time
 from tqdm import tqdm
+from astropy.table import QTable
 
 # Make plots look pretty
 rc('font', **{'family': 'serif', 'serif': ['cmr10']})
@@ -1166,6 +1169,9 @@ class SEDmodel(object):
                     arg_val = {row[0]: row[1] for row in filt_map}
                 args[arg] = arg_val
 
+        args.pop('CONFIG', None)
+        args.pop('config', None)
+
         # Set default parameters for some parameters if not specified in input.yaml or command line
         args['num_chains'] = args.get('num_chains', 4)
         args['num_warmup'] = args.get('num_warmup', 500)
@@ -1177,13 +1183,27 @@ class SEDmodel(object):
         args['map'] = args.get('map', {})
         args['drop_bands'] = args.get('drop_bands', [])
         args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd(), args['name']))
-        args['yamloutputfile'] = args.get('yamloutputfile', 'output.yaml')
+        args['outfile_prefix'] = args.get('outfile_prefix', 'output')
+        args['jobid'] = args.get('jobid', False)
+        pdp = args.get('private_data_path', [])
+        args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
+        args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['jobsplit'] = args.get('jobsplit')
+        if args['jobsplit'] is not None:
+            args['snana'] = True
+        else:
+            args['jobsplit'] = [1, 1]
+            args['snana'] = False
+        args['jobid'] = args['jobsplit'][0]
+        args['njobtot'] = args['jobsplit'][1] * args['sim_prescale']
+        args['jobid'] = args['jobsplit'][0]
 
-        try:
-            if not os.path.exists(args['outputdir']):
-                os.mkdir(args['outputdir'])
-        except FileNotFoundError:
-            raise FileNotFoundError('Requested output directory does not exist and could not be created')
+        if not (args['mode'] == 'fitting' and args['snana']):
+            try:
+                if not os.path.exists(args['outputdir']):
+                    os.mkdir(args['outputdir'])
+            except FileNotFoundError:
+                raise FileNotFoundError('Requested output directory does not exist and could not be created')
 
         if 'training' in args['mode'].lower():
             self.l_knots = device_put(np.array(args['l_knots'], dtype=float))
@@ -1352,7 +1372,7 @@ class SEDmodel(object):
             with open(os.path.join(args['outputdir'], 'bayesn.yaml'), 'w') as file:
                 yaml.dump(yaml_data, file)
 
-        z = self.data[-5, 0, :]
+        z_HEL = self.data[-5, 0, :]
         muhat = self.data[-3, 0, :]
 
         if args['mode'] == 'fitting':
@@ -1364,29 +1384,48 @@ class SEDmodel(object):
                 np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
             samples['delM'] = samples['Ds'] - samples['mu']
 
-        # Save convergence data for each parameter to csv file
-        summary = arviz.summary(samples)
-        summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
+            # Create FITRES file
+            if args['snana']:
+                # fetch snana version that includes tag + commit;
+                # e.g., v11_05-4-gd033611.
+                # Use same git command as in Makefile for C code
+                SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
+                if SNANA_DIR != 'NULL':
+                    cmd = f'cd {SNANA_DIR}; git describe - -always - -tags'
+                    ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
+                    snana_version = ret.stdout.replace('\n', '')
+                else:
+                    snana_version = 'NULL'
+                self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
+                                          '# VERSION_PHOTOMETRY:': args['version_photometry'],
+                                          '# TABLE NAME:': 'FITRES\n#'}
 
-        with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
-            pickle.dump(samples, file)
+                self.fitres_table['MU'] = np.around(samples['mu'].mean(axis=(0, 1)), 3)
+                self.fitres_table['MU_ERR'] = np.around(samples['mu'].std(axis=(0, 1)), 3)
 
-        data = np.array([self.sn_list, z, muhat]).T
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES', fmt="salt2",
+                                 metachar="")
 
-        df = pd.DataFrame(data, columns=['sn', 'z', 'muhat'])
-        df.to_csv(os.path.join(args['outputdir'], 'sn_props.txt'), index=False)
+        if args['snana']:
+            # Output yaml
+            out_dict = {
+                'ABORT_IF_ZERO': 1,
+                'NLC': self.data.shape[-1],
+                'NOBS': int(self.data[-1, ...].sum())
+            }
+            with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
+                yaml.dump(out_dict, file, default_flow_style=False)
 
-        with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
-            yaml.dump(args, file)
+        if not (args['mode'] == 'fitting' and args['snana']):
+            # Save convergence data for each parameter to csv file
+            summary = arviz.summary(samples)
+            summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
 
-        # Output yaml
-        out_dict = {
-            'ABORT_IF_ZERO': 1,
-            'NLC': self.data.shape[-1],
-            'NOBS': int(self.data[-1, ...].sum())
-        }
-        with open(os.path.join(args['outputdir'], args['yamloutputfile']), 'w') as file:
-            yaml.dump(out_dict, file, default_flow_style=False)
+            with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
+                pickle.dump(samples, file)
+
+            with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
+                yaml.dump(args, file)
         return
 
     def process_dataset(self, args):
@@ -1411,14 +1450,36 @@ class SEDmodel(object):
             and data set to load
 
         """
-        if 'data_dir' not in args.keys() and 'data_table' not in args.keys():
+        if 'version_photometry' not in args.keys() and 'data_table' not in args.keys():
             raise ValueError('Please pass either data_dir (for a directory containing all SNANA files such as a '
                              'simulation output) or a combination of data_table and data_root')
         if 'data_table' in args.keys() and 'data_root' not in args.keys():
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
-        if 'data_dir' in args.keys():  # If SNANA simulation
-            data_dir = args['data_dir']
+        if 'version_photometry' in args.keys():  # If using all files in directory
+            data_dir = args['version_photometry']
+            if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
+                # Look in standard public repositories for real data/simulations
+                dir_list = ['SNDATA_ROOT/lcmerge', 'SNDATA_ROOT/SIM']
+                sim_list = np.loadtxt(os.path.join(os.environ.get('SNDATA_ROOT'), 'SIM', 'PATH_SNDATA_SIM.LIST'), dtype=str)
+                dir_list = dir_list + list([sim_dir[1:] for sim_dir in sim_list])
+                pdp = [path[1:] if path[0] == '$' else path for path in args['private_data_path']]
+                dir_list = dir_list + pdp  # Add any private data directories
+                found_in = []
+                for dir in dir_list:
+                    root_split = dir.split('/')
+                    root, remainder = root_split[0], ''.join(root_split[1:])
+                    if not os.path.isabs(dir):
+                        root = os.environ.get(root, 'NULL')
+                    if os.path.exists(os.path.join(root, remainder, data_dir)):
+                        found_in.append(os.path.join(root, remainder, data_dir))
+                if len(found_in) == 0:
+                    raise ValueError(f'Requested photometry {data_dir} was not found in any of the usual public '
+                                     f'locations, maybe you need to specify an additional private data location')
+                elif len(found_in) > 1:
+                    raise ValueError(f'Requested photometry {data_dir} was found in multiple locations, please remove '
+                                     f'duplicates and ensure the one you want to use remains')
+                data_dir = found_in[0]
             sample_name = os.path.split(data_dir)[-1]
             list_file = os.path.join(data_dir, f'{os.path.split(data_dir)[-1]}.LIST')
             sn_list = np.loadtxt(list_file, dtype='str')
@@ -1428,23 +1489,41 @@ class SEDmodel(object):
             all_lcs = []
             t_ranges = []
             sne = []
+            # For FITRES table
+            idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
+            snrmax1s, snrmax2s, snrmax3s = [], [], []
+            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
+            # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             print('Reading light curves...')
             if file_format.lower() == 'fits':  # If FITS format
+                ntot = 0
+                # Check if sim or real data
+                head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')
+                phot_file = os.path.join(data_dir, f'{sn_list[0].replace("HEAD", "PHOT")}.gz')
+                sne_file = sncosmo.read_snana_fits(head_file, phot_file)
+                # If real data, ignore sim_prescale
+                if 'SIM_REDSHIFT_HELIO' not in sne_file[0].meta.keys():
+                    args['njobtot'] = args['jobsplit'][0]
                 for sn_file in tqdm(sn_list):
                     head_file = os.path.join(data_dir, f'{sn_file}.gz')
                     phot_file = os.path.join(data_dir, f'{sn_file.replace("HEAD", "PHOT")}.gz')
-                    sne = sncosmo.read_snana_fits(head_file, phot_file)
-                    for sn_ind in range(len(sne)):
-                        sn = sne[sn_ind]
+                    sne_file = sncosmo.read_snana_fits(head_file, phot_file)
+                    for sn_ind in range(len(sne_file)):
+                        ntot += 1
+                        if (ntot - args['jobid']) % args['njobtot'] != 0:
+                            continue
+                        sn = sne_file[sn_ind]
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         peak_mjd = meta['PEAKMJD']
                         sne.append(meta['SNID'])
-                        z = meta['SIM_REDSHIFT_CMB']
-                        z_err = 5e-3
-                        data['t'] = (data.MJD - peak_mjd) / (1 + z)
+                        zhel = meta['REDSHIFT_HELIO']
+                        zcmb = meta['REDSHIFT_FINAL']
+                        zhel_err = 5e-4  # Need to handle this better if not defined
+                        zcmb_err = 5e-4  # Need to handle this better if not defined
+                        data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                         # If filter not in map_dict, assume one-to-one mapping------
                         for f in data.BAND.unique():
                             if f not in map_dict.keys():
@@ -1452,7 +1531,7 @@ class SEDmodel(object):
                         data['FLT'] = data.BAND.apply(lambda x: map_dict[x])
                         # Remove bands outside of filter coverage-------------------
                         for f in data.FLT.unique():
-                            if z > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or z < (
+                            if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
                                     self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
                                 data = data[~data.FLT.isin([f])]
                         # Record all used bands-------------------------------------
@@ -1472,10 +1551,10 @@ class SEDmodel(object):
                             data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                         data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                         data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                        data['redshift'] = z
-                        data['redshift_error'] = z_err
+                        data['redshift'] = zhel
+                        data['redshift_error'] = zcmb_err
                         data['MWEBV'] = meta['MWEBV']
-                        data['dist_mod'] = self.cosmo.distmod(z)
+                        data['dist_mod'] = self.cosmo.distmod(zcmb)
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
@@ -1487,15 +1566,56 @@ class SEDmodel(object):
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
                         all_lcs.append(lc)
+                        # Set up FITRES table data
+                        # (currently just uses second table, should improve for cases where there are multiple lc files)
+                        idsurvey.append(meta.get('IDSURVEY', 'NULL'))
+                        sn_type.append(meta.get('TYPE', 'NULL'))
+                        field.append(meta.get('FIELD', 'NULL'))
+                        cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                        z_hels.append(zhel)
+                        z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
+                        z_hds.append(meta['REDSHIFT_FINAL'])
+                        z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
+                        vpecs.append(meta.get('VPEC', 'NULL'))
+                        vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
+                        mwebvs.append(meta.get('MWEBV', 'NULL'))
+                        host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
+                        host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                        snrmax1 = np.max(lc.flux / lc.flux_err)
+                        lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                        if lc_snr2.shape[0] == 0:
+                            snrmax2 = -99
+                            snrmax3 = -99
+                        else:
+                            snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                            lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                              lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[
+                                                  0]]
+                            if lc_snr3.shape[0] == 0:
+                                snrmax3 = -99
+                            else:
+                                snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                        snrmax1s.append(snrmax1)
+                        snrmax2s.append(snrmax2)
+                        snrmax3s.append(snrmax3)
             else:  # If not FITS, assume text format
-                for sn_file in tqdm(sn_list):
+                # Check if sim or real data
+                meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_list[0]), default_tablename='OBS')
+                # If real data, ignore sim_prescale
+                if 'SIM_REDSHIFT_HELIO' not in meta.keys():
+                    args['njobtot'] = args['jobsplit'][0]
+                for sn_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
+                    if (sn_ind + 1 - args['jobid']) % args['njobtot'] != 0:
+                        continue
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_file), default_tablename='OBS')
                     data = lcdata['OBS'].to_pandas()
                     peak_mjd = meta['PEAKMJD']
                     sne.append(meta['SNID'])
-                    z = meta['SIM_REDSHIFT_CMB']
-                    z_err = 5e-3
-                    data['t'] = (data.MJD - peak_mjd) / (1 + z)
+                    zhel = meta['REDSHIFT_HELIO']
+                    zcmb = meta['REDSHIFT_FINAL']
+                    zhel_err = 5e-4  # Need to handle this better if not defined
+                    zcmb_err = 5e-4  # Need to handle this better if not defined
+                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
                     for f in data.BAND.unique():
@@ -1505,7 +1625,7 @@ class SEDmodel(object):
 
                     # Remove bands outside of filter coverage-------------------
                     for f in data.FLT.unique():
-                        if z > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or z < (
+                        if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
                                 self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
                             data = data[~data.FLT.isin([f])]
                     # Record all used bands-------------------------------------
@@ -1525,10 +1645,10 @@ class SEDmodel(object):
                         data['MAGERR'] = np.abs((2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL'])
                     data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                     data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                    data['redshift'] = z
-                    data['redshift_error'] = z_err
+                    data['redshift'] = zhel
+                    data['redshift_error'] = zcmb_err
                     data['MWEBV'] = meta['MWEBV']
-                    data['dist_mod'] = self.cosmo.distmod(z)
+                    data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
@@ -1540,6 +1660,37 @@ class SEDmodel(object):
                     t_ranges.append((lc['t'].min(), lc['t'].max()))
                     n_obs.append(lc.shape[0])
                     all_lcs.append(lc)
+                    # Set up FITRES table data
+                    # (currently just uses second table, should improve for cases where there are multiple lc files)
+                    idsurvey.append(meta.get('IDSURVEY', 'NULL'))
+                    sn_type.append(meta.get('TYPE', 'NULL'))
+                    field.append(meta.get('FIELD', 'NULL'))
+                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                    z_hels.append(zhel)
+                    z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
+                    z_hds.append(meta['REDSHIFT_FINAL'])
+                    z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
+                    vpecs.append(meta.get('VPEC', 'NULL'))
+                    vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
+                    mwebvs.append(meta.get('MWEBV', 'NULL'))
+                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
+                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                    snrmax1 = np.max(lc.flux / lc.flux_err)
+                    lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                    if lc_snr2.shape[0] == 0:
+                        snrmax2 = -99
+                        snrmax3 = -99
+                    else:
+                        snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                        lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                      lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                        if lc_snr3.shape[0] == 0:
+                            snrmax3 = -99
+                        else:
+                            snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                    snrmax1s.append(snrmax1)
+                    snrmax2s.append(snrmax2)
+                    snrmax3s.append(snrmax3)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
@@ -1567,7 +1718,17 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
-            return
+            # Prep FITRES table
+            varlist = ["SN:"] * len(sne)
+            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
+            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
+            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                           names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR',
+                                  'zHD',
+                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
+                                  'SNRMAX2', 'SNRMAX3'])
+            self.fitres_table = table
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
             sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
@@ -1575,6 +1736,11 @@ class SEDmodel(object):
 
             all_lcs = []
             t_ranges = []
+            # For FITRES table
+            idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
+            snrmax1s, snrmax2s, snrmax3s = [], [], []
+            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
+            # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             print('Reading light curves...')
             for i in tqdm(range(sn_list.shape[0])):
@@ -1591,7 +1757,8 @@ class SEDmodel(object):
                     else:
                         peak_mjd = meta['SEARCH_PEAKMJD']
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
-                    data['t'] = (data.MJD - peak_mjd) / (1 + row.REDSHIFT_CMB)
+                    zhel = meta['REDSHIFT_HELIO']
+                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
                     for f in data.FLT.unique():
@@ -1600,7 +1767,7 @@ class SEDmodel(object):
                     data['FLT'] = data.FLT.apply(lambda x: map_dict[x])
                     # Remove bands outside of filter coverage-------------------
                     for f in data.FLT.unique():
-                        if row.REDSHIFT_CMB > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or row.REDSHIFT_CMB < (
+                        if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
                                 self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
                             data = data[~data.FLT.isin([f])]
                     # Record all used bands-------------------------------------
@@ -1620,7 +1787,7 @@ class SEDmodel(object):
                         data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                     data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                     data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                    data['redshift'] = row.REDSHIFT_CMB
+                    data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
                     data['MWEBV'] = meta['MWEBV']
                     data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
@@ -1639,6 +1806,29 @@ class SEDmodel(object):
                 t_ranges.append((lc['t'].min(), lc['t'].max()))
                 n_obs.append(lc.shape[0])
                 all_lcs.append(sn_lc)
+                # Set up FITRES table data
+                # (currently just uses second table, should improve for cases where there are multiple lc files)
+                idsurvey.append(meta.get('IDSURVEY', 'NULL'))
+                sn_type.append(meta.get('TYPE', 'NULL'))
+                field.append(meta.get('FIELD', 'NULL'))
+                cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                z_hels.append(zhel)
+                z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', row.REDSHIFT_CMB_ERR))
+                z_hds.append(row.REDSHIFT_CMB)
+                z_hd_errs.append(row.REDSHIFT_CMB_ERR)
+                vpecs.append(meta.get('VPEC', 'NULL'))
+                vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
+                mwebvs.append(meta.get('MWEBV', 'NULL'))
+                host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
+                host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                snrmax1 = np.max(lc.flux / lc.flux_err)
+                lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                lc_snr3 = lc_snr2[lc_snr2.band_indices != lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                snrmax1s.append(snrmax1)
+                snrmax2s.append(snrmax2)
+                snrmax3s.append(snrmax3)
             N_sn = sn_list.shape[0]
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
@@ -1668,6 +1858,17 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+
+            # Prep FITRES table
+            varlist = ["SN:"] * len(sne)
+            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
+            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
+            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR', 'zHD',
+                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
+                                  'SNRMAX2', 'SNRMAX3'])
+            self.fitres_table = table
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
