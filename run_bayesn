@@ -4,7 +4,9 @@ import os
 
 from bayesn import SEDmodel
 import argparse
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
+
+yaml = YAML(typ='safe')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('input', type=str)
@@ -37,7 +39,7 @@ if not os.path.exists(cmd_args.input):
     raise FileNotFoundError(f'Specified input file ({cmd_args.input}) was not found, please provide the path to an '
                             f'input yaml file or create an input.yaml in your current directory')
 with open(cmd_args.input, 'r') as file:
-    args = yaml.load(file, Loader=yaml.Loader)
+    args = yaml.load(file)
 
 # If no default model to load is specified in input.yaml or via command line, assume T21
 if 'load_model' not in args.keys() and cmd_args.load_model is None:
