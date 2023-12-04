@@ -38,10 +38,12 @@ import arviz
 import extinction
 import timeit
 from astropy.io import fits
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 import time
 from tqdm import tqdm
 from astropy.table import QTable
+
+yaml = YAML(typ='safe')
 
 # Make plots look pretty
 rc('font', **{'family': 'serif', 'serif': ['cmr10']})
@@ -154,11 +156,11 @@ class SEDmodel(object):
         if os.path.exists(load_model):
             print(f'Loading custom model at {load_model}')
             with open(load_model, 'r') as file:
-                params = yaml.load(file, Loader=yaml.Loader)
+                params = yaml.load(file)
         elif load_model in built_in_models:
             print(f'Loading built-in model {load_model}')
             with open(os.path.join(self.__root_dir__, 'model_files', load_model, 'BAYESN.YAML'), 'r') as file:
-                params = yaml.load(file, Loader=yaml.Loader)
+                params = yaml.load(file)
         else:
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
                                     f'of the built-in model {built_in_models}')
@@ -265,7 +267,7 @@ class SEDmodel(object):
         if not os.path.exists(self.filter_yaml):
             raise FileNotFoundError(f'Specified filter yaml {self.filter_yaml} does not exist')
         with open(self.filter_yaml, 'r') as file:
-            filter_dict = yaml.load(file, Loader=yaml.Loader)
+            filter_dict = yaml.load(file)
 
         # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
         if 'standards' in filter_dict.keys():
@@ -1077,11 +1079,11 @@ class SEDmodel(object):
         if os.path.exists(reference_model):
             print(f'Using custom model at {reference_model} to initialise chains')
             with open(reference_model, 'r') as file:
-                params = yaml.load(file, Loader=reference_model.Loader)
+                params = yaml.load(file)
         elif reference_model in built_in_models:
             print(f'Loading built-in model {reference_model} to initialise chains')
             with open(os.path.join(self.__root_dir__, 'model_files', reference_model, 'BAYESN.YAML'), 'r') as file:
-                params = yaml.load(file, Loader=yaml.Loader)
+                params = yaml.load(file)
         else:
             raise ValueError("Invalid initialisation method, please choose either 'median' or 'sample', or choose "
                              "either one of the built-in models or a custom model to base the hyperparmeter "
