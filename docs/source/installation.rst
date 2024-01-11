@@ -38,7 +38,7 @@ instructions for jax GPU can be found here: https://github.com/google/jax#instal
 Install using pip (recommended)
 --------------------------------
 
-BayeSN is available on PyPI, and be installed by running
+BayeSN is available on PyPI, and can be installed by running
 
 ``pip install bayesn``
 
@@ -49,4 +49,6 @@ to run on CPU, you can just pip install without worrying about this.
 
 Install development version
 ----------------------------
-BayeSN is also available on Github:
+BayeSN is also available on Github and can be found here: https://github.com/bayesn/bayesn.
+
+To install, download or clone the repo and run ``pip install .`` in the base directory.
