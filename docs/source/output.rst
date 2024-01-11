@@ -1,7 +1,7 @@
 Output
 =============
 
-The output of BayeSN will vary depending on whether you are training or fitting. The output will be saved in
+The output of BayeSN will vary depending on whether the mode you are using. The output will be saved in
 ``outputdir/name`` where ``outputdir`` and ``name`` correspond to the keys present in the input file as described in
 :ref:`running_bayesn`.
 
@@ -22,3 +22,10 @@ The output of a fitting job will have the following structure:
 
 - ``fit_summary.csv``: A summary of the MCMC output, showing parameter means/medians etc. as well as the Gelman-Rubin statistic and effective sample sizes to assess fit quality.
 - ``chains.pkl``: The MCMC chains, as for the training output. Unlike for training, no postprocessing is required therefore only one set of chains needs to be saved.
+- ``output.fitres``: A FITRES file of the same structure as those returned by fits done within SNANA e.g. from SALT, summarising the properties of each fit light curve.
+
+The plan for large SNANA jobs is that only the last of these outputs will be saved to avoid creating a very large number of output files.
+
+As discussed in :ref:`running`, when running BayeSN fits on a sample of SNe all objects are fit in parallel in a single
+job, rather than having a separate job for each SN. These output files therefore contain the outputs for all SNe in the
+sample.
