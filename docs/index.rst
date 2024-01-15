@@ -29,6 +29,7 @@ analyses) conditioned on fixed population-level parameters.
    filters
    output
    plotting
+   builtin
    modules
 
 ..

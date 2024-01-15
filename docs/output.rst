@@ -26,6 +26,6 @@ The output of a fitting job will have the following structure:
 
 The plan for large SNANA jobs is that only the last of these outputs will be saved to avoid creating a very large number of output files.
 
-As discussed in :ref:`running`, when running BayeSN fits on a sample of SNe all objects are fit in parallel in a single
+As discussed in :ref:`running_bayesn`, when running BayeSN fits on a sample of SNe all objects are fit in parallel in a single
 job, rather than having a separate job for each SN. These output files therefore contain the outputs for all SNe in the
 sample.
