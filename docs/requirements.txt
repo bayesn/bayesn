@@ -1,2 +1,5 @@
 sphinx==7.2.6
 sphinx_rtd_theme==2.0.0
+numpy==1.25.2
+numpydoc==1.6.0
+pillow==10.0.0
