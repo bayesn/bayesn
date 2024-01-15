@@ -405,9 +405,9 @@ class SEDmodel(object):
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
             # Convolve the bands to match the sampling of the spectrum.
-            # band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1])
-            band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
-                                                                fill_value=0, bounds_error=False)(band_wave)
+            band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1])
+            # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
+            #                                                     fill_value=0, bounds_error=False)(band_wave)
 
             dlamba = jnp.diff(band_wave)
             dlamba = jnp.r_[dlamba, dlamba[-1]]
