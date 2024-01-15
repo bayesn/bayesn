@@ -12,7 +12,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('input', type=str)
 parser.add_argument('--filters', type=str, required=False)
 parser.add_argument('--outputdir', type=str, required=False)
-parser.add_argument('--name', type=str, required=False)
 parser.add_argument('--load_model', type=str, required=False)
 parser.add_argument('--mode', type=str, required=False)
 parser.add_argument('--num_chains', type=int, required=False)
@@ -43,6 +42,10 @@ with open(cmd_args.input, 'r') as file:
 # If no default model to load is specified in input.yaml or via command line, assume T21
 if 'load_model' not in args.keys() and cmd_args.load_model is None:
     args['load_model'] = 'T21_model'
+
+# If no default filters.yaml is specified in input.yaml, use argparse value (including default of None)
+if 'filters' not in args.keys():
+    args['filters'] = cmd_args.filters
 
 model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'])
 model.run(args, cmd_args)

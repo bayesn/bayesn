@@ -3,21 +3,111 @@
 Defining Filters
 ===================
 
-BayeSN does not include any inbuilt filters, favouring an approach separating filters from code allowing you to easily
-implement your own filter responses based on a simple yaml file. This allows for new or updated filters to be easily
-implemented independently of updates to the package. This section outlines the structure required for the yaml file
-which defines the filters.
+BayeSN includes a selection of filters for convenience. Alternatively, you can use your own filters through a simple
+yaml file, allowing new or updated filters to be easily implemented independently of updates to the package.
 
-To allow for quick start-up, we provide as a separate download a large set of filter responses along
-with an associated filters.yaml file which can be used by BayeSN straight away. Please see below for more details.
+Built-in filters
+-----------------
 
-Specifying filters
--------------------
+BayeSN includes the following filters, grouped together by instrument, survey or system, including the name that should
+be used when referring to the filter within BayeSN (e.g. `g_PS1` for Pan-STARRS 1 *g*-band). Note that if these names
+do not match those contained within your data files (perhaps they contain single letter SNANA filter names), you can
+provide a map to match up the names in the data files with the BayeSN names, as discussed in :ref:`running_bayesn`.
+
+- Standard
+    - Strinzinger *UBVRI* filters
+
+        - Names: `U`, `B`, `V`, `R`, `I`
+        - Source: Strinzinger+11, 2005PASP..117..810S
+    - 2MASS Peters Automated Infrared Imaging Telescope *JHK* filters
+
+        - Names: `J`, `H`, `K`
+        - Source: Cohen03, 2003AJ....126.1090C
+    - Persson *YJHK* filters
+
+        - Names: `Y_P`, `J_P`, `H_P`, `K_P`
+        - Source: 1998AJ....116.2475P
+- CSP
+
+    - Carnegie Supernova Project *BVgri* Swope filters
+
+        - Names: `B_CSP`, `V_CSP`, `V_CSP_3009`, `V_CSP_3014`, `g_CSP`, `r_CSP`, `i_CSP`
+        - Source: Krisciunas+2017, 2017AJ....154..211K, https://csp.obs.carnegiescience.edu/data/filters
+    - Carnegie Supernova Project II *BVgri* Swope filters
+
+        - Names: `B_CSP2`, `V_CSP2`, `g_CSP2`, `r_CSP2`, `i_CSP2`
+        - Source: https://csp.obs.carnegiescience.edu/data/filters
+    - Swope RetroCam *YJH* filters
+
+        - Names: `Y_RC`, `J_RC1`, `J_RC2`, `H_RC`
+        - Source: Krisciunas+2017, 2017AJ....154..211K, https://csp.obs.carnegiescience.edu/data/filters
+    - Dupont WIRC *YJH* filters
+
+        - Names: `Y_WIRC`, `J_WIRC`, `H_WIRC`
+        - Source: Krisciunas+2017, 2017AJ....154..211K, https://csp.obs.carnegiescience.edu/data/filters
+    - Dupont RetroCam *YJH* filters
+
+        - Names: `Y_RCDP`, `J_RCDP`, `H_RCDP`
+        - Source: https://csp.obs.carnegiescience.edu/data/filters
+- DECam
+
+    - Dark Energy Camera at Cerro Tololo Inter-American Observatory *griz* filters
+
+        - Names: `g_DES`, `r_DES`, `i_DES`, `z_DES`
+        - Source: https://noirlab.edu/science/programs/ctio/filters/Dark-Energy-Camera
+
+- HST
+
+    - Hubble Space Telescope WFC3IR/UVIS2 filters
+
+        - Names: `F105W`, `F125W`, `F140W`, `F160W`, `F225W`, `F275W`, `F300X`, `F336W`, `F390W`, `F438W`, `F475W`, `F555W`, `F625W`, `F814W`
+        - Source: https://www.stsci.edu/hst/instrumentation/wfc3/performance/throughputs
+- LSST
+
+    - Legacy Survey of Space and Time at Vera Rubin Observatory *ugrizy* filters
+
+        - Names: `u_LSST`, `g_LSST`, `r_LSST`, `i_LSST`, `z_LSST`, `y_LSST`
+        - Source: https://github.com/lsst/throughputs
+- PS1
+
+    - PanSTARRS 1 *griz* filters
+
+        - Names: `g_PS1`, `r_PS1`, `i_PS1`, `z_PS1`
+        - Source: Tonry+12, 2012ApJ...750...99T
+- SWIFT UVOT
+
+    - SWIFT UVOT *UBV* and *UVW1/UVW2/UVM2* filters
+
+        - Names: `U_SWIFT`, `B_SWIFT`, `R_SWIFT`, `UVW1`, `UVW2`, `UVM2`
+        - Source: Poole+08, 2008MNRAS.383..627P
+- USNO
+
+    - United States Naval Observatory 40-inch telescope *u'g'r'i'z'* filters
+
+        - Names: `u_prime`, `g_prime`, `r_prime`, `i_prime`, `z_prime`
+        - Source: Fukugita+96, 1996AJ....111.1748F; Smith+02, 2002AJ....123.2121S
+- ZTF
+
+    - Zwicky Transient Facility *gri* filters
+
+        - Names: `p48g`, `p48r`, `p48i`
+        - Source: Bellm+19, 2019PASP..131a8002B
+- ANDICAM
+
+    - ANDICAM at Cerro Tololo Inter-American Observatory *YJHK* filters
+
+        - Names: `Y_AND`, `J_AND`, `H_AND`, `K_AND`
+        - Source:
+
+Specifying custom filters
+---------------------------
 
 One of the arguments for the ``input.yaml`` file outlined in :ref:`running_bayesn`, ``filters``, is used to specify a
-path to a separate yaml file which details the filters you wish to use. This can be a small file containing a small
-number of filters, or one large file containing all the filters you might ever possibly want to use which only needs to
-be made once. This file should have the following structure:
+path to a separate yaml file which details any custom filters you wish to use. If this argument is not specified,
+the code will default to using the built-in filters.
+
+This yaml file can be a small file containing a small number of filters, or one large file containing all the filters
+you might ever possibly want to use which only needs to be made once. This file should have the following structure:
 
 .. code-block:: yaml
 
@@ -48,13 +138,6 @@ These arguments are described as follows:
 Please note, the AB reference source is treated as an analytic function within the code so nothing needs to be included
 in ``standards`` for the AB magnitude system, any filter with ``magsys: ab`` will automatically work. If your filters
 only use the AB magnitude system, you can just omit the ``standards`` and ``standards_root`` keys entirely.
-
-bayesn-filters
------------------
-
-**We optionally provide a collection of common filters along with an associated filters.yaml detailing all of them.**
-You can simply download ``bayesn-filters`` and set ``filters: /PATH/TO/bayesn-filters/filters.yaml`` in the input yaml
-file, which will enable you to use all of these inbuilt filters.
 
 Automatic filter dropping
 --------------------------

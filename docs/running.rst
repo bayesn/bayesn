@@ -5,8 +5,8 @@ Running BayeSN Jobs
 
 BayeSN jobs are run just by running the script ``run_bayesn`` (after installation, this script can be called from any
 directory), with the specific job defined by an input yaml file which allow you to specify e.g. whether you want to run
-model training or fitting, which data you want to use and where your filters are defined. To run a job, you can just run
-the following command, making sure to specify the path to your ``input.yaml`` file.
+model training or fitting, which data you want to use and where your custom filters, if required, are defined. To run a
+job, you can just run the following command, making sure to specify the path to your ``input.yaml`` file.
 
 ``run_bayesn PATH\TO\input.yaml``
 
@@ -17,8 +17,7 @@ Specifying input to BayeSN
 
 The keys which can be specified are described below. Depending on whether you are training or fitting, different keys will be required:
 
-- ``name``: Specifies the name of the folder that the output of the run will be saved in. In tandem with ``outputdir``, this will specify exactly where the results are saved.
-- ``outputdir``: The directory in which to save the output folder.
+- ``outputdir``: The directory in which to save the output. If not specified, output files will be saved in current directory. This directory will be created if it does not already exist.
 - ``mode``: The BayeSN mode to use, specifies what you want to do. Options are:
 
   - 'training_singleRV': Train a model with a single RV values across the population.
@@ -31,7 +30,7 @@ The keys which can be specified are described below. Depending on whether you ar
 - ``num_warmup``: The number of warmup steps for HMC. Typically 500 is sufficient for training and 250 for fitting for convergence, but you may need to increase this.
 - ``num_samples``: The number of posterior samples to take. Again, typically in development 500 was used when training and 250 when fitting, but you may want to experiment with this to achieve sufficient convergence.
 - ``num_chains``: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.
-- ``filters``: Path to a yaml file describing the filters you want to use. For more details, please see :ref:`filters`.
+- ``filters``: Path to a yaml file describing the filters you want to use, if you require custom filters. For more details, please see :ref:`filters`.
 - ``chain_method``: The method to use for running multiple chains in numpyro. If 'sequential', chains will be run one-after-the-other until all are complete. If 'parallel', the chains will be run in parallel over multiple devices - with 4 chains and a node with 4 GPUs, the chains will be run simultaneously in parallel. If 'vectorized', chains will be run in parallel on a single device which may or may not be quicker than running them sequentially depending on the device you are using, and may result in memory issues unless you are using a large GPU.
 - ``initialisation``: The strategy used to initialise the HMC chains. Must be one of:
 
@@ -61,12 +60,10 @@ This example demonstrates the input.yaml that could be used to train the BayeSN 
 
 .. code-block:: yaml
 
-    name: T21_training_example
     mode: training
     num_chains: 4
     num_warmup: 500
     num_samples: 500
-    filters: /PATH/TO/filters.yaml
     chain_method: parallel
     initialisation: T21
     l_knots: [3500.0, 4900.0, 6200.0, 7700.0, 8700.0, 9500.0]
@@ -80,17 +77,16 @@ This example demonstrates the input.yaml that could be used to train the BayeSN 
 Fitting example
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates the input.yaml that could be used to fit some SNANA simulations using a custom BayeSN model defined in a bayesn.yaml file.
+This example demonstrates the input.yaml that could be used to fit some SNANA simulations using a custom BayeSN model defined in a bayesn.yaml file, with custom filters defined in a filters.yaml file.
 
 .. code-block:: yaml
 
-    name: custom_fitting_example
     mode: fitting
     load_model: /PATH/TO/CUSTOM/bayesn.yaml
     num_chains: 4
     num_warmup: 250
     num_samples: 250
-    filters: /PATH/TO/filters.yaml
+    filters: /PATH/TO/custom_filters.yaml
     chain_method: parallel
     initialisation: median
     version_photometry: NAME_OF_SNANA_SIMULATION
