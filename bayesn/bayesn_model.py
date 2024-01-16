@@ -192,7 +192,7 @@ class SEDmodel(object):
     out: `bayesn_model.SEDmodel` instance
     """
 
-    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml='filters.yaml',
+    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
                  fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
@@ -201,6 +201,10 @@ class SEDmodel(object):
 
         self.__root_dir__ = os.path.dirname(os.path.abspath(__file__))
         print(f'Currently working in {os.getcwd()}')
+
+        # Use built-in filters if filters.yaml is not provided
+        if filter_yaml is None:
+            filter_yaml = os.path.join(self.__root_dir__, 'bayesn-filters', 'filters.yaml')
 
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
@@ -401,9 +405,9 @@ class SEDmodel(object):
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
             # Convolve the bands to match the sampling of the spectrum.
-            # band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1])
-            band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
-                                                                fill_value=0, bounds_error=False)(band_wave)
+            band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1])
+            # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
+            #                                                     fill_value=0, bounds_error=False)(band_wave)
 
             dlamba = jnp.diff(band_wave)
             dlamba = jnp.r_[dlamba, dlamba[-1]]
@@ -1435,7 +1439,7 @@ class SEDmodel(object):
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
         args['map'] = args.get('map', {})
         args['drop_bands'] = args.get('drop_bands', [])
-        args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd(), args['name']))
+        args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd()))
         args['outfile_prefix'] = args.get('outfile_prefix', 'output')
         args['jobid'] = args.get('jobid', False)
         pdp = args.get('private_data_path', [])

@@ -1,0 +1,5 @@
+u_40 usno_u.res bd17B=10.56 USNO 40 u from Fukugita et al. (1996)
+g_40 usno_g.res bd17B=9.64 USNO 40 g from Fukugita et al. (1996)
+r_40 usno_r.res bd17B=9.35 USNO 40 r from Fukugita et al. (1996)
+i_40 usno_i.res bd17B=9.25 USNO 40 i from Fukugita et al. (1996)
+z_40 usno_z.res bd17B=9.23 USNO 40 z from Fukugita et al. (1996)

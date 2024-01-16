@@ -1,0 +1,6 @@
+UVM2 photonUVM2.dat 16.85 UVM2 band from Swift UVOT
+UVW1 photonUVW1.dat 17.44 UVW1 band from Swift UVOT
+UVW2 photonUVW2.dat 17.38 UVW2 band from Swift UVOT
+U_UVOT photonU_UVOT.dat 18.340 U band from Swift UVOT
+B_UVOT photonB_UVOT.dat 19.110 B band from Swift UVOT
+V_UVOT photonV_UVOT.dat 17.890 V band from Swift UVOT

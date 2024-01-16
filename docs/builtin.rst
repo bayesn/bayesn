@@ -23,7 +23,7 @@ T21 model:
 
 W22 model:
 
-- Ward et al., 2022 (ApJ 956, 2, 111, https://ui.adsabs.harvard.edu/abs/2023ApJ...956..111W/abstract)
+- Ward et al., 2023 (ApJ 956, 2, 111, https://ui.adsabs.harvard.edu/abs/2023ApJ...956..111W/abstract)
 - Trained on Foundation DR1 (Foley+18, Jones+19) and Avelino+19 compilation, combination of data sets for M20 and T21
 - Training data includes BgVrizYJH
 - Wavelength range 3000 - 18500 A

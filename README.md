@@ -12,8 +12,7 @@ SNe. This repository contains an implementation of the BayeSN SED model built wi
 GPU acceleration, as discussed in Grayling+2024 (to be submitted).
 
 ## Installation and usage
-Instructions on how to install and run the BayeSN model can be found here: (link to be inserted when uploaded to
-readthedocs)
+Instructions on how to install and run the BayeSN model can be found here: https://bayesn.readthedocs.io/en/latest/index.html
 
 ## Citing the code/model
 If you utilise the BayeSN model in any way, please cite Mandel+2022 (MNRAS 510, 3, 3939-3966), and if you make use of
@@ -22,16 +21,15 @@ within BayeSN please cite the corresponding papers which present those models:
 
 - M20 model: Mandel et al. 2022 (MNRAS 510, 3, 3939-3966)
 - T21 model: Thorp et al. 2021 (MNRAS 508, 3, 4310-4331)
-- W22 model: Ward et al. 2022 (ApJ 956, 2, 111)
+- W22 model: Ward et al. 2023 (ApJ 956, 2, 111)
 
 ## Things to note
 
 ### Filters
 
-BayeSN does not include any inbuilt filters, favouring an approach separating filters from code allowing you to easily 
-implement your own filter responses based on a simple yaml file. However, in order to allow for quick start-up, we 
-provide as a separate download a large set of filter responses along with an associated filters.yaml file which can be
-used by BayeSN straight away.
+BayeSN includes a set of built-in filters for convenience, as detailed in the documentation. However, you can also add 
+your own  filters through a yaml file to allow for new and updated filter responses to be used without needing a package
+update.
 
 ### GPU Acceleration
 
