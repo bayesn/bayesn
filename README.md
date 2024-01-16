@@ -23,7 +23,7 @@ or think of any functionality that would add a lot of value for you, please rais
 
 ## Citing the code/model
 If you utilise the BayeSN model in any way, please cite Mandel+2022 (MNRAS 510, 3, 3939-3966), and if you make use of
-this code please cite Grayling+2024 (to be submitted). In addition, if you use any of the pre-trained models included
+this code please cite Grayling+2024 (submitted to MNRAS). In addition, if you use any of the pre-trained models included
 within BayeSN please cite the corresponding papers which present those models:
 
 - M20 model: Mandel et al. 2022 (MNRAS 510, 3, 3939-3966)
