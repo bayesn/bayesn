@@ -3,7 +3,7 @@
 Hierarchical Bayesian SED modelling of type Ia supernova light curves
 
 Developed and maintained by: Matt Grayling (@mattgrayling), Stephen Thorp (@stevet40), Gautham Narayan (@gnarayan), and 
-Kaisey S. Mandel (@CambridgeAstroStat) on behalf of the BayeSN Team (@bayesn)
+Kaisey S. Mandel (@CambridgeAstroStat) on behalf of the BayeSN Team (@bayesn).
 
 ## About
 BayeSN is a probabilistic optical-NIR SED model for type Ia supernovae, allowing for hierarchical analysis of the
@@ -12,7 +12,14 @@ SNe. This repository contains an implementation of the BayeSN SED model built wi
 GPU acceleration, as discussed in Grayling+2024 (to be submitted).
 
 ## Installation and usage
-Instructions on how to install and run the BayeSN model can be found here: https://bayesn.readthedocs.io/en/latest/index.html
+BayeSN can be pip-installed via the command `pip install bayesn`. 
+
+Detailed instructions on how to install and run the 
+BayeSN model can be found here: https://bayesn.readthedocs.io/en/latest/index.html
+
+## Support
+Our goal with BayeSN is for the package to be clear and easy to use. If you find something unclear, come across any bugs
+or think of any functionality that would add a lot of value for you, please raise a Github issue.
 
 ## Citing the code/model
 If you utilise the BayeSN model in any way, please cite Mandel+2022 (MNRAS 510, 3, 3939-3966), and if you make use of
