@@ -18,6 +18,11 @@ The model can be used to constrain physical population-level parameters of the d
 Bayesian inference, or alternatively to infer latent SN parameters including distance (suitable for use in cosmological
 analyses) conditioned on fixed population-level parameters.
 
+Support
+---------
+Our goal with BayeSN is for the package to be clear and easy to use. If you find something unclear, come across any bugs
+or think of any functionality that would add a lot of value for you, please raise a Github issue here: https://github.com/bayesn/bayesn/issues
+
 
 .. toctree::
    :maxdepth: 2
