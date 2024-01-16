@@ -12,7 +12,7 @@ About
 ------------------------------------
 This is the documentation for BayeSN, the hierarchical Bayesian optical-NIR SED model for type Ia supernovae as outlined
 in Mandel+2022 (MNRAS 510, 3, 3939-3966). This implementation is introduced and briefly described in Grayling+2024
-(to be submitted), and is built on numpyro and jax to enable support for GPU acceleration.
+(submitted to MNRAS), and is built on numpyro and jax to enable support for GPU acceleration.
 
 The model can be used to constrain physical population-level parameters of the distribution of SNe Ia using hierarchical
 Bayesian inference, or alternatively to infer latent SN parameters including distance (suitable for use in cosmological
