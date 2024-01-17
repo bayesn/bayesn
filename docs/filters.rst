@@ -15,6 +15,7 @@ do not match those contained within your data files (perhaps they contain single
 provide a map to match up the names in the data files with the BayeSN names, as discussed in :ref:`running_bayesn`.
 
 - Standard
+
     - Strinzinger *UBVRI* filters
 
         - Names: `U`, `B`, `V`, `R`, `I`

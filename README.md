@@ -9,13 +9,12 @@ Kaisey S. Mandel (@CambridgeAstroStat) on behalf of the BayeSN Team (@bayesn).
 BayeSN is a probabilistic optical-NIR SED model for type Ia supernovae, allowing for hierarchical analysis of the
 population distribution of physical properties as well as cosmology-independent distance estimation for individual
 SNe. This repository contains an implementation of the BayeSN SED model built with numpyro and jax, with support for 
-GPU acceleration, as discussed in Grayling+2024 (to be submitted).
+GPU acceleration, as discussed in Grayling+2024 (submitted to MNRAS).
 
 ## Installation and usage
 BayeSN can be pip-installed via the command `pip install bayesn`. 
 
-Detailed instructions on how to install and run the 
-BayeSN model can be found here: https://bayesn.readthedocs.io/en/latest/index.html
+Detailed instructions on how to install and run the BayeSN model can be found here: https://bayesn.readthedocs.io/en/latest/index.html
 
 ## Support
 Our goal with BayeSN is for the package to be clear and easy to use. If you find something unclear, come across any bugs
