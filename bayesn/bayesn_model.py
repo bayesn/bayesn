@@ -2282,7 +2282,8 @@ class SEDmodel(object):
             'ebv_mw': ebv_mw,
             'RV': RV
         }
-        l_r = np.linspace(min(self.l_knots), max(self.l_knots), int((max(self.l_knots) - min(self.l_knots)) / dl) + dl)
+        l_r = np.arange(min(self.l_knots), max(self.l_knots) + dl, dl, dtype=float)
+        l_r = l_r[l_r <= max(self.l_knots)]
         l_o = l_r[None, ...].repeat(N, axis=0) * (1 + z[:, None])
 
         self.model_wave = l_r
@@ -2298,9 +2299,7 @@ class SEDmodel(object):
         keep_shape = t.shape
         t = t.flatten(order='F')
         map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
-        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,
-                                                                                                                     2,
-                                                                                                                     0)
+        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,2,0)
         spectra = self.get_spectra(theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp)
 
         # Host extinction
