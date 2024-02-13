@@ -1675,7 +1675,7 @@ class SEDmodel(object):
                 'NOBS': int(self.data[-1, ...].sum())
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
-                yaml.dump(out_dict, file, default_flow_style=False)
+                yaml.dump(out_dict, file)
 
         if not (args['mode'] == 'fitting' and args['snana']):
             # Save convergence data for each parameter to csv file
