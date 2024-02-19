@@ -1812,15 +1812,14 @@ class SEDmodel(object):
                         data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                         data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                         data['redshift'] = zhel
-                        data['redshift_error'] = zcmb_err
+                        data['redshift_error'] = meta['REDSHIFT_CMB_ERR']
                         data['MWEBV'] = meta['MWEBV']
+                        data['mass'] = meta['HOSTGAL_LOGMASS']
                         data['dist_mod'] = self.cosmo.distmod(zcmb)
                         data['mask'] = 1
                         lc = data[
-                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
-                             'dist_mod',
-                             'MWEBV',
-                             'mask']]
+                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
+                             'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
@@ -1905,15 +1904,16 @@ class SEDmodel(object):
                     data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp']))
                     data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     data['redshift'] = zhel
-                    data['redshift_error'] = zcmb_err
+                    data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
                     data['MWEBV'] = meta['MWEBV']
+                    data['mass'] = meta['HOSTGAL_LOGMASS']
                     data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
                     lc = data[
-                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
+                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
-                    lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                     t_ranges.append((lc['t'].min(), lc['t'].max()))
                     n_obs.append(lc.shape[0])
                     all_lcs.append(lc)
@@ -1963,8 +1963,8 @@ class SEDmodel(object):
             t = t.flatten(order='F')
             J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
                                                                      order='F').transpose(1, 2, 0)
-            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10], ...]
-            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10], ...]
+            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
+            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             for i in range(len(all_lcs)):
                 mag_data[:, (flux_data[1, ...] <= 0)] = 0
