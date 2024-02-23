@@ -1664,7 +1664,7 @@ class SEDmodel(object):
                 self.fitres_table['MU'] = np.around(samples['mu'].mean(axis=(0, 1)), 3)
                 self.fitres_table['MU_ERR'] = np.around(samples['mu'].std(axis=(0, 1)), 3)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT ', fmt="salt2",
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="salt2",
                                  metachar="")
 
         if args['snana']:
