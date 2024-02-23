@@ -1814,7 +1814,7 @@ class SEDmodel(object):
                         data['redshift'] = zhel
                         data['redshift_error'] = meta['REDSHIFT_CMB_ERR']
                         data['MWEBV'] = meta['MWEBV']
-                        data['mass'] = meta.get(['HOSTGAL_LOGMASS'], -9.)
+                        data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                         data['dist_mod'] = self.cosmo.distmod(zcmb)
                         data['mask'] = 1
                         lc = data[
@@ -1906,7 +1906,7 @@ class SEDmodel(object):
                     data['redshift'] = zhel
                     data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
                     data['MWEBV'] = meta['MWEBV']
-                    data['mass'] = meta.get(['HOSTGAL_LOGMASS'], -9.)
+                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
                     lc = data[
