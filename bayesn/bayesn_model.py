@@ -1664,7 +1664,7 @@ class SEDmodel(object):
                 self.fitres_table['MU'] = np.around(samples['mu'].mean(axis=(0, 1)), 3)
                 self.fitres_table['MU_ERR'] = np.around(samples['mu'].std(axis=(0, 1)), 3)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES', fmt="salt2",
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT ', fmt="salt2",
                                  metachar="")
 
         if args['snana']:
@@ -1827,19 +1827,19 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                        sn_type.append(meta.get('TYPE', 'NULL'))
-                        field.append(meta.get('FIELD', 'NULL'))
-                        cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                        idsurvey.append(meta.get('IDSURVEY', -9.))
+                        sn_type.append(meta.get('TYPE', -9.))
+                        field.append(meta.get('FIELD', 'VOID'))
+                        cutflag_snana.append(meta.get('CUTFLAG_SNANA', -9.))
                         z_hels.append(zhel)
                         z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                         z_hds.append(meta['REDSHIFT_FINAL'])
                         z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                        vpecs.append(meta.get('VPEC', 'NULL'))
-                        vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
-                        mwebvs.append(meta.get('MWEBV', 'NULL'))
-                        host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
-                        host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                        vpecs.append(meta.get('VPEC', -9.))
+                        vpec_errs.append(meta.get('VPEC_ERR', -9.))
+                        mwebvs.append(meta.get('MWEBV', -9.))
+                        host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                        host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                         snrmax1 = np.max(lc.flux / lc.flux_err)
                         lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                         if lc_snr2.shape[0] == 0:
@@ -1919,19 +1919,19 @@ class SEDmodel(object):
                     all_lcs.append(lc)
                     # Set up FITRES table data
                     # (currently just uses second table, should improve for cases where there are multiple lc files)
-                    idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                    sn_type.append(meta.get('TYPE', 'NULL'))
-                    field.append(meta.get('FIELD', 'NULL'))
-                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                    idsurvey.append(meta.get('IDSURVEY', -9.))
+                    sn_type.append(meta.get('TYPE', -9.))
+                    field.append(meta.get('FIELD', 'VOID'))
+                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', -9.))
                     z_hels.append(zhel)
                     z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                     z_hds.append(meta['REDSHIFT_FINAL'])
                     z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                    vpecs.append(meta.get('VPEC', 'NULL'))
-                    vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
-                    mwebvs.append(meta.get('MWEBV', 'NULL'))
-                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
-                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                    vpecs.append(meta.get('VPEC', -9.))
+                    vpec_errs.append(meta.get('VPEC_ERR', -9.))
+                    mwebvs.append(meta.get('MWEBV', -9.))
+                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                     snrmax1 = np.max(lc.flux / lc.flux_err)
                     lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                     if lc_snr2.shape[0] == 0:
