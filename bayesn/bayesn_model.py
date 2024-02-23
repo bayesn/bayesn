@@ -1671,8 +1671,12 @@ class SEDmodel(object):
             # Output yaml
             out_dict = {
                 'ABORT_IF_ZERO': 1,
-                'NLC': self.data.shape[-1],
-                'NOBS': int(self.data[-1, ...].sum())
+                'SURVEY': 'FOUNDATION',  # Hard coding just for testing
+                'IDSURVEY': 150,  # Hard coding just for testing
+                'NEVT_TOT': self.data.shape[-1],
+                'NEVT_LC_CUTS': self.data.shape[-1],
+                'NEVT_LCFIT_CUTS': self.data.shape[-1],
+                'CPU_MINUTES': 5.5,  # Hard coding just for testing
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
