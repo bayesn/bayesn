@@ -234,6 +234,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_g.dat
+    lam_unit: nm
   g_PS1:
     magsys: ab
     magzero: 0.0
@@ -258,6 +259,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_i.dat
+    lam_unit: nm
   i_PS1:
     magsys: ab
     magzero: 0.0
@@ -294,6 +296,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_r.dat
+    lam_unit: nm
   r_PS1:
     magsys: ab
     magzero: 0.0
@@ -318,6 +321,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_u.dat
+    lam_unit: nm
   u_prime:
     magsys: bd17
     magzero: 10.56
@@ -330,6 +334,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_y.dat
+    lam_unit: nm
   y_PS1:
     magsys: ab
     magzero: 0.0
@@ -342,6 +347,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: LSST/total_z.dat
+    lam_unit: nm
   z_PS1:
     magsys: ab
     magzero: 0.0
