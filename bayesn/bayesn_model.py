@@ -1656,7 +1656,7 @@ class SEDmodel(object):
                 # Use same git command as in Makefile for C code
                 SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
                 if SNANA_DIR != 'NULL':
-                    cmd = f'cd {SNANA_DIR}; git describe - -always - -tags'
+                    cmd = f'cd {SNANA_DIR}; git describe --always --tags'
                     ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
                     snana_version = ret.stdout.replace('\n', '')
                 else:
