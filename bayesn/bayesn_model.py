@@ -1765,7 +1765,7 @@ class SEDmodel(object):
                             survey_dict[split[1]] = split[2]
             sample_name = os.path.split(data_dir)[-1]
             list_file = os.path.join(data_dir, f'{os.path.split(data_dir)[-1]}.LIST')
-            sn_list = np.loadtxt(list_file, dtype='str')
+            sn_list = np.atleast_1d(np.loadtxt(list_file, dtype='str'))
             file_format = sn_list[0].split('.')[1]
             map_dict = args['map']
             n_obs = []
@@ -1782,15 +1782,20 @@ class SEDmodel(object):
             if file_format.lower() == 'fits':  # If FITS format
                 ntot = 0
                 # Check if sim or real data
-                head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')
-                phot_file = os.path.join(data_dir, f'{sn_list[0].replace("HEAD", "PHOT")}.gz')
+                # if not os.path.exists
+                head_file = os.path.join(data_dir, f'{sn_list[0]}')
+                if not os.path.exists(head_file):
+                    head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')  # Look for .fits.gz if .fits not found
+                phot_file = head_file.replace("HEAD", "PHOT")
                 sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                 # If real data, ignore sim_prescale
                 if 'SIM_REDSHIFT_HELIO' not in sne_file[0].meta.keys():
                     args['njobtot'] = args['jobsplit'][0]
                 for sn_file in tqdm(sn_list):
-                    head_file = os.path.join(data_dir, f'{sn_file}.gz')
-                    phot_file = os.path.join(data_dir, f'{sn_file.replace("HEAD", "PHOT")}.gz')
+                    head_file = os.path.join(data_dir, f'{sn_file}')
+                    if not os.path.exists(head_file):
+                        head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
+                    phot_file = head_file.replace("HEAD", "PHOT")
                     sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                     for sn_ind in range(len(sne_file)):
                         ntot += 1
@@ -1801,7 +1806,6 @@ class SEDmodel(object):
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         peak_mjd = meta['PEAKMJD']
-                        sne.append(meta['SNID'])
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         zhel_err = 5e-4  # Need to handle this better if not defined
@@ -1834,7 +1838,7 @@ class SEDmodel(object):
                         data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                         data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                         data['redshift'] = zhel
-                        data['redshift_error'] = meta['REDSHIFT_CMB_ERR']
+                        data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
                         data['MWEBV'] = meta['MWEBV']
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                         data['dist_mod'] = self.cosmo.distmod(zcmb)
@@ -1844,18 +1848,21 @@ class SEDmodel(object):
                              'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                        if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
+                            continue
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
+                        sne.append(meta['SNID'])
                         survey = meta.get('SURVEY', 'NULL')
                         survey_id = survey_dict.get(survey, 0)
                         idsurvey.append(survey_id)
                         if survey not in self.surveys:
                             self.surveys.append(survey)
                         if survey_id not in self.survey_ids:
-                            self.survey_ids.append(survey_id)
+                            self.survey_ids.append(str(survey_id))
                         sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
