@@ -401,6 +401,13 @@ class SEDmodel(object):
             except:
                 raise FileNotFoundError(f'Filter response not found for {key}')
 
+            # Convert wavelength units if required, model is defined in Angstroms
+            units = val.get('lam_unit', 'AA')
+            if units.lower() == 'nm':  # Convert from nanometres to Angstroms
+                R[:, 0] = R[:, 0] * 10
+            elif units.lower() == 'micron':  # Convert from microns to Angstroms
+                R[:, 0] = R[:, 0] * 1e4
+
             band_low_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][0], 0]
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
