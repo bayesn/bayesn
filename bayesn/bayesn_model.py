@@ -32,6 +32,7 @@ from jax.random import PRNGKey, split
 from astropy.cosmology import FlatLambdaCDM
 import astropy.table as at
 import astropy.constants as const
+from astropy.io import ascii
 import matplotlib as mpl
 from matplotlib import rc
 import arviz
@@ -44,6 +45,7 @@ from tqdm import tqdm
 from astropy.table import QTable
 
 yaml = YAML(typ='safe')
+yaml.default_flow_style = False
 
 jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 
@@ -196,6 +198,8 @@ class SEDmodel(object):
                  fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
+        self.start_time = time.time()
+        self.end_time = None
         # os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
         print('Current devices:', jax.devices())
 
@@ -1668,15 +1672,19 @@ class SEDmodel(object):
                                  metachar="")
 
         if args['snana']:
+            survey = ','.join(self.surveys)
+            survey_id = ','.join(self.survey_ids)
+            self.end_time = time.time()
+            cpu_time = self.end_time - self.start_time
             # Output yaml
             out_dict = {
                 'ABORT_IF_ZERO': 1,
-                'SURVEY': 'FOUNDATION',  # Hard coding just for testing
-                'IDSURVEY': 150,  # Hard coding just for testing
+                'SURVEY': survey,
+                'IDSURVEY': survey_id,
                 'NEVT_TOT': self.data.shape[-1],
                 'NEVT_LC_CUTS': self.data.shape[-1],
                 'NEVT_LCFIT_CUTS': self.data.shape[-1],
-                'CPU_MINUTES': 5.5,  # Hard coding just for testing
+                'CPU_MINUTES': round(cpu_time / 60, 2),
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
@@ -1721,6 +1729,9 @@ class SEDmodel(object):
         if 'data_table' in args.keys() and 'data_root' not in args.keys():
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
+        survey_dict = {}
+        self.surveys = []
+        self.survey_ids = []
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -1745,6 +1756,13 @@ class SEDmodel(object):
                     raise ValueError(f'Requested photometry {data_dir} was found in multiple locations, please remove '
                                      f'duplicates and ensure the one you want to use remains')
                 data_dir = found_in[0]
+                # Load up SNANA survey definitions file
+                survey_def_path = os.path.join(os.environ.get('SNDATA_ROOT'), 'SURVEY.DEF')
+                with open(survey_def_path) as fp:
+                    for line in fp:
+                        if line[:line.find(':')] == 'SURVEY':
+                            split = line.split()
+                            survey_dict[split[1]] = split[2]
             sample_name = os.path.split(data_dir)[-1]
             list_file = os.path.join(data_dir, f'{os.path.split(data_dir)[-1]}.LIST')
             sn_list = np.loadtxt(list_file, dtype='str')
@@ -1831,16 +1849,21 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        idsurvey.append(meta.get('IDSURVEY', -9.))
-                        sn_type.append(meta.get('TYPE', -9.))
+                        survey = meta.get('SURVEY', 'NULL')
+                        survey_id = survey_dict.get(survey, 0)
+                        idsurvey.append(survey_id)
+                        if survey not in self.surveys:
+                            self.surveys.append(survey)
+                        if survey_id not in self.survey_ids:
+                            self.survey_ids.append(survey_id)
+                        sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
-                        cutflag_snana.append(meta.get('CUTFLAG_SNANA', -9.))
                         z_hels.append(zhel)
                         z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                         z_hds.append(meta['REDSHIFT_FINAL'])
                         z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                        vpecs.append(meta.get('VPEC', -9.))
-                        vpec_errs.append(meta.get('VPEC_ERR', -9.))
+                        vpecs.append(meta.get('VPEC', 0.))
+                        vpec_errs.append(meta.get('VPEC_ERR', 0.))
                         mwebvs.append(meta.get('MWEBV', -9.))
                         host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                         host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
@@ -1923,16 +1946,21 @@ class SEDmodel(object):
                     all_lcs.append(lc)
                     # Set up FITRES table data
                     # (currently just uses second table, should improve for cases where there are multiple lc files)
-                    idsurvey.append(meta.get('IDSURVEY', -9.))
-                    sn_type.append(meta.get('TYPE', -9.))
+                    survey = meta.get('SURVEY', 'NULL')
+                    survey_id = survey_dict.get(survey, 0)
+                    idsurvey.append(survey_id)
+                    if survey not in self.surveys:
+                        self.surveys.append(survey)
+                    if survey_id not in self.survey_ids:
+                        self.survey_ids.append(survey_id)
+                    sn_type.append(meta.get('TYPE', 0))
                     field.append(meta.get('FIELD', 'VOID'))
-                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', -9.))
                     z_hels.append(zhel)
                     z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                     z_hds.append(meta['REDSHIFT_FINAL'])
                     z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                    vpecs.append(meta.get('VPEC', -9.))
-                    vpec_errs.append(meta.get('VPEC_ERR', -9.))
+                    vpecs.append(meta.get('VPEC', 0.))
+                    vpec_errs.append(meta.get('VPEC_ERR', 0.))
                     mwebvs.append(meta.get('MWEBV', -9.))
                     host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                     host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
@@ -1988,12 +2016,11 @@ class SEDmodel(object):
             varlist = ["SN:"] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
             snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
-            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                           names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR',
-                                  'zHD',
-                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
-                                  'SNRMAX2', 'SNRMAX3'])
+                           names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
+                                  'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
+                                  'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
@@ -2135,9 +2162,9 @@ class SEDmodel(object):
             varlist = ["SN:"] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
             snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
-            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR', 'zHD',
+                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR', 'zHD',
                                   'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
                                   'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
