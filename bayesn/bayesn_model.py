@@ -2013,7 +2013,9 @@ class SEDmodel(object):
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             for i in range(len(all_lcs)):
-                mag_data[:, (flux_data[1, ...] <= 0)] = 0
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             if 'training' in args['mode'].lower():
@@ -2157,7 +2159,9 @@ class SEDmodel(object):
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             for i in range(len(all_lcs)):
-                mag_data[:, (flux_data[1, ...] <= 0)] = 0
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             sne = sn_list['SNID'].values
