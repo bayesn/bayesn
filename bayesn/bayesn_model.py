@@ -1679,15 +1679,13 @@ class SEDmodel(object):
                                  metachar="")
 
         if args['snana']:
-            survey = ','.join(self.surveys)
-            survey_id = ','.join(self.survey_ids)
             self.end_time = time.time()
             cpu_time = self.end_time - self.start_time
             # Output yaml
             out_dict = {
                 'ABORT_IF_ZERO': 1,
-                'SURVEY': survey,
-                'IDSURVEY': survey_id,
+                'SURVEY': self.survey,
+                'IDSURVEY': int(self.survey_id),
                 'NEVT_TOT': self.data.shape[-1],
                 'NEVT_LC_CUTS': self.data.shape[-1],
                 'NEVT_LCFIT_CUTS': self.data.shape[-1],
@@ -1737,8 +1735,6 @@ class SEDmodel(object):
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
-        self.surveys = []
-        self.survey_ids = []
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -1802,6 +1798,9 @@ class SEDmodel(object):
                     head_file = os.path.join(data_dir, f'{sn_file}')
                     if not os.path.exists(head_file):
                         head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
+                    with fits.open(head_file) as hdu:
+                        self.survey = hdu[0].header.get('SURVEY', 'NULL')
+                    self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
                     sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                     for sn_ind in range(len(sne_file)):
@@ -1862,14 +1861,10 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        sne.append(meta['SNID'])
-                        survey = meta.get('SURVEY', 'NULL')
-                        survey_id = survey_dict.get(survey, 0)
-                        idsurvey.append(survey_id)
-                        if survey not in self.surveys:
-                            self.surveys.append(survey)
-                        if survey_id not in self.survey_ids:
-                            self.survey_ids.append(str(survey_id))
+                        sn_name = meta['SNID']
+                        if isinstance(sn_name, bytes):
+                            sn_name = sn_name.decode('utf-8')
+                        sne.append(sn_name)
                         sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
@@ -1910,7 +1905,10 @@ class SEDmodel(object):
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_file), default_tablename='OBS')
                     data = lcdata['OBS'].to_pandas()
                     peak_mjd = meta['PEAKMJD']
-                    sne.append(meta['SNID'])
+                    sn_name = meta['SNID']
+                    if isinstance(sn_name, bytes):
+                        sn_name = sn_name.decode('utf-8')
+                    sne.append(sn_name)
                     zhel = meta['REDSHIFT_HELIO']
                     zcmb = meta['REDSHIFT_FINAL']
                     zhel_err = 5e-4  # Placeholder in case value is not defined in meta, need to handle this better
@@ -1960,13 +1958,6 @@ class SEDmodel(object):
                     all_lcs.append(lc)
                     # Set up FITRES table data
                     # (currently just uses second table, should improve for cases where there are multiple lc files)
-                    survey = meta.get('SURVEY', 'NULL')
-                    survey_id = survey_dict.get(survey, 0)
-                    idsurvey.append(survey_id)
-                    if survey not in self.surveys:
-                        self.surveys.append(survey)
-                    if survey_id not in self.survey_ids:
-                        self.survey_ids.append(survey_id)
                     sn_type.append(meta.get('TYPE', 0))
                     field.append(meta.get('FIELD', 'VOID'))
                     z_hels.append(zhel)
@@ -1994,6 +1985,8 @@ class SEDmodel(object):
                     snrmax1s.append(snrmax1)
                     snrmax2s.append(snrmax2)
                     snrmax3s.append(snrmax3)
+                self.survey = meta.get('SURVEY', 'NULL')
+                self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
@@ -2030,6 +2023,7 @@ class SEDmodel(object):
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
+            idsurvey = [self.survey_id] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
             snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
             table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
