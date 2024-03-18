@@ -1674,8 +1674,13 @@ class SEDmodel(object):
 
                 self.fitres_table['MU'] = np.around(samples['mu'].mean(axis=(0, 1)), 3)
                 self.fitres_table['MU_ERR'] = np.around(samples['mu'].std(axis=(0, 1)), 3)
+                self.fitres_table['THETA_1'] = np.around(samples['theta'].mean(axis=(0, 1)), 3)
+                self.fitres_table['THETA_1_ERR'] = np.around(samples['theta'].std(axis=(0, 1)), 3)
+                self.fitres_table['AV'] = np.around(samples['AV'].mean(axis=(0, 1)), 3)
+                self.fitres_table['AV_ERR'] = np.around(samples['AV'].std(axis=(0, 1)), 3)
+                self.fitres_table.round(3)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="salt2",
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana",
                                  metachar="")
 
         if args['snana']:
@@ -2025,7 +2030,6 @@ class SEDmodel(object):
             varlist = ["SN:"] * len(sne)
             idsurvey = [self.survey_id] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
-            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
             table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
                            names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
