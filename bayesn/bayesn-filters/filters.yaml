@@ -233,8 +233,7 @@ filters:
   g_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_g.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_g.dat
   g_PS1:
     magsys: ab
     magzero: 0.0
@@ -258,8 +257,7 @@ filters:
   i_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_i.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_i.dat
   i_PS1:
     magsys: ab
     magzero: 0.0
@@ -295,8 +293,7 @@ filters:
   r_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_r.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_r.dat
   r_PS1:
     magsys: ab
     magzero: 0.0
@@ -320,8 +317,7 @@ filters:
   u_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_u.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_u.dat
   u_prime:
     magsys: bd17
     magzero: 10.56
@@ -333,8 +329,7 @@ filters:
   y_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_y.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_y.dat
   y_PS1:
     magsys: ab
     magzero: 0.0
@@ -346,8 +341,7 @@ filters:
   z_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/total_z.dat
-    lam_unit: nm
+    path: LSST/2017-04_approx/LSST_z.dat
   z_PS1:
     magsys: ab
     magzero: 0.0

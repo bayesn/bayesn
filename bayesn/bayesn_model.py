@@ -32,6 +32,7 @@ from jax.random import PRNGKey, split
 from astropy.cosmology import FlatLambdaCDM
 import astropy.table as at
 import astropy.constants as const
+from astropy.io import ascii
 import matplotlib as mpl
 from matplotlib import rc
 import arviz
@@ -44,6 +45,7 @@ from tqdm import tqdm
 from astropy.table import QTable
 
 yaml = YAML(typ='safe')
+yaml.default_flow_style = False
 
 jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 
@@ -196,6 +198,8 @@ class SEDmodel(object):
                  fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
+        self.start_time = time.time()
+        self.end_time = None
         # os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
         print('Current devices:', jax.devices())
 
@@ -412,7 +416,7 @@ class SEDmodel(object):
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
             # Convolve the bands to match the sampling of the spectrum.
-            band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1])
+            band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1], left=0, right=0)
             # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
             #                                                     fill_value=0, bounds_error=False)(band_wave)
 
@@ -1659,7 +1663,7 @@ class SEDmodel(object):
                 # Use same git command as in Makefile for C code
                 SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
                 if SNANA_DIR != 'NULL':
-                    cmd = f'cd {SNANA_DIR}; git describe - -always - -tags'
+                    cmd = f'cd {SNANA_DIR}; git describe --always --tags'
                     ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
                     snana_version = ret.stdout.replace('\n', '')
                 else:
@@ -1668,18 +1672,37 @@ class SEDmodel(object):
                                           '# VERSION_PHOTOMETRY:': args['version_photometry'],
                                           '# TABLE NAME:': 'FITRES\n#'}
 
-                self.fitres_table['MU'] = np.around(samples['mu'].mean(axis=(0, 1)), 3)
-                self.fitres_table['MU_ERR'] = np.around(samples['mu'].std(axis=(0, 1)), 3)
+                n_sn = samples['mu'].shape[-1]
+                summary = arviz.summary(samples)
+                summary = summary[~summary.index.str.contains('tform')]
+                rhat = summary.r_hat.values
+                sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES', fmt="salt2",
+                self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
+                self.fitres_table['MU_ERR'] = samples['mu'].std(axis=(0, 1))
+                self.fitres_table['THETA_1'] = samples['theta'].mean(axis=(0, 1))
+                self.fitres_table['THETA_1_ERR'] = samples['theta'].std(axis=(0, 1))
+                self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
+                self.fitres_table['AV_ERR'] = samples['AV'].std(axis=(0, 1))
+                self.fitres_table['MEAN_RHAT'] = sn_rhat.mean(axis=1)
+                self.fitres_table['MAX_RHAT'] = sn_rhat.max(axis=1)
+                self.fitres_table.round(3)
+
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana",
                                  metachar="")
 
         if args['snana']:
+            self.end_time = time.time()
+            cpu_time = self.end_time - self.start_time
             # Output yaml
             out_dict = {
                 'ABORT_IF_ZERO': 1,
-                'NLC': self.data.shape[-1],
-                'NOBS': int(self.data[-1, ...].sum())
+                'SURVEY': self.survey,
+                'IDSURVEY': int(self.survey_id),
+                'NEVT_TOT': self.data.shape[-1],
+                'NEVT_LC_CUTS': self.data.shape[-1],
+                'NEVT_LCFIT_CUTS': self.data.shape[-1],
+                'CPU_MINUTES': round(cpu_time / 60, 2),
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
@@ -1724,6 +1747,7 @@ class SEDmodel(object):
         if 'data_table' in args.keys() and 'data_root' not in args.keys():
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
+        survey_dict = {}
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -1748,9 +1772,16 @@ class SEDmodel(object):
                     raise ValueError(f'Requested photometry {data_dir} was found in multiple locations, please remove '
                                      f'duplicates and ensure the one you want to use remains')
                 data_dir = found_in[0]
+                # Load up SNANA survey definitions file
+                survey_def_path = os.path.join(os.environ.get('SNDATA_ROOT'), 'SURVEY.DEF')
+                with open(survey_def_path) as fp:
+                    for line in fp:
+                        if line[:line.find(':')] == 'SURVEY':
+                            split = line.split()
+                            survey_dict[split[1]] = split[2]
             sample_name = os.path.split(data_dir)[-1]
             list_file = os.path.join(data_dir, f'{os.path.split(data_dir)[-1]}.LIST')
-            sn_list = np.loadtxt(list_file, dtype='str')
+            sn_list = np.atleast_1d(np.loadtxt(list_file, dtype='str'))
             file_format = sn_list[0].split('.')[1]
             map_dict = args['map']
             n_obs = []
@@ -1767,15 +1798,23 @@ class SEDmodel(object):
             if file_format.lower() == 'fits':  # If FITS format
                 ntot = 0
                 # Check if sim or real data
-                head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')
-                phot_file = os.path.join(data_dir, f'{sn_list[0].replace("HEAD", "PHOT")}.gz')
+                # if not os.path.exists
+                head_file = os.path.join(data_dir, f'{sn_list[0]}')
+                if not os.path.exists(head_file):
+                    head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')  # Look for .fits.gz if .fits not found
+                phot_file = head_file.replace("HEAD", "PHOT")
                 sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                 # If real data, ignore sim_prescale
                 if 'SIM_REDSHIFT_HELIO' not in sne_file[0].meta.keys():
                     args['njobtot'] = args['jobsplit'][0]
                 for sn_file in tqdm(sn_list):
-                    head_file = os.path.join(data_dir, f'{sn_file}.gz')
-                    phot_file = os.path.join(data_dir, f'{sn_file.replace("HEAD", "PHOT")}.gz')
+                    head_file = os.path.join(data_dir, f'{sn_file}')
+                    if not os.path.exists(head_file):
+                        head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
+                    with fits.open(head_file) as hdu:
+                        self.survey = hdu[0].header.get('SURVEY', 'NULL')
+                    self.survey_id = survey_dict.get(self.survey, 0)
+                    phot_file = head_file.replace("HEAD", "PHOT")
                     sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                     for sn_ind in range(len(sne_file)):
                         ntot += 1
@@ -1786,7 +1825,6 @@ class SEDmodel(object):
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         peak_mjd = meta['PEAKMJD']
-                        sne.append(meta['SNID'])
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         zhel_err = 5e-4  # Need to handle this better if not defined
@@ -1819,35 +1857,38 @@ class SEDmodel(object):
                         data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
                         data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                         data['redshift'] = zhel
-                        data['redshift_error'] = zcmb_err
+                        data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
                         data['MWEBV'] = meta['MWEBV']
+                        data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                         data['dist_mod'] = self.cosmo.distmod(zcmb)
                         data['mask'] = 1
                         lc = data[
-                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
-                             'dist_mod',
-                             'MWEBV',
-                             'mask']]
+                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
+                             'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                        if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
+                            continue
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                        sn_type.append(meta.get('TYPE', 'NULL'))
-                        field.append(meta.get('FIELD', 'NULL'))
-                        cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                        sn_name = meta['SNID']
+                        if isinstance(sn_name, bytes):
+                            sn_name = sn_name.decode('utf-8')
+                        sne.append(sn_name)
+                        sn_type.append(meta.get('TYPE', 0))
+                        field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
                         z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                         z_hds.append(meta['REDSHIFT_FINAL'])
                         z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                        vpecs.append(meta.get('VPEC', 'NULL'))
-                        vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
-                        mwebvs.append(meta.get('MWEBV', 'NULL'))
-                        host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
-                        host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                        vpecs.append(meta.get('VPEC', 0.))
+                        vpec_errs.append(meta.get('VPEC_ERR', 0.))
+                        mwebvs.append(meta.get('MWEBV', -9.))
+                        host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                        host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                         snrmax1 = np.max(lc.flux / lc.flux_err)
                         lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                         if lc_snr2.shape[0] == 0:
@@ -1877,7 +1918,10 @@ class SEDmodel(object):
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_file), default_tablename='OBS')
                     data = lcdata['OBS'].to_pandas()
                     peak_mjd = meta['PEAKMJD']
-                    sne.append(meta['SNID'])
+                    sn_name = meta['SNID']
+                    if isinstance(sn_name, bytes):
+                        sn_name = sn_name.decode('utf-8')
+                    sne.append(sn_name)
                     zhel = meta['REDSHIFT_HELIO']
                     zcmb = meta['REDSHIFT_FINAL']
                     zhel_err = 5e-4  # Placeholder in case value is not defined in meta, need to handle this better
@@ -1912,33 +1956,32 @@ class SEDmodel(object):
                     data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp']))
                     data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     data['redshift'] = zhel
-                    data['redshift_error'] = zcmb_err
+                    data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
                     data['MWEBV'] = meta['MWEBV']
+                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
                     lc = data[
-                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'band_indices', 'redshift', 'redshift_error',
+                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
-                    lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                     t_ranges.append((lc['t'].min(), lc['t'].max()))
                     n_obs.append(lc.shape[0])
                     all_lcs.append(lc)
                     # Set up FITRES table data
                     # (currently just uses second table, should improve for cases where there are multiple lc files)
-                    idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                    sn_type.append(meta.get('TYPE', 'NULL'))
-                    field.append(meta.get('FIELD', 'NULL'))
-                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                    sn_type.append(meta.get('TYPE', 0))
+                    field.append(meta.get('FIELD', 'VOID'))
                     z_hels.append(zhel)
                     z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                     z_hds.append(meta['REDSHIFT_FINAL'])
                     z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                    vpecs.append(meta.get('VPEC', 'NULL'))
-                    vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
-                    mwebvs.append(meta.get('MWEBV', 'NULL'))
-                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
-                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                    vpecs.append(meta.get('VPEC', 0.))
+                    vpec_errs.append(meta.get('VPEC_ERR', 0.))
+                    mwebvs.append(meta.get('MWEBV', -9.))
+                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                     snrmax1 = np.max(lc.flux / lc.flux_err)
                     lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                     if lc_snr2.shape[0] == 0:
@@ -1955,6 +1998,8 @@ class SEDmodel(object):
                     snrmax1s.append(snrmax1)
                     snrmax2s.append(snrmax2)
                     snrmax3s.append(snrmax3)
+                self.survey = meta.get('SURVEY', 'NULL')
+                self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
@@ -1970,11 +2015,13 @@ class SEDmodel(object):
             t = t.flatten(order='F')
             J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
                                                                      order='F').transpose(1, 2, 0)
-            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10], ...]
-            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10], ...]
+            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
+            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             for i in range(len(all_lcs)):
-                mag_data[:, (flux_data[1, ...] <= 0)] = 0
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             if 'training' in args['mode'].lower():
@@ -1989,14 +2036,13 @@ class SEDmodel(object):
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
+            idsurvey = [self.survey_id] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
-            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
-            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                           names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR',
-                                  'zHD',
-                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
-                                  'SNRMAX2', 'SNRMAX3'])
+                           names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
+                                  'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
+                                  'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
@@ -2119,7 +2165,9 @@ class SEDmodel(object):
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             for i in range(len(all_lcs)):
-                mag_data[:, (flux_data[1, ...] <= 0)] = 0
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             sne = sn_list['SNID'].values
@@ -2138,9 +2186,9 @@ class SEDmodel(object):
             varlist = ["SN:"] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
             snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
-            table = QTable([varlist, sne, idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs,
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'CUTFLAG_SNANA', 'zHEL', 'zHELERR', 'zHD',
+                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR', 'zHD',
                                   'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
                                   'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
