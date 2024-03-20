@@ -124,6 +124,7 @@ you might ever possibly want to use which only needs to be made once. This file 
         magsys: ab
         magzero: 0
         path: test_band_1_response.dat
+        lam_unit: nm
       test_band_2:
         magsys: vega
         magzero: 0
@@ -134,7 +135,7 @@ These arguments are described as follows:
 - ``standards_root``: A directory which all paths in ``standards`` are defined relative to. For example, if the standard spectrum for Vega is located at ``\data\standards\VEGA_STANDARD.fits`` and BD17 is at ``\data\filters\BD17_STANDARD.fits``, you can just set ``standards_root: \data\standards`` and use ``path: VEGA_STANDARD.fits`` within the key for Vega and similar for BD17. Alternatively, if you use a relative path this will be treated as being relative to the location of the filters yaml file. You can also use an environment variable here as part of the path e.g. $SNDATA_ROOT. This is an optional argument present for convenience, if not specified it is assumed that the paths for each band are all full paths rather than paths relative to ``standards_root``.
 - ``standards``: Keys in here define all of the standards you wish to use. For each standard, the key is the name (this can be any string of your choosing), and each must have a ``path`` specifying the location of the reference spectrum for each standard - this can be either a FITS file with named columns for WAVELENGTH and FLUX, or a text file with columns for each.
 - ``filters_root``: This specifies a directory which all paths in ``filters`` are defined relative to, behaving exactly as ``standards_root`` does for ``standards``. Again, if you use a relative path this will be treated as being relative to the location of the filters yaml file.
-- ``filters``: Keys in here define all of the filters you wish you use. For each filter, the key is the name (again, this can be any string of your choosing). Each filter must have a ``magsys`` key which either corresponds to one of the standard names defined in ``standards`` or is set to 'ab' (see note below), defining the magnitude system for each band. Each filter must also have a ``magzero`` key, specifying the magnitude offset for the filter, and a ``path`` specifying the location of the filter response for each filter.
+- ``filters``: Keys in here define all of the filters you wish you use. For each filter, the key is the name (again, this can be any string of your choosing). Each filter must have a ``magsys`` key which either corresponds to one of the standard names defined in ``standards`` or is set to 'ab' (see note below), defining the magnitude system for each band. Each filter must also have a ``magzero`` key, specifying the magnitude offset for the filter, and a ``path`` specifying the location of the filter response for each filter. Optionally, you can provide a ``lam_unit`` key - by default, BayeSN expects you to use filter responses with wavelength in Angstroms, but you can specify either 'nm' or 'micron' if your filter responses use nanometres or micrometres respectively and the units will be converted into Angstroms under-the-hood.
 
 Please note, the AB reference source is treated as an analytic function within the code so nothing needs to be included
 in ``standards`` for the AB magnitude system, any filter with ``magsys: ab`` will automatically work. If your filters
