@@ -1583,7 +1583,7 @@ class SEDmodel(object):
             end = timeit.default_timer()
             extras = None
             print('vmap: ', end - start)
-        self.postprocess(samples, extras, args)
+        self.postprocess(samples, args)
 
     def postprocess(self, samples, args):
         """
