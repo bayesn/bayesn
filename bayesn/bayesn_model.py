@@ -1487,8 +1487,7 @@ class SEDmodel(object):
 
     def run(self, args, cmd_args):
         """
-        Main method to run BayeSN. Can be used for either model training, fitting or dust inference with fixed
-        population SN parameters, depending on input yaml file.
+        Main method to run BayeSN, can be used for either model training or fitting depending on config.yaml
 
         Parameters
         ----------
@@ -1499,76 +1498,92 @@ class SEDmodel(object):
         -------
 
         """
-        args = self.parse_yaml_input(args, cmd_args)
+        self.parse_yaml_input(args, cmd_args)
 
         # Set up initialisation for HMC chains
         # -------------------------
         if args['initialisation'] == 'T21':
-            init_strategy = init_to_value(values=self.initial_guess(args, reference_model='T21'))
-
+            init_strategy = init_to_value(values=self.initial_guess(reference_model='T21'))
+        elif args['initialisation'] == 'M20':
+            init_strategy = init_to_value(values=self.initial_guess(reference_model='M20'))
+        elif args['initialisation'] == 'map':
+            init_strategy = init_to_value(values=self.map_initial_guess())
         elif args['initialisation'] == 'median':
             init_strategy = init_to_median()
         elif args['initialisation'] == 'sample':
             init_strategy = init_to_sample()
         else:
-            init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
+            raise ValueError('Invalid init strategy, must select existing model or one of value, median and sample')
 
-        print(f'Current mode: {args["mode"]}')
-
-        if args['mode'].lower() == 'training_globalrv':
-            nuts_kernel = NUTS(self.train_model_globalRV, adapt_step_size=True, target_accept_prob=0.8,
-                               init_strategy=init_strategy,
-                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
-                               step_size=0.1)
-        elif args['mode'].lower() == 'training_poprv':
-            nuts_kernel = NUTS(self.train_model_popRV, adapt_step_size=True, target_accept_prob=0.8,
-                               init_strategy=init_strategy,
-                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
-                               step_size=0.1)
-        elif args['mode'].lower() == 'dust':
-            nuts_kernel = NUTS(self.dust_model, adapt_step_size=True, target_accept_prob=0.8,
-                               init_strategy=init_strategy,
-                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
-                               step_size=0.1)
-        elif args['mode'].lower() == 'dust_split_sed':
-            nuts_kernel = NUTS(self.dust_model_split_sed, adapt_step_size=True, target_accept_prob=0.8,
-                               init_strategy=init_strategy,
-                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
-                               step_size=0.1)
-        elif args['mode'].lower() == 'dust_split_mag':
-            nuts_kernel = NUTS(self.dust_model_split_mag, adapt_step_size=True, target_accept_prob=0.8,
-                               init_strategy=init_strategy,
-                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
-                               step_size=0.1)
-        elif args['mode'].lower() == 'dust_redshift':
-            nuts_kernel = NUTS(self.dust_redshift_model, adapt_step_size=True, target_accept_prob=0.8,
+        if args['mode'].lower() == 'training':
+            nuts_kernel = NUTS(self.train_model, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'fitting':
-            if self.model_type == 'pop_RV':
-                nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_strategy,
-                                   max_tree_depth=10)
-            elif self.model_type == 'fixed_RV':
-                nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_strategy,
-                                   max_tree_depth=10)
+            nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_strategy, max_tree_depth=10)
         else:
-            raise ValueError("Invalid mode, must select one of 'training_globalRV', 'training_popRV', 'fitting',"
-                             "'dust', 'dust_split_mag', 'dust_split_sed' or 'dust_redshift'")
+            raise ValueError('Invalid mode, must select either training or fitting')
+
+        # self.data, self.band_weights = self.data[..., 0:2], self.band_weights[0:2, ...]
 
         mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
                     num_chains=args['num_chains'],
                     chain_method=args['chain_method'])
         rng = PRNGKey(0)
         start = timeit.default_timer()
-        # self.data, self.band_weights = self.data[..., 0:2], self.band_weights[0:2, ...]
-        # print(self.data.shape)
         mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
         end = timeit.default_timer()
         print(f'Total HMC runtime: {end - start} seconds')
         mcmc.print_summary()
         samples = mcmc.get_samples(group_by_chain=True)
-        self.postprocess(samples, args)
+        extras = mcmc.get_extra_fields(group_by_chain=True)
+
+        summary = arviz.summary(samples)
+        summary.to_csv(os.path.join(args['outputdir'], 'fit_summary_HMC.csv'))
+
+        if args['mode'].lower() == 'fitting':
+
+            def do_mcmc(data, weights):
+                """
+                Short function-in-a-function just to allow you to map over different objects and spread over multiple
+                devices. Could probably implement this better but still experimenting with it
+
+                Parameters
+                ----------
+                obs: array-like
+                    Data to fit, from output of process_dataset
+                weights: array-like
+                    Band-weights to calculate photometry
+
+                Returns
+                -------
+
+                sample_dict: dict
+                    Samples and other information from MCMC fit
+
+                """
+                rng_key = PRNGKey(123)
+                nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_strategy,
+                                   max_tree_depth=10)
+                mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
+                            num_chains=args['num_chains'], chain_method=args['chain_method'], progress_bar=False)
+                mcmc.run(rng_key, data[..., None], weights[None, ...])
+                return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
+
+            map = jax.vmap(do_mcmc, in_axes=(2, 0))
+            start = timeit.default_timer()
+            samples = map(self.data, self.band_weights)
+            for key, val in samples.items():
+                val = np.squeeze(val)
+                if len(val.shape) == 4:
+                    samples[key] = val.transpose(1, 2, 0, 3)
+                else:
+                    samples[key] = val.transpose(1, 2, 0)
+            end = timeit.default_timer()
+            extras = None
+            print('vmap: ', end - start)
+        self.postprocess(samples, extras, args)
 
     def postprocess(self, samples, args):
         """
