@@ -1722,16 +1722,16 @@ class SEDmodel(object):
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
-        if not (args['mode'] == 'fitting' and args['snana']):
-            # Save convergence data for each parameter to csv file
-            summary = arviz.summary(samples)
-            summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
+        # if not (args['mode'] == 'fitting' and args['snana']):
+        # Save convergence data for each parameter to csv file
+        summary = arviz.summary(samples)
+        summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
 
-            with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
-                pickle.dump(samples, file)
+        with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
+            pickle.dump(samples, file)
 
-            with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
-                yaml.dump(args, file)
+        with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
+            yaml.dump(args, file)
         return
 
     def process_dataset(self, args):
