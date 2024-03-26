@@ -1620,7 +1620,8 @@ class SEDmodel(object):
         # -------------------------
         if args['initialisation'] == 'T21':
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model='T21'))
-
+        elif args['initialisation'] == 'T21_split':
+            init_strategy = init_to_value(values=self.initial_guess(args, reference_model='T21_model', split=True))
         elif args['initialisation'] == 'median':
             init_strategy = init_to_median()
         elif args['initialisation'] == 'sample':
