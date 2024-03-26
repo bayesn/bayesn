@@ -1916,7 +1916,7 @@ class SEDmodel(object):
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             print('Reading light curves...')
             if file_format.lower() == 'fits':  # If FITS format
-                ntot = 0
+                ntot, n_inc = 0, 0
                 # Check if sim or real data
                 # if not os.path.exists
                 head_file = os.path.join(data_dir, f'{sn_list[0]}')
@@ -1947,6 +1947,11 @@ class SEDmodel(object):
                         peak_mjd = meta['PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
+                        if zhel > 0.3:
+                            continue
+                        n_inc += 1
+                        if n_inc > 500:
+                            continue
                         zhel_err = 5e-4  # Need to handle this better if not defined
                         zcmb_err = 5e-4  # Need to handle this better if not defined
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
