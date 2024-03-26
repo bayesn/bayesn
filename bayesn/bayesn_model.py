@@ -247,7 +247,7 @@ class SEDmodel(object):
             self.mu_R = jnp.array(params['MUR'])
             self.sigma_R = jnp.array(params['SIGMAR'])
 
-        self.trunc_val = 1.2
+        self.trunc_val = 0.5
 
         self.used_band_inds = None
         self._setup_band_weights()
