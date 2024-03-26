@@ -1948,6 +1948,8 @@ class SEDmodel(object):
                         peak_mjd = meta['PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
+                        if meta['HOSTGAL_LOGMASS'] < 10:
+                            continue
                         if zhel > 0.3:
                             continue
                         n_inc += 1
