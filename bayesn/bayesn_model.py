@@ -941,6 +941,106 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
+    def train_model_mass_split(self, obs, weights):
+        """
+        Numpyro model used for training to learn global parameters
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+
+        Returns
+        -------
+
+        """
+        sample_size = self.data.shape[-1]
+
+        N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        W_mu = jnp.zeros(N_knots)
+
+        W0_HM = numpyro.sample('W0_HM', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W0_LM = numpyro.sample('W0_LM', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W0_HM = jnp.reshape(W0_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        W0_LM = jnp.reshape(W0_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+
+        sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
+                                               dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
+        sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
+        L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        mu_R_HM = numpyro.sample('mu_R_HM', dist.Uniform(1, 5))
+        sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(0.5))
+        phi_alpha_R_HM = norm.cdf((1.2 - mu_R_HM) / sigma_R_HM)
+
+        mu_R_LM = numpyro.sample('mu_R_LM', dist.Uniform(1, 5))
+        sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(0.5))
+        phi_alpha_R_LM = norm.cdf((1.2 - mu_R_LM) / sigma_R_LM)
+
+        tauA_HM_tform = numpyro.sample('tauA_HM_tform', dist.Uniform(0, jnp.pi / 2.))
+        tauA_HM = numpyro.deterministic('tauA_HM', jnp.tan(tauA_HM_tform))
+
+        tauA_LM_tform = numpyro.sample('tauA_LM_tform', dist.Uniform(0, jnp.pi / 2.))
+        tauA_LM = numpyro.deterministic('tauA_LM', jnp.tan(tauA_LM_tform))
+
+        sigma0_HM_tform = numpyro.sample('sigma0_HM_tform', dist.Uniform(0, jnp.pi / 2.))
+        sigma0_HM = numpyro.deterministic('sigma0_HM', 0.1 * jnp.tan(sigma0_HM_tform))
+
+        sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
+        sigma0_LM = numpyro.deterministic('sigma0_LM', 0.1 * jnp.tan(sigma0_LM_tform))
+
+        mass = obs[-7, 0, :]
+        M_split = 10
+        HM_flag = mass > M_split
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+
+            Av_LM = numpyro.sample(f'AV_LM', dist.Exponential(1 / tauA_LM))
+            Av_HM = numpyro.sample(f'AV_HM', dist.Exponential(1 / tauA_HM))
+            Av = numpyro.deterministic('AV', HM_flag * Av_HM + (1 - HM_flag) * Av_LM)
+
+            Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
+            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
+            Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
+            Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
+                phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
+            Rv = numpyro.deterministic('Rv', HM_flag * Rv_HM + (1 - HM_flag) * Rv_LM)
+
+            W0 = HM_flag[:, None, None] * W0_HM[None, ...] + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
+
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+
+            sigma0 = HM_flag * sigma0_HM + (1 - HM_flag) * sigma0_LM
+
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            redshift = obs[-5, 0, sn_index]
+            redshift_error = obs[-4, 0, sn_index]
+            muhat = obs[-3, 0, sn_index]
+            ebv = obs[-2, 0, sn_index]
+
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
+                jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+                                       weights)
+
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+
     def train_model_popRV(self, obs, weights):
         """
         Numpyro model used for training to learn global parameters with a truncated Gaussian RV distribution
@@ -1325,7 +1425,7 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
-    def initial_guess(self, args, reference_model='M20_model'):
+    def initial_guess(self, args, reference_model='M20_model', split=False):
         """
         Sets initialisation for training chains, using some global parameter values from previous models.
         W0 and W1 matrices are interpolated to match wavelength knots of new model, and set to zero beyond
@@ -1408,6 +1508,21 @@ class SEDmodel(object):
             sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape) / 1.)
         param_init['sigmaepsilon'] = sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape)
         param_init['L_Omega'] = jnp.array(L_Omega_init)
+
+        if split:
+            # Extras for mass split
+            param_init['W0_HM'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
+            param_init['W0_LM'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
+            param_init['mu_R_HM'] = jnp.array(3)
+            param_init['sigma_R_HM'] = jnp.array(0.5)
+            param_init['Rv_tform_HM'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
+            param_init['Rv_tform_LM'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
+            param_init['tauA_HM_tform'] = jnp.arctan(tauA_ / 1.)
+            param_init['tauA_LM_tform'] = jnp.arctan(tauA_ / 1.)
+            param_init['AV_HM'] = jnp.array(np.random.exponential(tauA_, n_sne))
+            param_init['AV_LM'] = jnp.array(np.random.exponential(tauA_, n_sne))
+            param_init['sigma0_HM_tform'] = jnp.arctan(sigma0_ / 0.1)
+            param_init['sigma0_LM_tform'] = jnp.arctan(sigma0_ / 0.1)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
@@ -1545,6 +1660,11 @@ class SEDmodel(object):
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
+        elif args['mode'].lower() == 'train_model_mass_split':
+            nuts_kernel = NUTS(self.train_model_mass_split, adapt_step_size=True, target_accept_prob=0.8,
+                               init_strategy=init_strategy,
+                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
+                               step_size=0.1)
         elif args['mode'].lower() == 'fitting':
             if self.model_type == 'pop_RV':
                 nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_strategy,
@@ -1587,7 +1707,7 @@ class SEDmodel(object):
         -------
 
         """
-        if 'W1' in samples.keys():  # If training
+        if 'W1' in samples.keys() and 'W0_HM' not in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
             # Sign flipping-----------------
