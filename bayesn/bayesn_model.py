@@ -975,11 +975,11 @@ class SEDmodel(object):
 
         mu_R_HM = numpyro.sample('mu_R_HM', dist.Uniform(1, 5))
         sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(0.5))
-        phi_alpha_R_HM = norm.cdf((1.2 - mu_R_HM) / sigma_R_HM)
+        phi_alpha_R_HM = norm.cdf((self.trunc_val - mu_R_HM) / sigma_R_HM)
 
         mu_R_LM = numpyro.sample('mu_R_LM', dist.Uniform(1, 5))
         sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(0.5))
-        phi_alpha_R_LM = norm.cdf((1.2 - mu_R_LM) / sigma_R_LM)
+        phi_alpha_R_LM = norm.cdf((self.trunc_val - mu_R_LM) / sigma_R_LM)
 
         tauA_HM_tform = numpyro.sample('tauA_HM_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA_HM = numpyro.deterministic('tauA_HM', jnp.tan(tauA_HM_tform))
