@@ -1955,8 +1955,6 @@ class SEDmodel(object):
                         if n_inc > 500:
                             continue
                         n_inc += 1
-                        if meta['HOSTGAL_LOGMASS'] < 10:
-                            continue
                         # print(sn_ind + 1, len(sne_file), ntot, n_inc)
                         zhel_err = 5e-4  # Need to handle this better if not defined
                         zcmb_err = 5e-4  # Need to handle this better if not defined
