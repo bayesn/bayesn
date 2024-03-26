@@ -961,10 +961,10 @@ class SEDmodel(object):
         W_mu = jnp.zeros(N_knots)
 
         W0_HM = numpyro.sample('W0_HM', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
-        W0_LM = numpyro.sample('W0_LM', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        # W0_LM = numpyro.sample('W0_LM', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         W0_HM = jnp.reshape(W0_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
-        W0_LM = jnp.reshape(W0_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        # W0_LM = jnp.reshape(W0_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
         W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
 
         sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
@@ -1011,7 +1011,7 @@ class SEDmodel(object):
                 phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
             Rv = numpyro.deterministic('Rv', HM_flag * Rv_HM + (1 - HM_flag) * Rv_LM)
 
-            W0 = HM_flag[:, None, None] * W0_HM[None, ...] + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
+            W0 = W0_HM # HM_flag[:, None, None] * W0_HM[None, ...] + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
 
             eps_mu = jnp.zeros(N_knots_sig)
             eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
@@ -1033,7 +1033,7 @@ class SEDmodel(object):
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            Ds_err = muhat_err  # jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
