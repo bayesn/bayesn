@@ -996,6 +996,8 @@ class SEDmodel(object):
         mass = obs[-7, 0, :]
         M_split = 10
         HM_flag = mass > M_split
+        print(HM_flag.sum())
+        stop
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
@@ -1937,24 +1939,30 @@ class SEDmodel(object):
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
                     sne_file = sncosmo.read_snana_fits(head_file, phot_file)
-                    tdiffs = []
                     for sn_ind in range(len(sne_file)):
                         ntot += 1
                         if (ntot - args['jobid']) % args['njobtot'] != 0:
                             continue
                         sn = sne_file[sn_ind]
                         meta, data = sn.meta, sn.to_pandas()
-
+                        # print('----')
+                        # print(data)
+                        # if ntot > 10:
+                        #     stop
+                        init_shape = data.shape
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        peak_mjd = meta['SIM_PEAKMJD']
+                        data = data[data.BAND != '-']
+                        mjd_range = (data.MJD.min(), data.MJD.max())
+                        peak_mjd = meta['SALTMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
-                        if zhel > 0.3:
+                        if meta['PIA'] < 0.5:
                             continue
-                        if n_inc > 500:
+                        if zcmb > 0.36:
                             continue
-                        n_inc += 1
+                        # if n_inc > 500:
+                        #     continue
                         # print(sn_ind + 1, len(sne_file), ntot, n_inc)
                         zhel_err = 5e-4  # Need to handle this better if not defined
                         zcmb_err = 5e-4  # Need to handle this better if not defined
@@ -1969,6 +1977,7 @@ class SEDmodel(object):
                             if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
                                     self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
                                 data = data[~data.FLT.isin([f])]
+                        post_filt_shape = data.shape
                         # Record all used bands-------------------------------------
                         for f in data.FLT.unique():
                             if f not in used_bands:
@@ -1995,10 +2004,15 @@ class SEDmodel(object):
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
                              'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
+                        nan_shape = lc.shape
+                        phase_range = (lc['t'].min(), lc['t'].max())
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                        final_shape = lc.shape
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
+                            print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
-                        tdiffs.append(meta['SIM_PEAKMJD'] - meta['PEAKMJD'])
+                        n_inc += 1
+                        # tdiffs.append(meta['SIM_PEAKMJD'] - meta['PEAKMJD'])
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
                         all_lcs.append(lc)
