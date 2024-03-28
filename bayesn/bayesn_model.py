@@ -996,8 +996,6 @@ class SEDmodel(object):
         mass = obs[-7, 0, :]
         M_split = 10
         HM_flag = mass > M_split
-        print(HM_flag.sum())
-        stop
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
