@@ -1983,6 +1983,9 @@ class SEDmodel(object):
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         data = data[data.BAND != '-']
+                        #
+                        data['FLUXCALERR'] = np.abs(data['FLUXCAL']) / 20
+                        #
                         mjd_range = (data.MJD.min(), data.MJD.max())
                         peak_mjd = meta['SALTMJD']
                         zhel = meta['REDSHIFT_HELIO']
@@ -2182,6 +2185,7 @@ class SEDmodel(object):
                     snrmax3s.append(snrmax3)
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
+            stop
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
