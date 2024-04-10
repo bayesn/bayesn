@@ -2049,9 +2049,9 @@ class SEDmodel(object):
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
-                        if n_inc not in good:
-                            n_inc += 1
-                            continue
+                        # if n_inc not in good:
+                        #     n_inc += 1
+                        #     continue
                         n_inc += 1
                         tdiffs.append(meta['SALTMJD'] - meta['PEAKMJD'])
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
