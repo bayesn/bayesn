@@ -2898,6 +2898,6 @@ class SEDmodel(object):
                                                            ebv_mw=ebv_mws[i], yerr=0, mag=mag)
             lc = lc.T
             lc = lc.reshape(num_samples, len(bands), len(t))
-            flux_grid.at[i, ...].set(lc)
+            flux_grid = flux_grid.at[i, ...].set(lc)
 
         return flux_grid
