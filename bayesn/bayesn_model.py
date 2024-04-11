@@ -16,7 +16,7 @@ from numpyro.infer import MCMC, NUTS, init_to_median, init_to_sample, init_to_va
 import numpyro.distributions as dist
 from numpyro.optim import Adam
 from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoDelta
+from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiagonalNormal, AutoLaplaceApproximation
 import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr
@@ -43,6 +43,7 @@ from ruamel.yaml import YAML
 import time
 from tqdm import tqdm
 from astropy.table import QTable
+from .zltn_utils import *
 
 yaml = YAML(typ='safe')
 yaml.default_flow_style = False
@@ -819,6 +820,55 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
+    def fit_model_globalRV_vi(self, obs, weights):
+        """
+        Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for tmax
+        as well as theta, epsilon, Av and distance modulus
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            tmax = numpyro.sample('tmax', dist.Normal(0, 5))
+
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
     def fit_model_popRV(self, obs, weights):
         """
         Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
@@ -1444,6 +1494,7 @@ class SEDmodel(object):
         args['num_chains'] = args.get('num_chains', 4)
         args['num_warmup'] = args.get('num_warmup', 500)
         args['num_samples'] = args.get('num_samples', 500)
+        args['fit_method'] = args.get('fit_method', 'mcmc')
         args['chain_method'] = args.get('chain_method', 'parallel')
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
@@ -1472,6 +1523,11 @@ class SEDmodel(object):
                     os.mkdir(args['outputdir'])
             except FileNotFoundError:
                 raise FileNotFoundError('Requested output directory does not exist and could not be created')
+
+        # Check fit method is valid
+        args['fit_method'] = args['fit_method'].lower()
+        if args['fit_method'].lower() not in ['vi', 'mcmc']:
+            raise ValueError(f'Requested fitting method {args["fit_method"]}, must be one of "mcmc" or "vi"')
 
         if 'training' in args['mode'].lower():
             self.l_knots = device_put(np.array(args['l_knots'], dtype=float))
@@ -1556,18 +1612,114 @@ class SEDmodel(object):
             raise ValueError("Invalid mode, must select one of 'training_globalRV', 'training_popRV', 'fitting',"
                              "'dust', 'dust_split_mag', 'dust_split_sed' or 'dust_redshift'")
 
-        mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
+        # self.data, self.band_weights = self.data[..., 0:2], self.band_weights[0:2, ...]
+
+        if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
+            def fit_vmap_mcmc(data, weights):
+                """
+                Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
+                device
+
+                Parameters
+                ----------
+                obs: array-like
+                    Data to fit, from output of process_dataset
+                weights: array-like
+                    Band-weights to calculate photometry
+
+                Returns
+                -------
+
+                sample_dict: dict
+                    Samples and other information from MCMC fit
+
+                """
+                rng_key = PRNGKey(0)
+                mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
+                            num_chains=args['num_chains'], chain_method=args['chain_method'], progress_bar=False)
+                mcmc.run(rng_key, data[..., None], weights[None, ...])
+                return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
+
+            start = timeit.default_timer()
+            map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
+            samples = map(self.data, self.band_weights)
+            for key, val in samples.items():
+                val = np.squeeze(val)
+                if len(val.shape) == 4:
+                    samples[key] = val.transpose(1, 2, 0, 3)
+                else:
+                    samples[key] = val.transpose(1, 2, 0)
+            end = timeit.default_timer()
+        elif args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi':
+            def fit_vmap_vi(data, weights):
+                """
+                Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
+                device
+
+                Parameters
+                ----------
+                obs: array-like
+                    Data to fit, from output of process_dataset
+                weights: array-like
+                    Band-weights to calculate photometry
+
+                Returns
+                -------
+
+                sample_dict: dict
+                    Samples and other information from MCMC fit
+
+                """
+                optimizer = Adam(0.01)
+                model = self.fit_model_globalRV_vi
+                sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
+                # First start with the Laplace Approximation
+                laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
+                svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
+
+                svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False)
+                params, losses = svi_result.params, svi_result.losses
+                laplace_median = laplace_guide.median(params)
+
+                # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
+                new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
+                zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
+
+                svi = SVI(model, zltn_guide, optimizer, Trace_ELBO(5))
+                svi_result = svi.run(PRNGKey(123), 30000, data[..., None], weights[None, ...], progress_bar=False)
+                params, losses = svi_result.params, svi_result.losses
+                predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
+                samples = predictive(PRNGKey(123), data=None)
+                return {**samples}
+
+            start = timeit.default_timer()
+            map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
+            samples = map(self.data, self.band_weights)
+            for key, val in samples.items():
+                print('----')
+                print(key, val.shape)
+                val = np.squeeze(val)
+                print(key, val.shape)
+                if len(val.shape) == 3:
+                    samples[key] = val.transpose(1, 2, 0)
+                else:
+                    samples[key] = val.transpose()
+                print(key, samples[key].shape)
+                samples[key] = samples[key].reshape(4, args['num_samples'], *samples[key].shape[1:])
+                print(key, samples[key].shape)
+            end = timeit.default_timer()
+        else:
+            mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
                     num_chains=args['num_chains'],
                     chain_method=args['chain_method'])
-        rng = PRNGKey(0)
-        start = timeit.default_timer()
-        # self.data, self.band_weights = self.data[..., 0:2], self.band_weights[0:2, ...]
-        # print(self.data.shape)
-        mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
-        end = timeit.default_timer()
+            rng = PRNGKey(0)
+            start = timeit.default_timer()
+
+            mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
+            end = timeit.default_timer()
+            mcmc.print_summary()
+            samples = mcmc.get_samples(group_by_chain=True)
         print(f'Total HMC runtime: {end - start} seconds')
-        mcmc.print_summary()
-        samples = mcmc.get_samples(group_by_chain=True)
         self.postprocess(samples, args)
 
     def postprocess(self, samples, args):
@@ -1657,7 +1809,7 @@ class SEDmodel(object):
             samples['delM'] = samples['Ds'] - samples['mu']
 
             # Create FITRES file
-            if args['snana']:
+            if args['snana'] and False:
                 # fetch snana version that includes tag + commit;
                 # e.g., v11_05-4-gd033611.
                 # Use same git command as in Makefile for C code
@@ -1707,16 +1859,16 @@ class SEDmodel(object):
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
-        if not (args['mode'] == 'fitting' and args['snana']):
+        # if not (args['mode'] == 'fitting' and args['snana']):
             # Save convergence data for each parameter to csv file
-            summary = arviz.summary(samples)
-            summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
+        summary = arviz.summary(samples)
+        summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
 
-            with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
-                pickle.dump(samples, file)
+        with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
+            pickle.dump(samples, file)
 
-            with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
-                yaml.dump(args, file)
+        with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
+            yaml.dump(args, file)
         return
 
     def process_dataset(self, args):
