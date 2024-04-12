@@ -1612,7 +1612,7 @@ class SEDmodel(object):
             raise ValueError("Invalid mode, must select one of 'training_globalRV', 'training_popRV', 'fitting',"
                              "'dust', 'dust_split_mag', 'dust_split_sed' or 'dust_redshift'")
 
-        # self.data, self.band_weights = self.data[..., 0:2], self.band_weights[0:2, ...]
+        # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
             def fit_vmap_mcmc(data, weights):
@@ -1685,7 +1685,8 @@ class SEDmodel(object):
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
                 zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
 
-                svi = SVI(model, zltn_guide, optimizer, Trace_ELBO(5))
+                # svi_result = fit_zltn_vmap(model, zltn_guide, data[..., None], weights[None, ...])
+                svi = SVI(model, zltn_guide, Adam(0.005), Trace_ELBO(5))
                 svi_result = svi.run(PRNGKey(123), 30000, data[..., None], weights[None, ...], progress_bar=False)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
@@ -1696,17 +1697,12 @@ class SEDmodel(object):
             map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
             for key, val in samples.items():
-                print('----')
-                print(key, val.shape)
                 val = np.squeeze(val)
-                print(key, val.shape)
                 if len(val.shape) == 3:
                     samples[key] = val.transpose(1, 2, 0)
                 else:
                     samples[key] = val.transpose()
-                print(key, samples[key].shape)
                 samples[key] = samples[key].reshape(4, args['num_samples'], *samples[key].shape[1:])
-                print(key, samples[key].shape)
             end = timeit.default_timer()
         else:
             mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
@@ -1719,7 +1715,7 @@ class SEDmodel(object):
             end = timeit.default_timer()
             mcmc.print_summary()
             samples = mcmc.get_samples(group_by_chain=True)
-        print(f'Total HMC runtime: {end - start} seconds')
+        print(f'Total inference runtime: {end - start} seconds')
         self.postprocess(samples, args)
 
     def postprocess(self, samples, args):
@@ -1809,7 +1805,7 @@ class SEDmodel(object):
             samples['delM'] = samples['Ds'] - samples['mu']
 
             # Create FITRES file
-            if args['snana'] and False:
+            if args['snana']:
                 # fetch snana version that includes tag + commit;
                 # e.g., v11_05-4-gd033611.
                 # Use same git command as in Makefile for C code
@@ -1859,13 +1855,13 @@ class SEDmodel(object):
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
-        # if not (args['mode'] == 'fitting' and args['snana']):
+        if not (args['mode'] == 'fitting' and args['snana']):
             # Save convergence data for each parameter to csv file
-        summary = arviz.summary(samples)
-        summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
+            summary = arviz.summary(samples)
+            summary.to_csv(os.path.join(args['outputdir'], 'fit_summary.csv'))
 
-        with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
-            pickle.dump(samples, file)
+            with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
+                pickle.dump(samples, file)
 
         with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
             yaml.dump(args, file)
