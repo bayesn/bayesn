@@ -1821,6 +1821,7 @@ class SEDmodel(object):
                                           '# TABLE NAME:': 'FITRES\n#'}
 
                 n_sn = samples['mu'].shape[-1]
+                del samples['diverging']
                 summary = arviz.summary(samples)
                 summary = summary[~summary.index.str.contains('tform')]
                 rhat = summary.r_hat.values
