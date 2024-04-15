@@ -2124,7 +2124,6 @@ class SEDmodel(object):
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
-                    print(meta['SNID'])
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask']]
