@@ -1671,7 +1671,7 @@ class SEDmodel(object):
 
                 """
                 optimizer = Adam(0.01)
-                model = self.fit_model_globalRV_vi
+                model = self.fit_model_globalRV
                 sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
                 # First start with the Laplace Approximation
                 laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
@@ -1683,19 +1683,25 @@ class SEDmodel(object):
 
                 # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
+                model = self.fit_model_globalRV_vi
                 zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
 
                 # svi_result = fit_zltn_vmap(model, zltn_guide, data[..., None], weights[None, ...])
                 svi = SVI(model, zltn_guide, Adam(0.005), Trace_ELBO(5))
-                svi_result = svi.run(PRNGKey(123), 30000, data[..., None], weights[None, ...], progress_bar=False)
+                svi_result = svi.run(PRNGKey(123), 10000, data[..., None], weights[None, ...], progress_bar=False)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
                 samples = predictive(PRNGKey(123), data=None)
+                # samples['losses'] = losses
                 return {**samples}
+
 
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
+            # plt.plot(samples['losses'][1, :])
+            # plt.show()
+            # stop
             for key, val in samples.items():
                 val = np.squeeze(val)
                 if len(val.shape) == 3:
@@ -1826,6 +1832,7 @@ class SEDmodel(object):
                     if key in samples.keys():
                         del samples[key]
                 summary = arviz.summary(samples)
+                summary.to_csv('fit_summary.csv')
                 summary = summary[~summary.index.str.contains('tform')]
                 rhat = summary.r_hat.values
                 sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
@@ -1836,12 +1843,15 @@ class SEDmodel(object):
                 self.fitres_table['THETA_1_ERR'] = samples['theta'].std(axis=(0, 1))
                 self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
                 self.fitres_table['AV_ERR'] = samples['AV'].std(axis=(0, 1))
+                # if not args['fit_method'] == 'vi':
                 self.fitres_table['MEAN_RHAT'] = sn_rhat.mean(axis=1)
                 self.fitres_table['MAX_RHAT'] = sn_rhat.max(axis=1)
                 self.fitres_table.round(3)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana",
-                                 metachar="")
+                drop_count = pd.isna(self.fitres_table['MU']).sum()
+                self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU'])]
+
+                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana", metachar="")
 
         if args['snana']:
             self.end_time = time.time()
@@ -1853,7 +1863,7 @@ class SEDmodel(object):
                 'IDSURVEY': int(self.survey_id),
                 'NEVT_TOT': self.data.shape[-1],
                 'NEVT_LC_CUTS': self.data.shape[-1],
-                'NEVT_LCFIT_CUTS': self.data.shape[-1],
+                'NEVT_LCFIT_CUTS': int(self.data.shape[-1] - drop_count),
                 'CPU_MINUTES': round(cpu_time / 60, 2),
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
@@ -1976,6 +1986,7 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
+                        data = data[data.BAND == 'z']
                         peak_mjd = meta['PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
@@ -2113,6 +2124,7 @@ class SEDmodel(object):
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(zcmb)
                     data['mask'] = 1
+                    print(meta['SNID'])
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask']]
