@@ -1832,7 +1832,6 @@ class SEDmodel(object):
                     if key in samples.keys():
                         del samples[key]
                 summary = arviz.summary(samples)
-                summary.to_csv('fit_summary.csv')
                 summary = summary[~summary.index.str.contains('tform')]
                 rhat = summary.r_hat.values
                 sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
@@ -1869,6 +1868,7 @@ class SEDmodel(object):
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
+        print(args['mode'], args['snana'])
         if not (args['mode'] == 'fitting' and args['snana']):
             # Save convergence data for each parameter to csv file
             summary = arviz.summary(samples)
@@ -1877,8 +1877,8 @@ class SEDmodel(object):
             with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
 
-        with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
-            yaml.dump(args, file)
+            with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
+                yaml.dump(args, file)
         return
 
     def process_dataset(self, args):
