@@ -1868,7 +1868,6 @@ class SEDmodel(object):
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
-        print(args['mode'], args['snana'])
         if not (args['mode'] == 'fitting' and args['snana']):
             # Save convergence data for each parameter to csv file
             summary = arviz.summary(samples)
