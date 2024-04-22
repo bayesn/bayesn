@@ -1674,6 +1674,9 @@ class SEDmodel(object):
                 np.power(Ds_err, 2),
                 np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
             samples['delM'] = samples['Ds'] - samples['mu']
+            if 'tmax' in samples.keys():  # Convert tmax samples into peak_MJD samples
+                samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
+                            1 + z_HEL[None, None, :])
 
             # Create FITRES file
             if args['snana']:
@@ -1806,7 +1809,7 @@ class SEDmodel(object):
             n_obs = []
             all_lcs = []
             t_ranges = []
-            sne = []
+            sne, peak_mjds = [], []
             # For FITRES table
             idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
             snrmax1s, snrmax2s, snrmax3s = [], [], []
@@ -1897,6 +1900,7 @@ class SEDmodel(object):
                         if isinstance(sn_name, bytes):
                             sn_name = sn_name.decode('utf-8')
                         sne.append(sn_name)
+                        peak_mjds.append(peak_mjd)
                         sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
@@ -1940,7 +1944,6 @@ class SEDmodel(object):
                     sn_name = meta['SNID']
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
-                    sne.append(sn_name)
                     zhel = meta['REDSHIFT_HELIO']
                     zcmb = meta['REDSHIFT_FINAL']
                     zhel_err = 5e-4  # Placeholder in case value is not defined in meta, need to handle this better
@@ -1985,6 +1988,8 @@ class SEDmodel(object):
                          'dist_mod', 'MWEBV', 'mask']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    sne.append(sn_name)
+                    peak_mjds.append(peak_mjd)
                     t_ranges.append((lc['t'].min(), lc['t'].max()))
                     n_obs.append(lc.shape[0])
                     all_lcs.append(lc)
@@ -2053,6 +2058,7 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.peak_mjds = np.array(peak_mjds)
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
             idsurvey = [self.survey_id] * len(sne)
@@ -2076,6 +2082,7 @@ class SEDmodel(object):
             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
+            sne, peak_mjds = [], []
             print('Reading light curves...')
             for i in tqdm(range(sn_list.shape[0])):
                 row = sn_list.iloc[i]
@@ -2138,6 +2145,8 @@ class SEDmodel(object):
                         sn_lc = lc.copy()
                     else:
                         sn_lc = pd.concat([sn_lc, lc])
+                sne.append(sn)
+                peak_mjds.append(peak_mjd)
                 t_ranges.append((lc['t'].min(), lc['t'].max()))
                 n_obs.append(lc.shape[0])
                 all_lcs.append(sn_lc)
@@ -2200,6 +2209,7 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.peak_mjds = np.array(peak_mjds)
 
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
