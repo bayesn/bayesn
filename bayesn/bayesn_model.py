@@ -1775,9 +1775,12 @@ class SEDmodel(object):
                 (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
                 np.power(Ds_err, 2),
                 np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+            print(self.peak_mjds[321])
             samples['delM'] = samples['Ds'] - samples['mu']
             samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
                         1 + self.data[-5, 0, :][None, None, :])
+            print(samples['tmax'].mean(axis=(0, 1))[321])
+            print(samples['peak_MJD'].mean(axis=(0, 1))[321])
 
             # Create FITRES file
             if args['snana']:
@@ -2189,7 +2192,6 @@ class SEDmodel(object):
                     snrmax3s.append(snrmax3)
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
-            raise ValueError('Nope')
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
