@@ -1776,6 +1776,8 @@ class SEDmodel(object):
                 np.power(Ds_err, 2),
                 np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
             samples['delM'] = samples['Ds'] - samples['mu']
+            samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
+                        1 + self.data[-5, 0, :][None, None, :])
 
             # Create FITRES file
             if args['snana']:
@@ -1940,7 +1942,7 @@ class SEDmodel(object):
                    399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411,
                    412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422])
             tdiffs = []
-            sne = []
+            sne, peak_mjds = [], []
             # For FITRES table
             idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
             snrmax1s, snrmax2s, snrmax3s = [], [], []
@@ -2053,6 +2055,7 @@ class SEDmodel(object):
                         #     n_inc += 1
                         #     continue
                         n_inc += 1
+                        peak_mjds.append(peak_mjd)
                         tdiffs.append(meta['SALTMJD'] - meta['PEAKMJD'])
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
@@ -2219,6 +2222,7 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.peak_mjds = np.array(peak_mjds)
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
             idsurvey = [self.survey_id] * len(sne)
