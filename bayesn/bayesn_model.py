@@ -1989,7 +1989,7 @@ class SEDmodel(object):
                         data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.02, None)
                         #
                         mjd_range = (data.MJD.min(), data.MJD.max())
-                        peak_mjd = meta['SALTMJD']
+                        peak_mjd = meta['BAYESNMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         if meta['PIA'] < 0.5:
@@ -2054,6 +2054,7 @@ class SEDmodel(object):
                         # if n_inc not in good:
                         #     n_inc += 1
                         #     continue
+                        print(n_inc, peak_mjd)
                         n_inc += 1
                         peak_mjds.append(peak_mjd)
                         tdiffs.append(meta['SALTMJD'] - meta['PEAKMJD'])
@@ -2188,6 +2189,7 @@ class SEDmodel(object):
                     snrmax3s.append(snrmax3)
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
+            raise ValueError('Nope')
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
