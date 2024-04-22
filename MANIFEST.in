@@ -11,6 +11,7 @@ include bayesn/bayesn-filters/filters/LCO/*
 include bayesn/bayesn-filters/filters/LCO/Dupont/*
 include bayesn/bayesn-filters/filters/LCO/Swope/*
 include bayesn/bayesn-filters/filters/LSST/*
+include bayesn/bayesn-filters/filters/LSST/2017-04_approx/*
 include bayesn/bayesn-filters/filters/NULL/*
 include bayesn/bayesn-filters/filters/PS1/*
 include bayesn/bayesn-filters/filters/standard/*
