@@ -206,10 +206,7 @@ class SEDmodel(object):
         self.__root_dir__ = os.path.dirname(os.path.abspath(__file__))
         print(f'Currently working in {os.getcwd()}')
 
-        # Use built-in filters if filters.yaml is not provided
-        if filter_yaml is None:
-            filter_yaml = os.path.join(self.__root_dir__, 'bayesn-filters', 'filters.yaml')
-
+        # Load built-in filter_yaml and add custom filters if specified
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
         self.hsiao_interp = None
@@ -327,19 +324,51 @@ class SEDmodel(object):
                                   band_max_log_wave, band_spacing)
         band_wave = 10 ** band_log_wave
 
-        if not os.path.exists(self.filter_yaml):
-            raise FileNotFoundError(f'Specified filter yaml {self.filter_yaml} does not exist')
-        with open(self.filter_yaml, 'r') as file:
+        # Load in-built filter yaml first
+        with open(os.path.join(self.__root_dir__, 'bayesn-filters', 'filters.yaml'), 'r') as file:
             filter_dict = yaml.load(file)
 
-        # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
-        if 'standards' in filter_dict.keys():
-            if 'standards_root' in filter_dict.keys():
-                standards_root = filter_dict['standards_root']
+        # Prepend root locations for in-built filters
+        for key, val in filter_dict['standards'].items():
+            filter_dict['standards'][key]['path'] = os.path.join(self.__root_dir__, 'bayesn-filters', val['path'])
+
+        for key, val in filter_dict['filters'].items():
+            filter_dict['filters'][key]['path'] = os.path.join(self.__root_dir__, 'bayesn-filters', val['path'])
+
+        # Add custom filters, if specified
+        if self.filter_yaml is not None:
+            if not os.path.exists(self.filter_yaml):
+                raise FileNotFoundError(f'Specified filter yaml {self.filter_yaml} does not exist')
+            with open(self.filter_yaml, 'r') as file:
+                custom_filter_dict = yaml.load(file)
+            # Add custom standards if specified---------------------
+            if 'standards' in custom_filter_dict.keys():
+                if 'standards_root' in custom_filter_dict.keys():
+                    standards_root = custom_filter_dict['standards_root']
+                else:
+                    standards_root = ''
+                for key, val in custom_filter_dict['standards'].items():
+                    path = os.path.join(standards_root, val['path'])
+                    # Fill environment variables if used e.g. $SNDATA_ROOT
+                    split_path = os.path.normpath(path).split(os.path.sep)
+                    root = split_path[0]
+                    if root[:1] == '$':
+                        env = os.getenv(root[1:])
+                        if env is None:
+                            raise FileNotFoundError(f'The environment variable {root} was not found')
+                        path = os.path.join(env, *split_path[1:])
+                    elif not os.path.isabs(path):  # If relative path, prepend yaml location
+                        path = os.path.join(os.path.split(os.path.abspath(self.filter_yaml))[0], path)
+                    custom_filter_dict['standards'][key]['path'] = path
+                    # Add custom standard and overwrite existing one of same name if present
+                    filter_dict['standards'][key] = custom_filter_dict['standards'][key]
+            # Add custom filters
+            if 'filters_root' in custom_filter_dict.keys():
+                filters_root = custom_filter_dict['filters_root']
             else:
-                standards_root = ''
-            for key, val in filter_dict['standards'].items():
-                path = os.path.join(standards_root, val['path'])
+                filters_root = ''
+            for key, val in custom_filter_dict['filters'].items():
+                path = os.path.join(filters_root, val['path'])
                 # Fill environment variables if used e.g. $SNDATA_ROOT
                 split_path = os.path.normpath(path).split(os.path.sep)
                 root = split_path[0]
@@ -349,30 +378,31 @@ class SEDmodel(object):
                         raise FileNotFoundError(f'The environment variable {root} was not found')
                     path = os.path.join(env, *split_path[1:])
                 elif not os.path.isabs(path):  # If relative path, prepend yaml location
-                    path = os.path.join(os.path.split(self.filter_yaml)[0], path)
-                if '.fits' in path:  # If fits file
-                    with fits.open(path) as hdu:
-                        standard_df = pd.DataFrame.from_records(hdu[1].data)
-                    standard_lam, standard_f = standard_df.WAVELENGTH.values, standard_df.FLUX.values
-                else:
-                    standard_txt = np.loadtxt(path)
-                    standard_lam, standard_f = standard_txt[:, 0], standard_txt[:, 1]
-                filter_dict['standards'][key]['lam'] = standard_lam
-                filter_dict['standards'][key]['f_lam'] = standard_f
-        else:
-            print('You have not provided any standard spectra e.g. Vega in filter input yaml, this is fine as long '
-                  'as everything is AB, otherwise make sure to add this')
+                    path = os.path.join(os.path.split(os.path.abspath(self.filter_yaml))[0], path)
+                custom_filter_dict['filters'][key]['path'] = path
+                # Add custom filter and overwrite existing one of same name if present
+                filter_dict['filters'][key] = custom_filter_dict['filters'][key]
+
+        print(filter_dict['standards'])
+
+        # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
+        for key, val in filter_dict['standards'].items():
+            path = val['path']
+            if '.fits' in path:  # If fits file
+                with fits.open(path) as hdu:
+                    standard_df = pd.DataFrame.from_records(hdu[1].data)
+                standard_lam, standard_f = standard_df.WAVELENGTH.values, standard_df.FLUX.values
+            else:
+                standard_txt = np.loadtxt(path)
+                standard_lam, standard_f = standard_txt[:, 0], standard_txt[:, 1]
+            filter_dict['standards'][key]['lam'] = standard_lam
+            filter_dict['standards'][key]['f_lam'] = standard_f
 
         def ab_standard_flam(l):  # Can just use analytic function for AB spectrum
             f = (const.c.to('AA/s').value / 1e23) * (l ** -2) * 10 ** (-48.6 / 2.5) * 1e23
             return f
 
         # Load filters------------------------------
-        if 'filters_root' in filter_dict.keys():
-            filters_root = filter_dict['filters_root']
-        else:
-            filters_root = ''
-
         band_weights, zps, offsets = [], [], []
         self.band_dict, self.zp_dict, self.band_lim_dict = {}, {}, {}
 
@@ -388,22 +418,11 @@ class SEDmodel(object):
 
         band_ind = 1
         for key, val in filter_dict['filters'].items():
-            path = os.path.join(filters_root, val['path'])
-            # Fill environment variables if used e.g. $SNDATA_ROOT
-            split_path = os.path.normpath(path).split(os.path.sep)
-            root = split_path[0]
-            if root[:1] == '$':
-                env = os.getenv(root[1:])
-                if env is None:
-                    raise FileNotFoundError(f'The environment variable {root} was not found')
-                path = os.path.join(env, *split_path[1:])
-            elif not os.path.isabs(path):  # If relative path, prepend yaml location
-                path = os.path.join(os.path.split(self.filter_yaml)[0], path)
             band, magsys, offset = key, val['magsys'], val['magzero']
             try:
-                R = np.loadtxt(path)
+                R = np.loadtxt(val['path'])
             except:
-                raise FileNotFoundError(f'Filter response not found for {key}')
+                raise FileNotFoundError(f'Filter response file {val["path"]} not found for {key}')
 
             # Convert wavelength units if required, model is defined in Angstroms
             units = val.get('lam_unit', 'AA')
