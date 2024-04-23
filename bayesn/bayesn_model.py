@@ -2051,7 +2051,6 @@ class SEDmodel(object):
                         sn_name = meta['SNID'].decode('utf-8')
                         # if sn_name != '1265143':
                         #     continue
-                        print(peak_mjd)
                         if meta['PIA'] < 0.5:
                             continue
                         if zcmb > 0.36:
@@ -2112,10 +2111,9 @@ class SEDmodel(object):
                             print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
                         sn_name = meta['SNID'].decode('utf-8')
-                        # if n_inc not in good:
-                        #     n_inc += 1
-                        #     continue
-                        print(n_inc, peak_mjd)
+                        if n_inc in drop_list:
+                            n_inc += 1
+                            continue
                         n_inc += 1
                         peak_mjds.append(peak_mjd)
                         tdiffs.append(meta['SALTMJD'] - meta['PEAKMJD'])
