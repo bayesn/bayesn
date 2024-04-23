@@ -2042,7 +2042,7 @@ class SEDmodel(object):
                         data['BAND'] = data.BAND.str.strip()
                         data = data[data.BAND != '-']
                         #
-                        data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.02, None)
+                        data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.05, None)
                         #
                         mjd_range = (data.MJD.min(), data.MJD.max())
                         peak_mjd = meta['BAYESNMJD']
