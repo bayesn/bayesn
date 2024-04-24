@@ -1782,58 +1782,58 @@ class SEDmodel(object):
             samples['delM'] = samples['Ds'] - samples['mu']
             samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
                         1 + self.data[-5, 0, :][None, None, :])
-            # print(samples['tmax'].mean(axis=(0, 1))[0])
-            # print(samples['peak_MJD'].mean(axis=(0, 1))[0])
+            print(samples['tmax'].mean(axis=(0, 1))[0])
+            print(samples['peak_MJD'].mean(axis=(0, 1))[0])
 
-            # plt.hist(samples['tmax'].flatten())
-            # plt.show()
-            #
-            # with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
-            #     pickle.dump(samples, file)
-            #
-            # num_samples = 1
-            # t = np.arange(-10, 40)
-            # bands = ['r_DES', 'i_DES', 'z_DES']
-            #
-            # theta = samples['theta'][..., 0].flatten(order='F')
-            # AV = samples['AV'][..., 0].flatten(order='F')
-            # RV = None
-            # mu = samples['mu'][..., 0].flatten(order='F')
-            # eps = samples['eps'][..., 0]
-            # eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order='F')
-            # eps = eps.reshape((eps.shape[0], self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
-            # eps_full = jnp.zeros((eps.shape[0], self.l_knots.shape[0], self.tau_knots.shape[0]))
-            # eps = eps_full.at[:, 1:-1, :].set(eps)
-            # del_M = samples['delM'][..., 0].flatten(order='F')
-            #
-            # theta, AV, mu, eps, del_M = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-            #                             eps[:num_samples, ...], del_M[:num_samples, ...]
-            #
-            # print(self.band_dict)
-            # print(self.used_band_inds)
-            #
-            # lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu,
-            #                                                del_M=del_M, eps=eps, RV=RV, z=z_HEL, write_to_files=False,
-            #                                                ebv_mw=ebv_mw, yerr=0, mag=False)
-            #
-            # lc = lc[:, 0]
-            # print(lc[:50])
-            # print(lc[50:100])
-            # print(lc[100:])
-            #
-            # plt.errorbar(self.data[0, :, 0], self.data[1, :, 0], self.data[2, :, 0], fmt='x')
-            # plt.scatter(self.data[0, :, 0], samples['model_flux'].mean(axis=(0, 1))[:, 0])
-            # plt.figure()
-            # cs = ['r', 'c', 'k']
-            # for b_ind in range(1, 4):
-            #     b_inds = self.data[-6, :, 0] == b_ind
-            #     plt.errorbar(self.data[0, b_inds, 0], self.data[1, b_inds, 0], self.data[2, b_inds, 0], fmt=f'{cs[b_ind - 1]}x')
-            # plt.plot(t, lc[:50], color='r')
-            # plt.plot(t, lc[50:100], color='c')
-            # plt.plot(t, lc[100:], color='k')
-            # plt.show()
-            #
-            # raise ValueError('Nope')
+            plt.hist(samples['tmax'].flatten())
+            plt.show()
+
+            with open(os.path.join(args['outputdir'], 'chains.pkl'), 'wb') as file:
+                pickle.dump(samples, file)
+
+            num_samples = 1
+            t = np.arange(-10, 40)
+            bands = ['r_DES', 'i_DES', 'z_DES']
+
+            theta = samples['theta'][..., 0].flatten(order='F')
+            AV = samples['AV'][..., 0].flatten(order='F')
+            RV = None
+            mu = samples['mu'][..., 0].flatten(order='F')
+            eps = samples['eps'][..., 0]
+            eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order='F')
+            eps = eps.reshape((eps.shape[0], self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((eps.shape[0], self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            del_M = samples['delM'][..., 0].flatten(order='F')
+
+            theta, AV, mu, eps, del_M = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
+                                        eps[:num_samples, ...], del_M[:num_samples, ...]
+
+            print(self.band_dict)
+            print(self.used_band_inds)
+
+            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu,
+                                                           del_M=del_M, eps=eps, RV=RV, z=z_HEL, write_to_files=False,
+                                                           ebv_mw=ebv_mw, yerr=0, mag=False)
+
+            lc = lc[:, 0]
+            print(lc[:50])
+            print(lc[50:100])
+            print(lc[100:])
+
+            plt.errorbar(self.data[0, :, 0], self.data[1, :, 0], self.data[2, :, 0], fmt='x')
+            plt.scatter(self.data[0, :, 0], samples['model_flux'].mean(axis=(0, 1))[:, 0])
+            plt.figure()
+            cs = ['r', 'c', 'k']
+            for b_ind in range(1, 4):
+                b_inds = self.data[-6, :, 0] == b_ind
+                plt.errorbar(self.data[0, b_inds, 0], self.data[1, b_inds, 0], self.data[2, b_inds, 0], fmt=f'{cs[b_ind - 1]}x')
+            plt.plot(t, lc[:50], color='r')
+            plt.plot(t, lc[50:100], color='c')
+            plt.plot(t, lc[100:], color='k')
+            plt.show()
+
+            raise ValueError('Nope')
 
             # Create FITRES file
             if args['snana']:
@@ -1997,7 +1997,7 @@ class SEDmodel(object):
                    386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398,
                    399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411,
                    412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422])
-            drop_list = [32, 310, 62, 85, 146, 262, 311, 350, 355, 357, 368, 412]
+            drop_list = [32, 310, 62, 85, 110, 142, 146, 178, 199, 217, 262, 311, 321, 350, 355, 357, 368, 412]
             tdiffs = []
             sne, peak_mjds = [], []
             # For FITRES table
@@ -2050,7 +2050,7 @@ class SEDmodel(object):
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         sn_name = meta['SNID'].decode('utf-8')
-                        # if sn_name != '1265143':
+                        # if sn_name != '1277892':
                         #     continue
                         if meta['PIA'] < 0.5:
                             continue
@@ -2112,6 +2112,7 @@ class SEDmodel(object):
                             print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
                         sn_name = meta['SNID'].decode('utf-8')
+                        print(n_inc, meta.get('HOSTGAL_LOGMASS', -9.))
                         if n_inc in drop_list:
                             n_inc += 1
                             continue
