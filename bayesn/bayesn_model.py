@@ -1709,7 +1709,7 @@ class SEDmodel(object):
         -------
 
         """
-        if 'W1' in samples.keys() and 'W0_HM' not in samples.keys():  # If training
+        if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
             # Sign flipping-----------------
@@ -1734,37 +1734,38 @@ class SEDmodel(object):
             samples['theta'] = samples['theta'] / theta_std[..., None]
             samples['W1'] = samples['W1'] * theta_std[..., None]
 
-            # Save best fit global params to files for easy inspection and reading in------
-            W0 = np.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
-                                                             order='F')
-            W1 = np.mean(samples['W1'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
-                                                             order='F')
+            if 'W0_HM' not in samples.keys():
+                # Save best fit global params to files for easy inspection and reading in------
+                W0 = np.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                                                 order='F')
+                W1 = np.mean(samples['W1'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                                                 order='F')
 
-            L_Sigma = np.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
-                                np.mean(samples['L_Omega'], axis=[0, 1]))
-            sigma0 = np.mean(samples['sigma0'])
+                L_Sigma = np.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
+                                    np.mean(samples['L_Omega'], axis=[0, 1]))
+                sigma0 = np.mean(samples['sigma0'])
 
-            tauA = np.mean(samples['tauA'])
+                tauA = np.mean(samples['tauA'])
 
-            yaml_data = {
-                'M0': float(self.M0),
-                'SIGMA0': float(sigma0),
-                'TAUA': float(tauA),
-                'TAU_KNOTS': self.tau_knots.tolist(),
-                'L_KNOTS': self.l_knots.tolist(),
-                'W0': W0.tolist(),
-                'W1': W1.tolist(),
-                'L_SIGMA_EPSILON': L_Sigma.tolist()
-            }
+                yaml_data = {
+                    'M0': float(self.M0),
+                    'SIGMA0': float(sigma0),
+                    'TAUA': float(tauA),
+                    'TAU_KNOTS': self.tau_knots.tolist(),
+                    'L_KNOTS': self.l_knots.tolist(),
+                    'W0': W0.tolist(),
+                    'W1': W1.tolist(),
+                    'L_SIGMA_EPSILON': L_Sigma.tolist()
+                }
 
-            if 'singlerv' in args['mode'].lower():
-                yaml_data['RV'] = float(np.mean(samples['RV']))
-            elif 'poprv' in args['mode'].lower():
-                yaml_data['MUR'] = float(np.mean(samples['mu_R']))
-                yaml_data['SIGMAR'] = float(np.mean(samples['sigma_R']))
+                if 'singlerv' in args['mode'].lower():
+                    yaml_data['RV'] = float(np.mean(samples['RV']))
+                elif 'poprv' in args['mode'].lower():
+                    yaml_data['MUR'] = float(np.mean(samples['mu_R']))
+                    yaml_data['SIGMAR'] = float(np.mean(samples['sigma_R']))
 
-            with open(os.path.join(args['outputdir'], 'bayesn.yaml'), 'w') as file:
-                yaml.dump(yaml_data, file)
+                with open(os.path.join(args['outputdir'], 'bayesn.yaml'), 'w') as file:
+                    yaml.dump(yaml_data, file)
 
         z_HEL = self.data[-5, 0, :]
         muhat = self.data[-3, 0, :]
@@ -1996,7 +1997,7 @@ class SEDmodel(object):
                    386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398,
                    399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411,
                    412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422])
-            drop_list = [32, 310, 62, 85, 146, 262, 311, 350, 355, 357, 368]
+            drop_list = [32, 310, 62, 85, 146, 262, 311, 350, 355, 357, 368, 412]
             tdiffs = []
             sne, peak_mjds = [], []
             # For FITRES table
