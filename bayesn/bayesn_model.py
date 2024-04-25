@@ -1998,6 +1998,8 @@ class SEDmodel(object):
                    399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411,
                    412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422])
             drop_list = [32, 310, 62, 85, 110, 142, 146, 178, 199, 217, 262, 311, 321, 350, 355, 357, 368, 412]
+            SALT_drop_list = [1291799, 1253029, 1292834, 1655162, 1901870, 1277892, 1777356, 1251235, 1654150, 1278518, 1283289, 1878268, 1683022, 1338739, 1334623, 1291799, 1880464, 1456021, 1252264, 1250432, 1319614, 1295627, 1913090, 1516017, 1512114, 1279397, 1872027, 1432268, 1284587, 1295062, 1922455, 1292084, 1330892, 1250785, 1259544, 1323331, 1294158, 1330892, 1259544, 1323331, 1295062]
+            SALT_drop_list = np.array(SALT_drop_list).astype(str)
             tdiffs = []
             sne, peak_mjds = [], []
             # For FITRES table
@@ -2043,7 +2045,7 @@ class SEDmodel(object):
                         data['BAND'] = data.BAND.str.strip()
                         data = data[data.BAND != '-']
                         #
-                        data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.01, None)
+                        data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.02, None)
                         #
                         mjd_range = (data.MJD.min(), data.MJD.max())
                         peak_mjd = meta['BAYESNMJD']
@@ -2112,7 +2114,9 @@ class SEDmodel(object):
                             print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
                         sn_name = meta['SNID'].decode('utf-8')
-                        print(n_inc, meta.get('HOSTGAL_LOGMASS', -9.))
+                        if sn_name in SALT_drop_list:
+                            n_inc += 1
+                            continue
                         if n_inc in drop_list:
                             n_inc += 1
                             continue
