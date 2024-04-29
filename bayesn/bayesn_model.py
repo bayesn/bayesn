@@ -383,8 +383,6 @@ class SEDmodel(object):
                 # Add custom filter and overwrite existing one of same name if present
                 filter_dict['filters'][key] = custom_filter_dict['filters'][key]
 
-        print(filter_dict['standards'])
-
         # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
         for key, val in filter_dict['standards'].items():
             path = val['path']
