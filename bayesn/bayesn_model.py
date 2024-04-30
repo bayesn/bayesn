@@ -2500,7 +2500,7 @@ class SEDmodel(object):
         return l_o, spectra, param_dict
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
-                             logM=None, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
+                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
                              output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
@@ -2548,6 +2548,10 @@ class SEDmodel(object):
             initialising SEDmodel will be used.
         logM: float or array-like, optional
             Currently unused, will be implemented when split models are included
+        tmax: float or array-like, optional
+            Time of maximum in rest-frame days, useful for plotting light curve fits with free tmax. Defaults to 0, i.e.
+            the simulated time of maximum will be at 0 days. If a float is passed, the same value will be used
+            for all objects.
         del_M: float or array-like, optional
             Grey offset del_M value to be used for each SN. If passing an array-like object, there must be a
             corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
@@ -2629,6 +2633,12 @@ class SEDmodel(object):
         elif ebv_mw.shape[0] != N:
             raise ValueError(
                 'For ebv_mw, either pass a single scalar value or an array of values for each of the N simulated objects')
+        tmax = np.array(tmax)
+        if len(tmax.shape) == 0:
+            tmax = tmax.repeat(N)
+        elif tmax.shape[0] != N:
+            raise ValueError('If not providing a scalar tmax value, array must be of same length as the number of '
+                             'objects to simulate, N')
         if RV is None:
             RV = self.RV
         RV = np.array(RV)
@@ -2681,6 +2691,7 @@ class SEDmodel(object):
         band_weights = self._calculate_band_weights(z, ebv_mw)
 
         t = jnp.repeat(t[..., None], N, axis=1)
+        t = t - tmax[None, :]
         hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t = t.flatten(order='F')
@@ -2862,6 +2873,7 @@ class SEDmodel(object):
         for i in tqdm(np.arange(N_sne)):
             theta = chains['theta'][..., i].flatten(order='F')
             AV = chains['AV'][..., i].flatten(order='F')
+            tmax = chains['tmax'][..., i].flatten(order='F')
             if 'RV' in chains.keys():
                 RV = chains['RV'][..., i].flatten(order='F')
             else:
@@ -2877,7 +2889,7 @@ class SEDmodel(object):
             theta, AV, mu, eps, del_M = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
                                         eps[:num_samples, ...], del_M[:num_samples, ...]
 
-            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu,
+            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
                                                            ebv_mw=ebv_mws[i], yerr=0, mag=mag)
             lc = lc.T
