@@ -1857,14 +1857,14 @@ class SEDmodel(object):
                 sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
 
                 self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
-                self.fitres_table['MU_ERR'] = samples['mu'].std(axis=(0, 1))
-                self.fitres_table['THETA_1'] = samples['theta'].mean(axis=(0, 1))
-                self.fitres_table['THETA_1_ERR'] = samples['theta'].std(axis=(0, 1))
+                self.fitres_table['MUERR'] = samples['mu'].std(axis=(0, 1))
+                self.fitres_table['THETA1'] = samples['theta'].mean(axis=(0, 1))
+                self.fitres_table['THETA1ERR'] = samples['theta'].std(axis=(0, 1))
                 self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
-                self.fitres_table['AV_ERR'] = samples['AV'].std(axis=(0, 1))
+                self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
                 # if not args['fit_method'] == 'vi':
-                self.fitres_table['MEAN_RHAT'] = sn_rhat.mean(axis=1)
-                self.fitres_table['MAX_RHAT'] = sn_rhat.max(axis=1)
+                self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
+                self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
                 self.fitres_table.round(3)
 
                 drop_count = pd.isna(self.fitres_table['MU']).sum()
