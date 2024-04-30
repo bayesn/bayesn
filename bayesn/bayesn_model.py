@@ -1587,6 +1587,39 @@ class SEDmodel(object):
         samples = mcmc.get_samples(group_by_chain=True)
         self.postprocess(samples, args)
 
+    def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map=None):
+        t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
+        if peak_mjd is not None:
+            t = (t - peak_mjd) / (1 + z)
+        flux = flux[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        flux_err = flux_err[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        filters = filters[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        band_indices = np.array([self.band_dict[filt_map[filter]] for filter in filters])
+        used_band_inds = band_indices[np.unique(band_indices, return_index=True)[1]]
+        t = t[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        n_data = len(t)
+        # Set up and populate data array
+        data = jnp.zeros((10, n_data, 1))
+        data = data.at[0, :, 0].set(t)
+        data = data.at[1, :, 0].set(flux)
+        data = data.at[2, :, 0].set(flux_err)
+        data = data.at[4, :, 0].set(band_indices)
+        data = data.at[5, :, 0].set(np.full_like(t, z))
+        data = data.at[7, :, 0].set(np.full_like(t, self.cosmo.distmod(z).value))
+        data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
+        data = data.at[9, :, 0].set(np.ones_like(t))
+
+        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
+
+        nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
+        mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
+        rng = PRNGKey(0)
+        start = timeit.default_timer()
+        mcmc.run(rng, data, band_weights, extra_fields=('potential_energy',))
+        mcmc.print_summary()
+        return
+
     def postprocess(self, samples, args):
         """
         Function to postprocess BayeSN output. Applies transformations to some parameters e.g. ensuring consistency for
