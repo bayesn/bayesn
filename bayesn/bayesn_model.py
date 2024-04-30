@@ -228,6 +228,9 @@ class SEDmodel(object):
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
                                     f'of the built-in model {built_in_models}')
 
+        # Define example light curve for jupyter notebook demos
+        self.example_lc = os.path.join(self.__root_dir__, 'data', 'example_lcs', 'Foundation_DR1_2016W.txt')
+
         self.l_knots = jnp.array(params['L_KNOTS'])
         self.tau_knots = jnp.array(params['TAU_KNOTS'])
         self.W0 = jnp.array(params['W0'])
@@ -1587,17 +1590,57 @@ class SEDmodel(object):
         samples = mcmc.get_samples(group_by_chain=True)
         self.postprocess(samples, args)
 
-    def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map=None):
+    def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
+                      drop_bands=[]):
+        meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
+        lcdata = lcdata['OBS'].to_pandas()
+
+        t = lcdata.MJD.values
+        flux = lcdata.FLUXCAL.values
+        flux_err = lcdata.FLUXCALERR.values
+        filters = lcdata.FLT.values
+        peak_mjd = meta[peak_mjd_key]
+        z = meta['REDSHIFT_HELIO']
+        ebv_mw = meta['MWEBV']
+
+        samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
+                           print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands)
+
+        return samples, sn_props
+
+    def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
+            file_prefix=None, drop_bands=[]):
+        if type(drop_bands) == str:
+            drop_bands = [drop_bands]
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
         if peak_mjd is not None:
             t = (t - peak_mjd) / (1 + z)
         flux = flux[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
         flux_err = flux_err[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
         filters = filters[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
-        band_indices = np.array([self.band_dict[filt_map[filter]] for filter in filters])
-        used_band_inds = band_indices[np.unique(band_indices, return_index=True)[1]]
+        filters = np.array([filt_map.get(filter, filter) for filter in filters])
         t = t[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+
+        # Prepare filters
+        for f in np.unique(filters):
+            if f not in self.band_dict.keys():
+                raise ValueError(f'Filter "{filter}" not defined in BayeSN, either add a mapping to filt_map to ensure '
+                                 f'that your filter names match up with ones built-in or add some custom filters if '
+                                 f'you want to use your own')
+            if z > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or z < (
+                    self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
+                drop_bands.append(f)
+        for f in drop_bands:
+            inds = filters != f
+            flux = flux[inds]
+            flux_err = flux_err[inds]
+            filters = filters[inds]
+            t = t[inds]
+        band_indices = np.array([self.band_dict[filt_map.get(filter, filter)] for filter in filters])
+
         n_data = len(t)
+        if n_data == 0:
+            raise ValueError('No data in rest-frame phase range covered by model, maybe you gave the wrong peak MJD?')
         # Set up and populate data array
         data = jnp.zeros((10, n_data, 1))
         data = data.at[0, :, 0].set(t)
@@ -1612,13 +1655,32 @@ class SEDmodel(object):
         band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
 
         nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
-                               max_tree_depth=10)
+                           max_tree_depth=10)
         mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
         rng = PRNGKey(0)
         start = timeit.default_timer()
         mcmc.run(rng, data, band_weights, extra_fields=('potential_energy',))
-        mcmc.print_summary()
-        return
+        if print:
+            mcmc.print_summary()
+        samples = mcmc.get_samples(group_by_chain=True)
+        if peak_mjd is not None:
+            samples['peak_MJD'] = peak_mjd + samples['tmax'] * (1 + z)
+        muhat = self.cosmo.distmod(z).value
+        muhat_err = 5
+        Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+        samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
+            np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+        samples['delM'] = samples['Ds'] - samples['mu']
+
+        if file_prefix is not None:
+            summary = arviz.summary(samples)
+            summary.to_csv(f'{file_prefix}_fit_summary.csv')
+            with open(f'{file_prefix}_chains.pkl', 'wb') as file:
+                pickle.dump(samples, file)
+
+        sn_props = (z, ebv_mw)
+
+        return samples, sn_props
 
     def postprocess(self, samples, args):
         """
@@ -2738,7 +2800,7 @@ class SEDmodel(object):
         eps_full[:, 1:-1, :] = eps
         return eps_full
 
-    def get_flux_from_chains(self, t, bands, chain_path, zs, ebv_mws, mag=True, num_samples=None):
+    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None):
         """
         Returns model photometry for posterior samples from BayeSN fits, which can be used to make light curve fit
         plots.
@@ -2773,12 +2835,18 @@ class SEDmodel(object):
             containing photometry across all SNe, all posterior samples, all bands and at all phases requested.
 
         """
-        with open(chain_path, 'rb') as file:
-            chains = pickle.load(file)
+        if type(chains) == str:
+            with open(chains, 'rb') as file:
+                chains = pickle.load(file)
 
         N_sne = chains['theta'].shape[2]
         if num_samples is None:
             num_samples = chains['theta'].shape[0] * chains['theta'].shape[1]
+
+        if isinstance(zs, float):
+            zs = np.array([zs])
+        if isinstance(ebv_mws, float):
+            ebv_mws = np.array([ebv_mws])
 
         flux_grid = jnp.zeros((N_sne, num_samples, len(bands), len(t)))
 
