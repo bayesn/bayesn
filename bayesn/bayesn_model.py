@@ -1858,8 +1858,8 @@ class SEDmodel(object):
 
                 self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
                 self.fitres_table['MUERR'] = samples['mu'].std(axis=(0, 1))
-                self.fitres_table['THETA1'] = samples['theta'].mean(axis=(0, 1))
-                self.fitres_table['THETA1ERR'] = samples['theta'].std(axis=(0, 1))
+                self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
+                self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
                 self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
                 self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
                 # if not args['fit_method'] == 'vi':
