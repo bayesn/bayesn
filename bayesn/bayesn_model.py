@@ -2292,8 +2292,8 @@ class SEDmodel(object):
                     data['flux_err'] = data['FLUXCALERR']
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
-                    data['MWEBV'] = meta['MWEBV']
-                    data['mass'] = meta['HOSTGAL_LOGMASS']
+                    data['MWEBV'] = meta.get('HOSTGAL_LOGMASS', 0.)
+                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
                     data['mask'] = 1
                     lc = data[
@@ -2327,9 +2327,17 @@ class SEDmodel(object):
                 host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
                 snrmax1 = np.max(lc.flux / lc.flux_err)
                 lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
-                snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
-                lc_snr3 = lc_snr2[lc_snr2.band_indices != lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
-                snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                if lc_snr2.shape[0] == 0:
+                    snrmax2 = -99
+                    snrmax3 = -99
+                else:
+                    snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                    lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                      lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                    if lc_snr3.shape[0] == 0:
+                        snrmax3 = -99
+                    else:
+                        snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
                 snrmax1s.append(snrmax1)
                 snrmax2s.append(snrmax2)
                 snrmax3s.append(snrmax3)
