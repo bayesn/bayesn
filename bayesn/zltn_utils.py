@@ -1,27 +1,16 @@
 import numpyro
 from numpyro.infer.autoguide import AutoContinuous
 from numpyro.distributions import constraints
-from numpyro.infer.initialization import init_to_median, init_to_uniform
+from numpyro.infer.initialization import init_to_median
 from numpyro.distributions.distribution import Distribution
-from numpyro.distributions.continuous import MultivariateNormal, Normal
+from numpyro.distributions.continuous import MultivariateNormal
 from numpyro.distributions.truncated import TruncatedNormal
 from numpyro.distributions.constraints import _SingletonConstraint
 from numpyro.distributions.transforms import biject_to, IdentityTransform, LowerCholeskyAffine
 import jax.numpy as jnp
-from numpyro.distributions.util import (
-    is_prng_key,
-    lazy_property,
-    matrix_to_tril_vec,
-    promote_shapes,
-    signed_stick_breaking_tril,
-    validate_sample,
-    vec_to_tril_matrix,
-)
-from jax import lax, vmap
-from jax.random import PRNGKey, normal, exponential
-
-key = PRNGKey(123)
-
+from numpyro.distributions.util import is_prng_key, promote_shapes, validate_sample
+from jax import lax
+from jax.random import normal, exponential
 
 class _FirstPositive(_SingletonConstraint):
     event_dim = 1

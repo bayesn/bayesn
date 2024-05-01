@@ -1640,6 +1640,7 @@ class SEDmodel(object):
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
 
         print(f'Current mode: {args["mode"]}')
+        print('Running...')
 
         if args['mode'].lower() == 'training_globalrv':
             nuts_kernel = NUTS(self.train_model_globalRV, adapt_step_size=True, target_accept_prob=0.8,
@@ -1713,8 +1714,13 @@ class SEDmodel(object):
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
+            expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
+                if len(val.shape) == 2:  # In case fitting only one object
+                    expand_dim = True
+                if expand_dim:
+                    val = val[None, ...]
                 if len(val.shape) == 4:
                     samples[key] = val.transpose(1, 2, 0, 3)
                 else:
@@ -1765,15 +1771,17 @@ class SEDmodel(object):
                 # samples['losses'] = losses
                 return {**samples}
 
-
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
-            # plt.plot(samples['losses'][1, :])
-            # plt.show()
-            # stop
+            del samples['_auto_latent']
+            expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
+                if len(val.shape) == 1:  # In case fitting only one object
+                    expand_dim = True
+                if expand_dim:
+                    val = val[None, ...]
                 if len(val.shape) == 3:
                     samples[key] = val.transpose(1, 2, 0)
                 else:
