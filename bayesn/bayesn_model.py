@@ -811,7 +811,7 @@ class SEDmodel(object):
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             theta = theta * (1 - fix_theta) + theta_val * fix_theta
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
-            theta = theta * (1 - fix_AV) + AV_val * fix_AV
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
             t = obs[0, ...] - tmax[None, sn_index]
@@ -842,7 +842,7 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_popRV(self, obs, weights):
+    def fit_model_popRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
         maximum as well as theta, epsilon, AV, RV and distance modulus.
@@ -1594,7 +1594,7 @@ class SEDmodel(object):
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
-                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False):
+                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, mag=False):
         meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
         lcdata = lcdata['OBS'].to_pandas()
 
@@ -1608,15 +1608,18 @@ class SEDmodel(object):
 
         samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
-                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV)
+                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, mag=mag)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
-            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False):
+            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, mag=False):
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
+        if mag:  # Convert data from mag into FLUXCAL
+            flux = np.power(10, (27.5 - flux) / 2.5)
+            flux_err = (np.log(10) / 2.5) * flux * flux_err
         if peak_mjd is not None:
             t = (t - peak_mjd) / (1 + z)
         flux = flux[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
