@@ -791,7 +791,7 @@ class SEDmodel(object):
 
         return X
 
-    def fit_model_globalRV(self, obs, weights):
+    def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -809,8 +809,11 @@ class SEDmodel(object):
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            theta = theta * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
@@ -1591,7 +1594,7 @@ class SEDmodel(object):
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
-                      drop_bands=[]):
+                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False):
         meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
         lcdata = lcdata['OBS'].to_pandas()
 
@@ -1604,12 +1607,13 @@ class SEDmodel(object):
         ebv_mw = meta['MWEBV']
 
         samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
-                           print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands)
+                                     print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
+                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
-            file_prefix=None, drop_bands=[]):
+            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False):
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
@@ -1658,9 +1662,19 @@ class SEDmodel(object):
                            max_tree_depth=10)
         mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
         rng = PRNGKey(0)
-        start = timeit.default_timer()
-        mcmc.run(rng, data, band_weights, extra_fields=('potential_energy',))
-        if print:
+
+        theta_val = 0
+        if fix_theta:
+            theta_val = fix_theta
+            fix_theta = True
+        AV_val = 0
+        if fix_AV:
+            AV_val = fix_AV
+            fix_AV = True
+
+        mcmc.run(rng, data, band_weights, fix_tmax, fix_theta, theta_val, fix_AV, AV_val,
+                 extra_fields=('potential_energy',))
+        if print_summary:
             mcmc.print_summary()
         samples = mcmc.get_samples(group_by_chain=True)
         if peak_mjd is not None:
@@ -1671,6 +1685,12 @@ class SEDmodel(object):
         samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
             np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
         samples['delM'] = samples['Ds'] - samples['mu']
+        if fix_tmax:
+            samples['tmax'] = jnp.zeros_like(samples['tmax'])
+        if fix_theta:
+            samples['theta'] = jnp.full_like(samples['theta'], theta_val)
+        if fix_AV:
+            samples['AV'] = jnp.full_like(samples['AV'], AV_val)
 
         if file_prefix is not None:
             summary = arviz.summary(samples)
