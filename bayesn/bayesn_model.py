@@ -2130,7 +2130,7 @@ class SEDmodel(object):
                     data['flux_err'] = data['FLUXCALERR']
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
-                    data['MWEBV'] = meta.get('HOSTGAL_LOGMASS', 0.)
+                    data['MWEBV'] = meta.get('MWEBV', 0.)
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
                     data['mask'] = 1
