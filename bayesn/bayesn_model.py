@@ -839,8 +839,8 @@ class SEDmodel(object):
 
     def fit_model_globalRV_vi(self, obs, weights):
         """
-        Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for tmax
-        as well as theta, epsilon, Av and distance modulus
+        Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
+        tmax as well as theta, epsilon, Av and distance modulus. This model is slightly modified for ZLTN VI.
 
         Parameters
         ----------
@@ -856,7 +856,7 @@ class SEDmodel(object):
         with numpyro.plate('SNe', sample_size) as sn_index:
             AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
-            tmax = numpyro.sample('tmax', dist.Normal(0, 5))
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
 
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
@@ -907,7 +907,7 @@ class SEDmodel(object):
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
             RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
-            RV = numpyro.deterministic('Rv_LM',
+            RV = numpyro.deterministic('Rv',
                                        self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
@@ -938,6 +938,59 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)  # _{sn_index}
+
+    def fit_model_popRV_vi(self, obs, weights):
+        """
+        Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
+        maximum as well as theta, epsilon, AV, RV and distance modulus. This model is slightly modified for ZLTN VI.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+            RV = numpyro.deterministic('Rv',
+                                       self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
 
     def train_model_globalRV(self, obs, weights):
         """
