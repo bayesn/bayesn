@@ -2065,7 +2065,7 @@ class SEDmodel(object):
                 # if not args['fit_method'] == 'vi':
                 self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
                 self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
-                self.fitres_table.round(3)
+                self.fitres_table.round(4)
 
                 drop_count = pd.isna(self.fitres_table['MU']).sum()
                 self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU'])]
@@ -2129,6 +2129,7 @@ class SEDmodel(object):
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
+        c = 299792.458
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -2210,8 +2211,12 @@ class SEDmodel(object):
                         peak_mjd = meta['PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
-                        zhel_err = 5e-4  # Need to handle this better if not defined
-                        zcmb_err = 5e-4  # Need to handle this better if not defined
+                        zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
+                        zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
+                        vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
+                        zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
+                        zhd = (1 + zcmb) / (1 + zpec) - 1
+                        # We deliberately don't include vpec error here, as BayeSN includes this elsewhere
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                         # If filter not in map_dict, assume one-to-one mapping------
                         for f in data.BAND.unique():
@@ -2237,13 +2242,13 @@ class SEDmodel(object):
                         data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
                         data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
                         data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
-                        data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp'])) * self.scale
-                        data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
+                        data['flux'] = data['FLUXCAL']
+                        data['flux_err'] = data['FLUXCALERR']
                         data['redshift'] = zhel
-                        data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
-                        data['MWEBV'] = meta['MWEBV']
+                        data['redshift_error'] = zhel_err
+                        data['MWEBV'] = meta.get('MWEBV', 0.)
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = self.cosmo.distmod(zcmb)
+                        data['dist_mod'] = self.cosmo.distmod(zhd)
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
@@ -2265,12 +2270,12 @@ class SEDmodel(object):
                         sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
-                        z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
-                        z_hds.append(meta['REDSHIFT_FINAL'])
-                        z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                        vpecs.append(meta.get('VPEC', 0.))
-                        vpec_errs.append(meta.get('VPEC_ERR', 0.))
-                        mwebvs.append(meta.get('MWEBV', -9.))
+                        z_hel_errs.append(zhel_err)
+                        z_hds.append(zhd)
+                        z_hd_errs.append(zcmb_err)
+                        vpecs.append(vpec)
+                        vpec_errs.append(vpec_err)
+                        mwebvs.append(meta.get('MWEBV', 0.))
                         host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                         host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                         if self.sim:
@@ -2320,8 +2325,12 @@ class SEDmodel(object):
                         sn_name = sn_name.decode('utf-8')
                     zhel = meta['REDSHIFT_HELIO']
                     zcmb = meta['REDSHIFT_FINAL']
-                    zhel_err = 5e-4  # Placeholder in case value is not defined in meta, need to handle this better
-                    zcmb_err = 5e-4  # Placeholder in case value is not defined in meta, need to handle this better
+                    zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
+                    zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
+                    vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
+                    zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
+                    zhd = (1 + zcmb) / (1 + zpec) - 1
+                    # We deliberately don't include vpec error here, as BayeSN includes this elsewhere
                     data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
@@ -2352,10 +2361,10 @@ class SEDmodel(object):
                     data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp']))
                     data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     data['redshift'] = zhel
-                    data['redshift_error'] = meta.get('REDSHIFT_CMB_ERR', 5e-4)  # Made up default if not specified
-                    data['MWEBV'] = meta['MWEBV']
+                    data['redshift_error'] = zhel_err
+                    data['MWEBV'] = meta.get('MWEBV', 0.)
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                    data['dist_mod'] = self.cosmo.distmod(zcmb)
+                    data['dist_mod'] = self.cosmo.distmod(zhd)
                     data['mask'] = 1
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
@@ -2375,9 +2384,9 @@ class SEDmodel(object):
                     z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
                     z_hds.append(meta['REDSHIFT_FINAL'])
                     z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
-                    vpecs.append(meta.get('VPEC', 0.))
-                    vpec_errs.append(meta.get('VPEC_ERR', 0.))
-                    mwebvs.append(meta.get('MWEBV', -9.))
+                    vpecs.append(vpec)
+                    vpec_errs.append(vpec_err)
+                    mwebvs.append(meta.get('MWEBV', 0.))
                     host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                     host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                     if self.sim:
@@ -2549,18 +2558,18 @@ class SEDmodel(object):
                 # Set up FITRES table data
                 # (currently just uses second table, should improve for cases where there are multiple lc files)
                 idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                sn_type.append(meta.get('TYPE', 'NULL'))
+                sn_type.append(meta.get('TYPE', 0))
                 field.append(meta.get('FIELD', 'NULL'))
                 cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
                 z_hels.append(zhel)
                 z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', row.REDSHIFT_CMB_ERR))
                 z_hds.append(row.REDSHIFT_CMB)
                 z_hd_errs.append(row.REDSHIFT_CMB_ERR)
-                vpecs.append(meta.get('VPEC', 'NULL'))
-                vpec_errs.append(meta.get('VPEC_ERR', 'NULL'))
-                mwebvs.append(meta.get('MWEBV', 'NULL'))
-                host_logmasses.append(meta.get('HOSTGAL_LOGMASS', 'NULL'))
-                host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', 'NULL'))
+                vpecs.append(meta.get('VPEC', 0.))
+                vpec_errs.append(meta.get('VPEC_ERR', self.sigma_pec))
+                mwebvs.append(meta.get('MWEBV', 0.))
+                host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
                 snrmax1 = np.max(lc.flux / lc.flux_err)
                 lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                 if lc_snr2.shape[0] == 0:
