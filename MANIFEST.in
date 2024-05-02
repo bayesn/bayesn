@@ -1,4 +1,5 @@
-include bayesn/data/hsiao.h5
+include bayesn/data/*
+include bayesn/data/example_lcs/*
 include bayesn/bayesn-filters/*
 include bayesn/bayesn-filters/filters/*
 include bayesn/bayesn-filters/filters/CTIO/*

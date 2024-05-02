@@ -229,6 +229,9 @@ class SEDmodel(object):
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
                                     f'of the built-in model {built_in_models}')
 
+        # Define example light curve for jupyter notebook demos
+        self.example_lc = os.path.join(self.__root_dir__, 'data', 'example_lcs', 'Foundation_DR1_2016W.txt')
+
         self.l_knots = jnp.array(params['L_KNOTS'])
         self.tau_knots = jnp.array(params['TAU_KNOTS'])
         self.W0 = jnp.array(params['W0'])
@@ -789,7 +792,7 @@ class SEDmodel(object):
 
         return X
 
-    def fit_model_globalRV(self, obs, weights):
+    def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -807,8 +810,11 @@ class SEDmodel(object):
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
@@ -886,7 +892,7 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_popRV(self, obs, weights):
+    def fit_model_popRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
         maximum as well as theta, epsilon, AV, RV and distance modulus.
@@ -905,12 +911,15 @@ class SEDmodel(object):
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
             RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
             RV = numpyro.deterministic('Rv',
                                        self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
-            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
@@ -1802,6 +1811,135 @@ class SEDmodel(object):
         print(f'Total inference runtime: {end - start} seconds')
         self.postprocess(samples, args)
 
+    def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
+                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
+                      mag=False):
+        meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
+        lcdata = lcdata['OBS'].to_pandas()
+
+        t = lcdata.MJD.values
+        flux = lcdata.FLUXCAL.values
+        flux_err = lcdata.FLUXCALERR.values
+        filters = lcdata.FLT.values
+        peak_mjd = meta[peak_mjd_key]
+        z = meta['REDSHIFT_HELIO']
+        ebv_mw = meta['MWEBV']
+
+        samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
+                                     print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
+                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, RV=RV, mu_R=mu_R,
+                                     sigma_R=sigma_R, mag=mag)
+
+        return samples, sn_props
+
+    def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
+            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
+            sigma_R=False, mag=False):
+        if type(drop_bands) == str:
+            drop_bands = [drop_bands]
+        t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
+        if mag:  # Convert data from mag into FLUXCAL
+            flux = np.power(10, (27.5 - flux) / 2.5)
+            flux_err = (np.log(10) / 2.5) * flux * flux_err
+        if peak_mjd is not None:
+            t = (t - peak_mjd) / (1 + z)
+        flux = flux[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        flux_err = flux_err[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        filters = filters[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        filters = np.array([filt_map.get(filter, filter) for filter in filters])
+        t = t[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+
+        # Prepare filters
+        for f in np.unique(filters):
+            if f not in self.band_dict.keys():
+                raise ValueError(f'Filter "{filter}" not defined in BayeSN, either add a mapping to filt_map to ensure '
+                                 f'that your filter names match up with ones built-in or add some custom filters if '
+                                 f'you want to use your own')
+            if z > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or z < (
+                    self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
+                drop_bands.append(f)
+        for f in drop_bands:
+            inds = filters != f
+            flux = flux[inds]
+            flux_err = flux_err[inds]
+            filters = filters[inds]
+            t = t[inds]
+        band_indices = np.array([self.band_dict[filt_map.get(filter, filter)] for filter in filters])
+
+        n_data = len(t)
+        if n_data == 0:
+            raise ValueError('No data in rest-frame phase range covered by model, maybe you gave the wrong peak MJD?')
+        # Set up and populate data array
+        data = jnp.zeros((10, n_data, 1))
+        data = data.at[0, :, 0].set(t)
+        data = data.at[1, :, 0].set(flux)
+        data = data.at[2, :, 0].set(flux_err)
+        data = data.at[4, :, 0].set(band_indices)
+        data = data.at[5, :, 0].set(np.full_like(t, z))
+        data = data.at[7, :, 0].set(np.full_like(t, self.cosmo.distmod(z).value))
+        data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
+        data = data.at[9, :, 0].set(np.ones_like(t))
+
+        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
+
+        # Update dust parameters if specified manually
+        if RV:
+            self.RV = jnp.array(RV)
+            self.model_type = 'fixed_RV'
+        elif mu_R:
+            if not sigma_R:
+                raise ValueError('You have set a custom mu_R, please also set a custom sigma_R')
+            self.mu_R = jnp.array(mu_R)
+            self.sigma_R = jnp.array(sigma_R)
+            self.model_type = 'pop_RV'
+        if self.model_type == 'fixed_RV':
+            nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
+        elif self.model_type == 'pop_RV':
+            nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
+        mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
+        rng = PRNGKey(0)
+
+        theta_val = 0
+        if fix_theta:
+            theta_val = fix_theta
+            fix_theta = True
+        AV_val = 0
+        if fix_AV:
+            AV_val = fix_AV
+            fix_AV = True
+
+        mcmc.run(rng, data, band_weights, fix_tmax, fix_theta, theta_val, fix_AV, AV_val,
+                 extra_fields=('potential_energy',))
+        if print_summary:
+            mcmc.print_summary()
+        samples = mcmc.get_samples(group_by_chain=True)
+        if peak_mjd is not None:
+            samples['peak_MJD'] = peak_mjd + samples['tmax'] * (1 + z)
+        muhat = self.cosmo.distmod(z).value
+        muhat_err = 5
+        Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+        samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
+            np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+        samples['delM'] = samples['Ds'] - samples['mu']
+        if fix_tmax:
+            samples['tmax'] = jnp.zeros_like(samples['tmax'])
+        if fix_theta:
+            samples['theta'] = jnp.full_like(samples['theta'], theta_val)
+        if fix_AV:
+            samples['AV'] = jnp.full_like(samples['AV'], AV_val)
+
+        if file_prefix is not None:
+            summary = arviz.summary(samples)
+            summary.to_csv(f'{file_prefix}_fit_summary.csv')
+            with open(f'{file_prefix}_chains.pkl', 'wb') as file:
+                pickle.dump(samples, file)
+
+        sn_props = (z, ebv_mw)
+
+        return samples, sn_props
+
     def postprocess(self, samples, args):
         """
         Function to postprocess BayeSN output. Applies transformations to some parameters e.g. ensuring consistency for
@@ -2628,7 +2766,7 @@ class SEDmodel(object):
         return l_o, spectra, param_dict
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
-                             logM=None, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
+                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
                              output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
@@ -2676,6 +2814,10 @@ class SEDmodel(object):
             initialising SEDmodel will be used.
         logM: float or array-like, optional
             Currently unused, will be implemented when split models are included
+        tmax: float or array-like, optional
+            Time of maximum in rest-frame days, useful for plotting light curve fits with free tmax. Defaults to 0, i.e.
+            the simulated time of maximum will be at 0 days. If a float is passed, the same value will be used
+            for all objects.
         del_M: float or array-like, optional
             Grey offset del_M value to be used for each SN. If passing an array-like object, there must be a
             corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
@@ -2757,6 +2899,12 @@ class SEDmodel(object):
         elif ebv_mw.shape[0] != N:
             raise ValueError(
                 'For ebv_mw, either pass a single scalar value or an array of values for each of the N simulated objects')
+        tmax = np.array(tmax)
+        if len(tmax.shape) == 0:
+            tmax = tmax.repeat(N)
+        elif tmax.shape[0] != N:
+            raise ValueError('If not providing a scalar tmax value, array must be of same length as the number of '
+                             'objects to simulate, N')
         if RV is None:
             RV = self.RV
         RV = np.array(RV)
@@ -2809,6 +2957,7 @@ class SEDmodel(object):
         band_weights = self._calculate_band_weights(z, ebv_mw)
 
         t = jnp.repeat(t[..., None], N, axis=1)
+        t = t - tmax[None, :]
         hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t = t.flatten(order='F')
@@ -2936,7 +3085,7 @@ class SEDmodel(object):
         eps_full[:, 1:-1, :] = eps
         return eps_full
 
-    def get_flux_from_chains(self, t, bands, chain_path, zs, ebv_mws, mag=True, num_samples=None):
+    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None):
         """
         Returns model photometry for posterior samples from BayeSN fits, which can be used to make light curve fit
         plots.
@@ -2971,12 +3120,18 @@ class SEDmodel(object):
             containing photometry across all SNe, all posterior samples, all bands and at all phases requested.
 
         """
-        with open(chain_path, 'rb') as file:
-            chains = pickle.load(file)
+        if type(chains) == str:
+            with open(chains, 'rb') as file:
+                chains = pickle.load(file)
 
         N_sne = chains['theta'].shape[2]
         if num_samples is None:
             num_samples = chains['theta'].shape[0] * chains['theta'].shape[1]
+
+        if isinstance(zs, float):
+            zs = np.array([zs])
+        if isinstance(ebv_mws, float):
+            ebv_mws = np.array([ebv_mws])
 
         flux_grid = jnp.zeros((N_sne, num_samples, len(bands), len(t)))
 
@@ -2984,6 +3139,7 @@ class SEDmodel(object):
         for i in tqdm(np.arange(N_sne)):
             theta = chains['theta'][..., i].flatten(order='F')
             AV = chains['AV'][..., i].flatten(order='F')
+            tmax = chains['tmax'][..., i].flatten(order='F')
             if 'RV' in chains.keys():
                 RV = chains['RV'][..., i].flatten(order='F')
             else:
@@ -2999,7 +3155,7 @@ class SEDmodel(object):
             theta, AV, mu, eps, del_M = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
                                         eps[:num_samples, ...], del_M[:num_samples, ...]
 
-            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu,
+            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
                                                            ebv_mw=ebv_mws[i], yerr=0, mag=mag)
             lc = lc.T
