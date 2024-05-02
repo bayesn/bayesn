@@ -911,12 +911,15 @@ class SEDmodel(object):
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
             RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
             RV = numpyro.deterministic('Rv',
                                        self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
-            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
@@ -1809,7 +1812,8 @@ class SEDmodel(object):
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
-                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, mag=False):
+                      drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
+                      mag=False):
         meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
         lcdata = lcdata['OBS'].to_pandas()
 
@@ -1823,12 +1827,14 @@ class SEDmodel(object):
 
         samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
-                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, mag=mag)
+                                     fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, RV=RV, mu_R=mu_R,
+                                     sigma_R=sigma_R, mag=mag)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
-            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, mag=False):
+            file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
+            sigma_R=False, mag=False):
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
@@ -1876,8 +1882,22 @@ class SEDmodel(object):
 
         band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
 
-        nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
-                           max_tree_depth=10)
+        # Update dust parameters if specified manually
+        if RV:
+            self.RV = jnp.array(RV)
+            self.model_type = 'fixed_RV'
+        elif mu_R:
+            if not sigma_R:
+                raise ValueError('You have set a custom mu_R, please also set a custom sigma_R')
+            self.mu_R = jnp.array(mu_R)
+            self.sigma_R = jnp.array(sigma_R)
+            self.model_type = 'pop_RV'
+        if self.model_type == 'fixed_RV':
+            nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
+        elif self.model_type == 'pop_RV':
+            nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
         mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
         rng = PRNGKey(0)
 
