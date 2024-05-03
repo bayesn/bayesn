@@ -12,7 +12,8 @@ About
 ------------------------------------
 This is the documentation for BayeSN, the hierarchical Bayesian optical-NIR SED model for type Ia supernovae as outlined
 in Mandel+2022 (MNRAS 510, 3, 3939-3966). This implementation is introduced and briefly described in Grayling+2024
-(submitted to MNRAS), and is built on numpyro and jax to enable support for GPU acceleration.
+(`arXiv link <https://arxiv.org/abs/2401.08755>`_, accepted by MNRAS), and is built on numpyro and jax to enable support
+for GPU acceleration.
 
 The model can be used to constrain physical population-level parameters of the distribution of SNe Ia using hierarchical
 Bayesian inference, or alternatively to infer latent SN parameters including distance (suitable for use in cosmological
@@ -21,8 +22,8 @@ analyses) conditioned on fixed population-level parameters.
 Support
 ---------
 Our goal with BayeSN is for the package to be clear and easy to use. If you find something unclear, come across any bugs
-or think of any functionality that would add a lot of value for you, please raise a Github issue here: https://github.com/bayesn/bayesn/issues
-
+or think of any functionality that would add a lot of value for you, please raise a Github issue here:
+https://github.com/bayesn/bayesn/issues
 
 .. toctree::
    :maxdepth: 2
@@ -31,6 +32,7 @@ or think of any functionality that would add a lot of value for you, please rais
    intro
    installation
    running
+   fitting
    filters
    output
    plotting
@@ -49,8 +51,12 @@ Citing the code/model
 ========================================
 
 If you utilise the BayeSN model in any way, please cite Mandel+2022 (MNRAS 510, 3, 3939-3966), and if you make use of
-this code please cite Grayling+2024 (to be submitted). In addition, if you use any of the pre-trained models included
-within BayeSN please cite the corresponding papers which present those models:
+this code please cite Grayling+2024 (`arXiv link <https://arxiv.org/abs/2401.08755>`_, accepted by MNRAS). If you make
+use of variational inference to fit light curves, please cite Uzsoy+2024 (to be submitted) which developed and assessed
+this code.
+
+In addition, if you use any of the pre-trained models included within BayeSN please cite the corresponding papers which
+present those models:
 
 - M20 model: Mandel et al. 2022 (MNRAS 510, 3, 3939-3966)
 - T21 model: Thorp et al. 2021 (MNRAS 508, 3, 4310-4331)
