@@ -803,6 +803,19 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
+
+        Returns
+        -------
 
         """
         sample_size = obs.shape[-1]
@@ -903,6 +916,16 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
 
         """
         sample_size = obs.shape[-1]
@@ -1814,6 +1837,53 @@ class SEDmodel(object):
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
                       drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
                       mag=False):
+        """
+        Method to fit light curve contained in SNANA-format text file using BayeSN model
+
+        Parameters
+        ----------
+        path: str
+            Path to SNANA-format text file containing data to be fit
+        filt_map: dict, optional
+            Dictionary providing mapping between filter names in file and BayeSN filters. Defaults to empty dictionary
+        peak_mjd_key: str, optional
+            Key to be used for peak MJD in SNANA text file meta. Defaults to 'SEARCH_PEAKMJD'
+        print_summary: Boolean, optional
+            Specifies whether to print fit summary
+        file_prefix: str, optional
+            Prefix of name for output files containing summary table and MCMC samples. Default to None, in which case
+            output files will not be saved and only returned for use in script.
+        drop_bands: array-like, optional
+            List of bands to be ignored during fitting. Defaults to empty list
+        fix_tmax: Boolean, optional
+            If True, tmax will not be inferred and fiducial value in file meta will be fixed. Defaults to False.
+        fix_theta: float, optional
+            Value to fix theta at during fitting. Defaults to False, meaning that theta will be inferred during fitting
+            rather than fixed.
+        fix_AV: float, optional
+            Value to fix AV at during fitting. Defaults to False, meaning that AV will be inferred during fitting
+            rather than fixed.
+        RV: float, optional
+            Value to fix RV at during fitting. Defaults to False, meaning that default model RV treatment will be used.
+        mu_R: float, optional
+            Value of mean of RV distribution to be used during fitting. Defaults to False, meaning that default model
+            RV treatment will be used. If specified, sigma_R must also be specified.
+        sigma_R: float, optional
+            Value of standard deviation of RV distribution. Defaults to False, meaning that default model RV treatment
+            will be used.
+        mag: Boolean, optional
+            Specifies whether data is mag or flux. If True, data is assumed to be mag and is automatically converted to
+            flux before fitting.
+
+        Returns
+        -------
+
+        samples: dict
+            Dictionary containing parameter names as keys and MCMC samples as values
+        sn_props: tuple
+            Tuple containing SN redshift and MW E(B-V), which can be useful to have in memory when making plots
+
+        """
         meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
         lcdata = lcdata['OBS'].to_pandas()
 
@@ -1835,6 +1905,70 @@ class SEDmodel(object):
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
             sigma_R=False, mag=False):
+        """
+        Method to fit light curve data loaded into memory with BayeSN model
+
+        Parameters
+        ----------
+        t: array-like
+            Set of MJDs/rest-frame phases for light curve data to be fit. If you pass MJD and also a peak_mjd, values
+            will automatically be converted to rest-frame phases
+        flux: array-like
+            Set of fluxes/mags for light curve data to be fit. Despite the name, you can use mags and if mag=True data
+            will be automatically converted into flux for fitting.
+        flux_err: array-like
+            Set of flux/mag errors for light curve data to be fit. Despite the name, you can use mags and if mag=True
+            data will be automatically converted into flux for fitting.
+        filters: array-like
+            Set of filters that flux/flux_err are measurements for, telling BayeSN which filters to use when fitting
+            data. Must be of same length as flux/flux_err i.e. specify the filter for each data point individually
+        z: float
+            Heliocentric redshift of SN to be used when fitting
+        ebv_mw: float, optional
+            Milky Way E(B-V) value of SN. Defaults to 0.
+        peak_mjd: float or Boolean, optional
+            Fiducial value for maximum MJD of SN, used to convert phases to rest-frame. Note that this value only needs
+            to be rough as BayeSN will fit for the time of maximum. However, if you set fix_tmax=True then this will
+            be fixed as the time of maximum. Defaults to False, meaning that the code will assume phases are already
+            rest-frame rather than MJD and will not do any conversion
+        filt_map: dict, optional
+            Dictionary providing mapping between filter names in file and BayeSN filters. Defaults to empty dictionary
+        print_summary: Boolean, optional
+            Specifies whether to print fit summary
+        file_prefix: str, optional
+            Prefix of name for output files containing summary table and MCMC samples. Default to None, in which case
+            output files will not be saved and only returned for use in script.
+        drop_bands: array-like, optional
+            List of bands to be ignored during fitting. Defaults to empty list
+        fix_tmax: Boolean, optional
+            If True, tmax will not be inferred and fiducial value in file meta will be fixed. Defaults to False.
+        fix_theta: float, optional
+            Value to fix theta at during fitting. Defaults to False, meaning that theta will be inferred during fitting
+            rather than fixed.
+        fix_AV: float, optional
+            Value to fix AV at during fitting. Defaults to False, meaning that AV will be inferred during fitting
+            rather than fixed.
+        RV: float, optional
+            Value to fix RV at during fitting. Defaults to False, meaning that default model RV treatment will be used.
+        mu_R: float, optional
+            Value of mean of RV distribution to be used during fitting. Defaults to False, meaning that default model
+            RV treatment will be used. If specified, sigma_R must also be specified.
+        sigma_R: float, optional
+            Value of standard deviation of RV distribution. Defaults to False, meaning that default model RV treatment
+            will be used.
+        mag: Boolean, optional
+            Specifies whether data is mag or flux. If True, data is assumed to be mag and is automatically converted to
+            flux before fitting.
+
+        Returns
+        -------
+
+        samples: dict
+            Dictionary containing parameter names as keys and MCMC samples as values
+        sn_props: tuple
+            Tuple containing SN redshift and MW E(B-V), which can be useful to have in memory when making plots
+
+        """
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)

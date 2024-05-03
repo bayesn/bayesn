@@ -1,3 +1,5 @@
+.. _plotting:
+
 Plotting BayeSN light curves and spectra
 ==========================================
 
@@ -10,7 +12,8 @@ Plotting light curve fits from posterior samples
 
 You can use the ``get_flux_from_chains`` method of the ``bayesn.bayesn_model.SEDmodel`` class to get model fit
 photometry from a set of samples inferred when fitting with BayeSN. An example of doing so to get model magnitudes
-is given below:
+is given below, and also in the notebook `example_fits.ipynb` included on the Github repo for BayeSN
+`here <https://github.com/bayesn/bayesn>`_:
 
 .. code-block:: python
 
@@ -18,7 +21,7 @@ is given below:
     from bayesn.bayesn_model import SEDmodel
 
     # Get photometry for T21 model
-    model = SEDmodel(load_model='T21_model', filter_yaml='PATH/TO/filters.yaml')
+    model = SEDmodel(load_model='T21_model')
 
     t = np.arange(-10, 40, 1) # Define rest-frame phases to calculate model photometry at
     bands = ['g_PS1', 'r_PS1', 'i_PS1', 'z_PS1'] # PS1 griz bands, for example
@@ -29,7 +32,9 @@ is given below:
     phot_grid = model.get_flux_from_chains(t, bands, 'PATH/TO/chains.pkl', z, ebv_mw, mag=True)
 
 The output ``phot_grid`` contains model photometry at each phase requested, for each band requested and for all
-posterior samples for all SNe in the sample.
+posterior samples for all SNe in the sample. For the third argument, which specifies the MCMC chains, you can either
+pass the chains themselves if they are already loaded into memory, or you can pass a path to the pickle file in which
+they are saved and they will be opened automatically.
 
 Flux grid is a multidimensional array with shape (number of SNe, number of posterior samples, number of bands,
 number of phases). Let's say, for example, that you had a set of posterior chains from light

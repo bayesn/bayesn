@@ -1,7 +1,12 @@
 .. _running_bayesn:
 
-Running BayeSN Jobs
+Running large BayeSN Jobs
 ==========================================
+
+BayeSN can be interacted with in two ways. The first is designed to be run from the command line, with a yaml file
+that configures what the user wants to do; this approach is designed for application to large data samples utilising
+GPUs. However, if you want to fit/analyse a small sample within a Jupyter notebook/custom Python script you can also do
+that as described in :ref:`fitting`.
 
 BayeSN jobs are run just by running the script ``run_bayesn`` (after installation, this script can be called from any
 directory), with the specific job defined by an input yaml file which allow you to specify e.g. whether you want to run
@@ -31,6 +36,7 @@ The keys which can be specified are described below. Depending on whether you ar
 - ``num_samples``: The number of posterior samples to take. Again, typically in development 500 was used when training and 250 when fitting, but you may want to experiment with this to achieve sufficient convergence.
 - ``num_chains``: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.
 - ``filters``: Path to a yaml file describing the filters you want to use, if you require custom filters. For more details, please see :ref:`filters`.
+- ``fit_method``: The inference method to use for light curve fitting, only used if fitting. Options are 'mcmc', for doing HMC using the NUTS algorithm, or 'vi' for using variational inference as presented in Uzsoy+2024, defaults to 'mcmc'. Variational inference makes an approximation to the shape of the posterior but is faster than MCMC, ideal for fitting large samples.
 - ``chain_method``: The method to use for running multiple chains in numpyro. If 'sequential', chains will be run one-after-the-other until all are complete. If 'parallel', the chains will be run in parallel over multiple devices - with 4 chains and a node with 4 GPUs, the chains will be run simultaneously in parallel. If 'vectorized', chains will be run in parallel on a single device which may or may not be quicker than running them sequentially depending on the device you are using, and may result in memory issues unless you are using a large GPU.
 - ``initialisation``: The strategy used to initialise the HMC chains. Must be one of:
 
@@ -46,7 +52,7 @@ The keys which can be specified are described below. Depending on whether you ar
 - ``private_data_path``: If you are using NERSC Perlmutter and wish to use a directory located in a private location, add a path to the location where your directory sits and it will be added to the default list of locations ``version_photometry`` searches for.
 - ``drop_bands``: A list of bands which are present in the data files that you are using which you do not wish to include in the analysis, optional.
 
-There are a few extra keys present in the code not yet documented here. These are all specific for SNANA implementation and will be documented as SNANA integration is completed.
+There are a few extra keys present in the code not yet documented here, which are specific for usage within SNANA.
 
 You can see an example of input.yaml files for training and fitting below.
 
@@ -77,7 +83,9 @@ This example demonstrates the input.yaml that could be used to train the BayeSN 
 Fitting example
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-This example demonstrates the input.yaml that could be used to fit some SNANA simulations using a custom BayeSN model defined in a bayesn.yaml file, with custom filters defined in a filters.yaml file.
+This example demonstrates the input.yaml that could be used to fit some SNANA simulations using a custom BayeSN model
+defined in a bayesn.yaml file, with custom filters defined in a filters.yaml file and using variational inference
+for the fitting.
 
 .. code-block:: yaml
 
@@ -88,6 +96,7 @@ This example demonstrates the input.yaml that could be used to fit some SNANA si
     num_samples: 250
     filters: /PATH/TO/custom_filters.yaml
     chain_method: parallel
+    fit_method: vi
     initialisation: median
     version_photometry: NAME_OF_SNANA_SIMULATION
     outputdir: /PATH/TO/OUTPUT/DIR
