@@ -103,7 +103,7 @@ filters:
   H_WFCAM:
     magsys: vega
     magzero: 0.0
-    path: filters/UKIRT/WFCAM/H_total_throughput.dat
+    path: filters/UKIRT/WFCAM/H_total.dat
   I:
     magsys: vega
     magzero: 0.0
@@ -139,7 +139,7 @@ filters:
   J_WFCAM:
     magsys: vega
     magzero: 0.0
-    path: filters/UKIRT/WFCAM/J_total_throughput.dat
+    path: filters/UKIRT/WFCAM/J_total.dat
   K:
     magsys: vega
     magzero: 0.0
@@ -159,7 +159,7 @@ filters:
   K_WFCAM:
     magsys: vega
     magzero: 0.0
-    path: filters/UKIRT/WFCAM/K_total_throughput.dat
+    path: filters/UKIRT/WFCAM/K_total.dat
   R:
     magsys: vega
     magzero: 0.0
@@ -231,7 +231,7 @@ filters:
   Y_WFCAM:
     magsys: vega
     magzero: 0.0
-    path: filters/UKIRT/WFCAM/Y_total_throughput.dat
+    path: filters/UKIRT/WFCAM/Y_total.dat
   g_CSP:
     magsys: bd17
     magzero: 9.644
@@ -375,4 +375,4 @@ filters:
   z_WFCAM:
     magsys: vega
     magzero: 0.0
-    path: filters/UKIRT/WFCAM/z_total_throughput.dat
+    path: filters/UKIRT/WFCAM/z_total.dat
