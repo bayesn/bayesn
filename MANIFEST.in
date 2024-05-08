@@ -24,6 +24,8 @@ include bayesn/bayesn-filters/filters/Swift/UVOT/*
 include bayesn/bayesn-filters/filters/USNO/*
 include bayesn/bayesn-filters/filters/USNO/USNO40/*
 include bayesn/bayesn-filters/filters/ZTF/*
+include bayesn/bayesn-filters/filters/ATLAS/ATLAS/*
+include bayesn/bayesn-filters/filters/UKIRT/WFCAM/*
 include bayesn/bayesn-filters/standards/*
 include bayesn/model_files/M20_model/BAYESN.INFO
 include bayesn/model_files/M20_model/BAYESN.YAML
@@ -32,4 +34,3 @@ include bayesn/model_files/T21_model/BAYESN.YAML
 include bayesn/model_files/W22_model/BAYESN.INFO
 include bayesn/model_files/W22_model/BAYESN.YAML
 include bayesn/model_files/README.md
-
