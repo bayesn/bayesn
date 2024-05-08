@@ -100,6 +100,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Dupont/H_DUP_TAM_scan_atm.dat
+  H_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/H_total.dat
   I:
     magsys: vega
     magzero: 0.0
@@ -132,6 +136,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Dupont/J_DUP_TAM_scan_atm.dat
+  J_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/J_total.dat
   K:
     magsys: vega
     magzero: 0.0
@@ -148,6 +156,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Dupont/K_DUP_TAM_scan_atm.dat
+  K_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/K_total.dat
   R:
     magsys: vega
     magzero: 0.0
@@ -216,6 +228,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Dupont/Y_DUP_TAM_scan_atm.dat
+  Y_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/Y_total.dat
   g_CSP:
     magsys: bd17
     magzero: 9.644
@@ -276,6 +292,14 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/ZTF/p48r.txt
+  c_ATLAS:
+    magsys: ab
+    magzero: 0.0
+    path: filters/ATLAS/ATLAS/c_total.dat
+  o_ATLAS:
+    magsys: ab
+    magzero: 0.0
+    path: filters/ATLAS/ATLAS/o_total.dat
   r_CSP:
     magsys: bd17
     magzero: 9.352
@@ -348,3 +372,7 @@ filters:
     magsys: bd17
     magzero: 9.23
     path: filters/USNO/USNO40/usno_z.res
+  z_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/z_total.dat

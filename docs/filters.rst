@@ -100,6 +100,21 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Names: `Y_AND`, `J_AND`, `H_AND`, `K_AND`
         - Source:
 
+- UKIRT
+
+    - WFCAM *zYJHK* filters
+
+        - Names: `z_WFCAM`, `Y_WFCAM`, `J_WFCAM`, `H_WFCAM`, `K_WFCAM`
+        - Source: Hewett+06, 2009MNRAS.394..675H
+
+- ATLAS
+
+    - ATLAS *co* filters
+
+        - Names: `c_ATLAS`, `o_ATLAS`
+        - Source: Tonry+18, 2018PASP..130f4505T
+
+
 Specifying custom filters
 ---------------------------
 
