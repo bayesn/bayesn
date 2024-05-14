@@ -2190,8 +2190,8 @@ class SEDmodel(object):
                 rhat = summary.r_hat.values
                 sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
 
-                self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
-                self.fitres_table['MUERR'] = samples['mu'].std(axis=(0, 1))
+                self.fitres_table['MU_LCFIT'] = samples['mu'].mean(axis=(0, 1))
+                self.fitres_table['MUERR_LCFIT'] = samples['mu'].std(axis=(0, 1))
                 self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
                 self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
                 self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
@@ -2201,8 +2201,13 @@ class SEDmodel(object):
                 self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
                 self.fitres_table.round(4)
 
-                drop_count = pd.isna(self.fitres_table['MU']).sum()
-                self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU'])]
+                drop_count = pd.isna(self.fitres_table['MU_LCFIT']).sum()
+                self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU_LCFIT'])]
+
+                # Reorder to put SIM columns last
+                new_cols = [col for col in self.fitres_table.columns if 'SIM' not in col] + \
+                           [col for col in self.fitres_table.columns if 'SIM' in col]
+                self.fitres_table = self.fitres_table[new_cols]
 
                 sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana", metachar="")
 
