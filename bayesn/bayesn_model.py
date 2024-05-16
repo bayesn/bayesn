@@ -1618,7 +1618,6 @@ class SEDmodel(object):
             args['snana'] = False
         args['jobid'] = args['jobsplit'][0]
         args['njobtot'] = args['jobsplit'][1] * args['sim_prescale']
-        args['jobid'] = args['jobsplit'][0]
 
         if not (args['mode'] == 'fitting' and args['snana']):
             try:
@@ -2328,7 +2327,7 @@ class SEDmodel(object):
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in sne_file[0].meta.keys()
                 if not self.sim:
-                    args['njobtot'] = args['jobsplit'][0]
+                    args['njobtot'] = args['jobsplit'][1]
                 for sn_file in tqdm(sn_list):
                     head_file = os.path.join(data_dir, f'{sn_file}')
                     if not os.path.exists(head_file):
@@ -2346,7 +2345,7 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        peak_mjd = meta['PEAKMJD']
+                        peak_mjd = meta['SIM_PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
@@ -2392,7 +2391,7 @@ class SEDmodel(object):
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
                              'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
-                        lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
+                        lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             continue
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
@@ -2451,7 +2450,7 @@ class SEDmodel(object):
                 self.sim = 'SIM_REDSHIFT_HELIO' in meta.keys()
                 # If real data, ignore sim_prescale
                 if not self.sim:
-                    args['njobtot'] = args['jobsplit'][0]
+                    args['njobtot'] = args['jobsplit'][1]
                 for sn_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
                     if (sn_ind + 1 - args['jobid']) % args['njobtot'] != 0:
                         continue
@@ -2509,6 +2508,8 @@ class SEDmodel(object):
                          'dist_mod', 'MWEBV', 'mask']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
+                        continue
                     sne.append(sn_name)
                     peak_mjds.append(peak_mjd)
                     t_ranges.append((lc['t'].min(), lc['t'].max()))
