@@ -2345,7 +2345,7 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        peak_mjd = meta['PEAKMJD']
+                        peak_mjd = meta['SIM_PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
@@ -2456,7 +2456,7 @@ class SEDmodel(object):
                         continue
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_file), default_tablename='OBS')
                     data = lcdata['OBS'].to_pandas()
-                    peak_mjd = meta['PEAKMJD']
+                    peak_mjd = meta['SIM_PEAKMJD']
                     sn_name = meta['SNID']
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
