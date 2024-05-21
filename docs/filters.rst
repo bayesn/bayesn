@@ -79,7 +79,7 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
     - SWIFT UVOT *UBV* and *UVW1/UVW2/UVM2* filters
 
-        - Names: `U_SWIFT`, `B_SWIFT`, `R_SWIFT`, `UVW1`, `UVW2`, `UVM2`
+        - Names: `U_SWIFT`, `B_SWIFT`, `V_SWIFT`, `UVW1`, `UVW2`, `UVM2`
         - Source: Poole+08, 2008MNRAS.383..627P
 - USNO
 
