@@ -232,6 +232,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/UKIRT/WFCAM/Y_total.dat
+  g_SDSS:
+    magsys: ab
+    magzero: 0
+    path: filters/APO/SDSS/SDSS_g.dat
   g_CSP:
     magsys: bd17
     magzero: 9.644
@@ -257,6 +261,10 @@ filters:
     magsys: bd17
     magzero: 9.64
     path: filters/USNO/USNO40/usno_g.res
+  i_SDSS:
+    magsys: ab
+    magzero: 0
+    path: filters/APO/SDSS/SDSS_i.dat
   i_CSP:
     magsys: bd17
     magzero: 9.25
@@ -282,6 +290,10 @@ filters:
     magsys: bd17
     magzero: 9.25
     path: filters/USNO/USNO40/usno_i.res
+  open_PS1:
+    magsys: ab
+    magzero: 0.0
+    path: filters/PS1/open_filt_tonry.txt
   p48g:
     magsys: ab
     magzero: 0.0
@@ -302,6 +314,10 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/ATLAS/ATLAS/o_total.dat
+  r_SDSS:
+    magsys: ab
+    magzero: 0
+    path: filters/APO/SDSS/SDSS_r.dat
   r_CSP:
     magsys: bd17
     magzero: 9.352
@@ -327,6 +343,10 @@ filters:
     magsys: bd17
     magzero: 9.35
     path: filters/USNO/USNO40/usno_r.res
+  u_SDSS:
+    magsys: ab
+    magzero: 0
+    path: filters/APO/SDSS/SDSS_u.dat
   u_CSP:
     magsys: bd17
     magzero: 10.518
@@ -348,6 +368,10 @@ filters:
     magsys: bd17
     magzero: 10.56
     path: filters/USNO/USNO40/usno_u.res
+  w_PS1:
+    magsys: ab
+    magzero: 0.0
+    path: filters/PS1/w_filt_tonry.txt
   y_DES:
     magsys: ab
     magzero: 0.0
@@ -361,6 +385,10 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/y_filt_tonry.txt
+  z_SDSS:
+    magsys: ab
+    magzero: 0
+    path: filters/APO/SDSS/SDSS_z.dat
   z_DES:
     magsys: ab
     magzero: 0.0

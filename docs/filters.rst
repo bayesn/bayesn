@@ -28,6 +28,12 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
         - Names: `Y_P`, `J_P`, `H_P`, `K_P`
         - Source: 1998AJ....116.2475P
+- SDSS
+
+    - 2.5m Sloan Digital Sky Survey *ugriz* filters at airmass 1.3
+
+        - Names: `u_SDSS`, `g_SDSS`, `r_SDSS`, `i_SDSS`, `z_SDSS`
+        - Source: Doi+2010, 2010AJ....139.1628D
 - CSP
 
     - Carnegie Supernova Project *BVgri* Swope filters
@@ -71,9 +77,9 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Source: https://github.com/lsst/throughputs
 - PS1
 
-    - PanSTARRS 1 *griz* filters
+    - PanSTARRS 1 *grizyw* and open filters
 
-        - Names: `g_PS1`, `r_PS1`, `i_PS1`, `z_PS1`
+        - Names: `g_PS1`, `r_PS1`, `i_PS1`, `z_PS1`, `y_PS1`, `w_PS1`, `open_PS1`
         - Source: Tonry+12, 2012ApJ...750...99T
 - SWIFT UVOT
 

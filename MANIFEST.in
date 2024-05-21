@@ -18,6 +18,7 @@ include bayesn/bayesn-filters/filters/standard/*
 include bayesn/bayesn-filters/filters/standard/2MASS_PAIRITEL/*
 include bayesn/bayesn-filters/filters/standard/Persson/*
 include bayesn/bayesn-filters/filters/standard/stritzinger/*
+include bayesn/bayesn-filters/filters/APO/SDSS/*
 include bayesn/bayesn-filters/filters/Swift/*
 include bayesn/bayesn-filters/filters/Swift/UVOT/*
 include bayesn/bayesn-filters/filters/USNO/*
