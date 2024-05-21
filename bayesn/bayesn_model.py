@@ -1987,7 +1987,7 @@ class SEDmodel(object):
         # Prepare filters
         for f in np.unique(filters):
             if f not in self.band_dict.keys():
-                raise ValueError(f'Filter "{filter}" not defined in BayeSN, either add a mapping to filt_map to ensure '
+                raise ValueError(f'Filter "{f}" not defined in BayeSN, either add a mapping to filt_map to ensure '
                                  f'that your filter names match up with ones built-in or add some custom filters if '
                                  f'you want to use your own')
             if z > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or z < (
