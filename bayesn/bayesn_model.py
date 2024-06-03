@@ -1610,6 +1610,8 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['zlim'] = args.get('zlim', 99.)
+        args['sim_peakmjd'] = args.get('sim_peakmjd', False)
         args['jobsplit'] = args.get('jobsplit')
         if args['jobsplit'] is not None:
             args['snana'] = True
@@ -2317,18 +2319,23 @@ class SEDmodel(object):
             sim_AVs, sim_RVs = [], [], [], [], [], [], [], [], [], []
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
-            print('Reading light curves...')
             if file_format.lower() == 'fits':  # If FITS format
                 ntot = 0
                 head_file = os.path.join(data_dir, f'{sn_list[0]}')
                 if not os.path.exists(head_file):
                     head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')  # Look for .fits.gz if .fits not found
                 phot_file = head_file.replace("HEAD", "PHOT")
+                print(phot_file, head_file)
                 sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in sne_file[0].meta.keys()
                 if not self.sim:
                     args['njobtot'] = args['jobsplit'][0]
+                self.sim = 'SIM_THETA' in sne_file[0].meta.keys()
+                if self.sim and args['sim_peakmjd']:
+                    mjd_key = 'SIM_PEAKMJD'
+                else:
+                    mjd_key = 'PEAKMJD'
                 for sn_file in tqdm(sn_list):
                     head_file = os.path.join(data_dir, f'{sn_file}')
                     if not os.path.exists(head_file):
@@ -2346,9 +2353,11 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        peak_mjd = meta['PEAKMJD']
+                        peak_mjd = meta[mjd_key]
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
+                        if zhel > args['zlim']:
+                            continue
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
                         vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
@@ -2462,6 +2471,8 @@ class SEDmodel(object):
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
                     zhel = meta['REDSHIFT_HELIO']
+                    if zhel > args['zlim']:
+                        continue
                     zcmb = meta['REDSHIFT_FINAL']
                     zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                     zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
