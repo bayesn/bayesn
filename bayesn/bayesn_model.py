@@ -2438,11 +2438,11 @@ class SEDmodel(object):
                 self.sim = 'SIM_REDSHIFT_HELIO' in sne_file[0].meta.keys()
                 if not self.sim:
                     args['njobtot'] = args['jobsplit'][0]
-                self.sim = 'SIM_THETA' in sne_file[0].meta.keys()
                 if self.sim and args['sim_peakmjd']:
                     mjd_key = 'SIM_PEAKMJD'
                 else:
                     mjd_key = 'PEAKMJD'
+                self.sim = 'SIM_THETA' in sne_file[0].meta.keys()  # Now check if this is a BayeSN sim
                 for sn_file in tqdm(sn_list):
                     head_file = os.path.join(data_dir, f'{sn_file}')
                     if not os.path.exists(head_file):
