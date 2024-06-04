@@ -2048,7 +2048,10 @@ class SEDmodel(object):
                         data['FLUXCALERR'] = np.clip(data['FLUXCALERR'], np.abs(data['FLUXCAL']) * 0.02, None)
                         #
                         mjd_range = (data.MJD.min(), data.MJD.max())
-                        peak_mjd = meta['BAYESNMJD']
+                        if meta['BAYESNMJD'] < 0:
+                            peak_mjd = meta['SALTMJD']
+                        else:
+                            peak_mjd = meta['BAYESNMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         sn_name = meta['SNID'].decode('utf-8')
