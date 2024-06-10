@@ -248,7 +248,7 @@ class SEDmodel(object):
             self.mu_R = jnp.array(params['MUR'])
             self.sigma_R = jnp.array(params['SIGMAR'])
 
-        self.trunc_val = 1.2
+        self.trunc_val = 0.5  # 1.2
 
         self.used_band_inds = None
         self._setup_band_weights()
@@ -1055,7 +1055,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
 
         RV = numpyro.sample('RV', dist.Uniform(1, 5))
 
@@ -1166,7 +1166,7 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
-    def train_model_popRV(self, obs, weights):
+    def train_model_popRV_noeps(self, obs, weights):
         """
         Numpyro model used for training to learn global parameters with a truncated Gaussian RV distribution
 
@@ -1189,7 +1189,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
 
         mu_R = numpyro.sample('mu_R', dist.Uniform(1, 5))
         sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
@@ -1269,10 +1269,10 @@ class SEDmodel(object):
         tauA_LM = numpyro.deterministic('tauA_LM', jnp.tan(tauA_LM_tform))
 
         sigma0_HM_tform = numpyro.sample('sigma0_HM_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0_HM = numpyro.deterministic('sigma0_HM', 0.1 * jnp.tan(sigma0_HM_tform))
+        sigma0_HM = numpyro.deterministic('sigma0_HM', 0 * 0.1 * jnp.tan(sigma0_HM_tform))
 
         sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0_LM = numpyro.deterministic('sigma0_LM', 0.1 * jnp.tan(sigma0_LM_tform))
+        sigma0_LM = numpyro.deterministic('sigma0_LM', 0 * 0.1 * jnp.tan(sigma0_LM_tform))
 
         mass = obs[-7, 0, :]
         M_split = 10
@@ -1846,7 +1846,7 @@ class SEDmodel(object):
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'training_poprv_noeps':
-            nuts_kernel = NUTS(self.train_model_popRV, adapt_step_size=True, target_accept_prob=0.8,
+            nuts_kernel = NUTS(self.train_model_popRV_noeps, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
