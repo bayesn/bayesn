@@ -1166,6 +1166,62 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
+    def train_model_popRV(self, obs, weights):
+        """
+        Numpyro model used for training to learn global parameters with a truncated Gaussian RV distribution
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band weights based on filter responses and MW extinction curves for numerical flux integrals
+
+        """
+        sample_size = self.data.shape[-1]
+        N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        W_mu = jnp.zeros(N_knots)
+        W0 = numpyro.sample('W0', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+
+        # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
+        sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+
+        mu_R = numpyro.sample('mu_R', dist.Uniform(1, 5))
+        sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
+        phi_alpha_R = norm.cdf((self.trunc_val - mu_R) / sigma_R)
+
+        # tauA = numpyro.sample('tauA', dist.HalfCauchy())
+        tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
+        tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
+            RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+            RV = numpyro.deterministic('Rv_LM', mu_R + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+
+            eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            redshift = obs[-5, 0, sn_index]
+            redshift_error = obs[-4, 0, sn_index]
+            muhat = obs[-3, 0, sn_index]
+
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
+                jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+                                      weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+
     def train_model_mass_split(self, obs, weights):
         """
         Numpyro model used for training to learn global parameters
@@ -1789,6 +1845,11 @@ class SEDmodel(object):
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
+        elif args['mode'].lower() == 'training_poprv_noeps':
+            nuts_kernel = NUTS(self.train_model_popRV, adapt_step_size=True, target_accept_prob=0.8,
+                               init_strategy=init_strategy,
+                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
+                               step_size=0.1)
         elif args['mode'].lower() == 'dust':
             nuts_kernel = NUTS(self.dust_model, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
@@ -1823,7 +1884,7 @@ class SEDmodel(object):
                                    max_tree_depth=10)
         else:
             raise ValueError("Invalid mode, must select one of 'training_globalRV', 'training_popRV', 'fitting',"
-                             "'dust', 'dust_split_mag', 'dust_split_sed' or 'dust_redshift'")
+                             "'dust', 'dust_split_mag', 'dust_split_sed', 'training_mass_split' or 'dust_redshift'")
 
         # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
@@ -2201,7 +2262,7 @@ class SEDmodel(object):
         -------
 
         """
-        if 'W0' in samples.keys():  # If training
+        if 'W0' in samples.keys() and 'sigmaepsilon' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
             # Sign flipping-----------------
