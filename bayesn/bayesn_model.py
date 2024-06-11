@@ -248,7 +248,7 @@ class SEDmodel(object):
             self.mu_R = jnp.array(params['MUR'])
             self.sigma_R = jnp.array(params['SIGMAR'])
 
-        self.trunc_val = 0.2  # 1.2
+        self.trunc_val = 0.5  # 1.2
 
         self.used_band_inds = None
         self._setup_band_weights()
@@ -1124,7 +1124,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
 
         mu_R = numpyro.sample('mu_R', dist.Uniform(1, 5))
         sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
@@ -1701,11 +1701,11 @@ class SEDmodel(object):
         param_init['W0'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
         param_init['W1'] = jnp.array(W1_init + np.random.normal(0, 0.01, W1_init.shape[0]))
         if 'poprv' in args['mode'].lower():
-            param_init['mu_R'] = jnp.array(3.)
-            param_init['sigma_R'] = jnp.array(0.5)
+            param_init['mu_R'] = jnp.array(2.8)
+            param_init['sigma_R'] = jnp.array(0.6)
             param_init['RV_tform'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
         else:
-            param_init['RV'] = jnp.array(3.)
+            param_init['RV'] = jnp.array(2.8)
         param_init['tauA_tform'] = jnp.arctan(tauA_ / 1.)
         param_init['sigma0_tform'] = jnp.arctan(sigma0_ / 0.1)
         param_init['sigma0'] = jnp.array(sigma0_)
