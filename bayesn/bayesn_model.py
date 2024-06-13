@@ -196,7 +196,7 @@ class SEDmodel(object):
     """
 
     def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
-                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
+                 fiducial_cosmology={"H0": 73.24, "Om0": 0.311}):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
         self.start_time = time.time()
@@ -212,7 +212,7 @@ class SEDmodel(object):
         self.data = None
         self.hsiao_interp = None
         self.RV_MW = device_put(jnp.array(3.1))
-        self.sigma_pec = device_put(jnp.array(150 / 3e5))
+        self.sigma_pec = device_put(jnp.array(0 * 150 / 3e5))
         self.sn_list = None
         self.filter_yaml = filter_yaml
         built_in_models = next(os.walk(os.path.join(self.__root_dir__, 'model_files')))[1]
