@@ -2020,10 +2020,10 @@ class SEDmodel(object):
                         sn_name = meta['SNID'].decode('utf-8')
                         if sn_name in drop_list:
                             continue
-                        if meta['PIA'] < 0.5:
-                            continue
-                        if zcmb > 0.4:
-                            continue
+                        # if meta['PIA'] < 0.5:
+                        #     continue
+                        # if zcmb > 0.4:
+                        #     continue
                         # if n_inc > 500:
                         #     continue
                         # print(sn_ind + 1, len(sne_file), ntot, n_inc)
@@ -2077,7 +2077,7 @@ class SEDmodel(object):
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                         final_shape = lc.shape
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
-                            print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
+                            # print(init_shape, post_filt_shape, nan_shape, final_shape, peak_mjd, meta['PEAKMJD'], phase_range, mjd_range)
                             continue
                         sn_name = meta['SNID'].decode('utf-8')
                         # if sn_name in SALT_drop_list:
