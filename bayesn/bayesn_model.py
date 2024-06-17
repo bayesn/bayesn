@@ -1841,7 +1841,7 @@ class SEDmodel(object):
             samples['theta'] = samples['theta'] / theta_std[..., None]
             samples['W1'] = samples['W1'] * theta_std[..., None]
 
-            if 'W0_HM' not in samples.keys():
+            if 'W0_HM' not in samples.keys() and 'M_step' not in samples.keys():
                 # Save best fit global params to files for easy inspection and reading in------
                 W0 = np.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
                                                                  order='F')
