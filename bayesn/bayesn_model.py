@@ -1765,7 +1765,7 @@ class SEDmodel(object):
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'training_mass_step':
-            nuts_kernel = NUTS(self.train_model_mass_split, adapt_step_size=True, target_accept_prob=0.8,
+            nuts_kernel = NUTS(self.train_model_mass_step, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
