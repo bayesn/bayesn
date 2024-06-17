@@ -1836,39 +1836,39 @@ class SEDmodel(object):
             # raise ValueError('Nope')
 
             # Create FITRES file
-            if args['snana']:
-                # fetch snana version that includes tag + commit;
-                # e.g., v11_05-4-gd033611.
-                # Use same git command as in Makefile for C code
-                SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
-                if SNANA_DIR != 'NULL':
-                    cmd = f'cd {SNANA_DIR}; git describe --always --tags'
-                    ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
-                    snana_version = ret.stdout.replace('\n', '')
-                else:
-                    snana_version = 'NULL'
-                self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
-                                          '# VERSION_PHOTOMETRY:': args['version_photometry'],
-                                          '# TABLE NAME:': 'FITRES\n#'}
+            # if args['snana']:
+            # fetch snana version that includes tag + commit;
+            # e.g., v11_05-4-gd033611.
+            # Use same git command as in Makefile for C code
+            SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
+            if SNANA_DIR != 'NULL':
+                cmd = f'cd {SNANA_DIR}; git describe --always --tags'
+                ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
+                snana_version = ret.stdout.replace('\n', '')
+            else:
+                snana_version = 'NULL'
+            self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
+                                      '# VERSION_PHOTOMETRY:': args['version_photometry'],
+                                      '# TABLE NAME:': 'FITRES\n#'}
 
-                n_sn = samples['mu'].shape[-1]
-                summary = arviz.summary(samples)
-                summary = summary[~summary.index.str.contains('tform')]
-                rhat = summary.r_hat.values
-                sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
+            n_sn = samples['mu'].shape[-1]
+            summary = arviz.summary(samples)
+            summary = summary[~summary.index.str.contains('tform')]
+            rhat = summary.r_hat.values
+            sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
 
-                self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
-                self.fitres_table['MU_ERR'] = samples['mu'].std(axis=(0, 1))
-                self.fitres_table['THETA_1'] = samples['theta'].mean(axis=(0, 1))
-                self.fitres_table['THETA_1_ERR'] = samples['theta'].std(axis=(0, 1))
-                self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
-                self.fitres_table['AV_ERR'] = samples['AV'].std(axis=(0, 1))
-                self.fitres_table['MEAN_RHAT'] = sn_rhat.mean(axis=1)
-                self.fitres_table['MAX_RHAT'] = sn_rhat.max(axis=1)
-                self.fitres_table.round(3)
+            self.fitres_table['MU'] = samples['mu'].mean(axis=(0, 1))
+            self.fitres_table['MU_ERR'] = samples['mu'].std(axis=(0, 1))
+            self.fitres_table['THETA_1'] = samples['theta'].mean(axis=(0, 1))
+            self.fitres_table['THETA_1_ERR'] = samples['theta'].std(axis=(0, 1))
+            self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
+            self.fitres_table['AV_ERR'] = samples['AV'].std(axis=(0, 1))
+            self.fitres_table['MEAN_RHAT'] = sn_rhat.mean(axis=1)
+            self.fitres_table['MAX_RHAT'] = sn_rhat.max(axis=1)
+            self.fitres_table.round(3)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana",
-                                 metachar="")
+            sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana",
+                             metachar="")
 
         if args['snana']:
             self.end_time = time.time()
