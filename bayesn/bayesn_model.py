@@ -1686,7 +1686,7 @@ class SEDmodel(object):
         W1_init = W1_init.flatten(order='F')
 
         n_eps = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
-        sigma0_init = 0.1
+        sigma0_init = 0.01
         sigmaepsilon_init = 0.1 * np.ones(n_eps)
         L_Omega_init = np.eye(n_eps)
 
@@ -1697,7 +1697,7 @@ class SEDmodel(object):
         tauA_ = tauA_init + np.random.normal(0, 0.01)
         while tauA_ < 0:
             tauA_ = tauA_init + np.random.normal(0, 0.01)
-        sigma0_ = sigma0_init + np.random.normal(0, 0.01)
+        sigma0_ = sigma0_init
         param_init['W0'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
         param_init['W1'] = jnp.array(W1_init + np.random.normal(0, 0.01, W1_init.shape[0]))
         if 'poprv' in args['mode'].lower():
