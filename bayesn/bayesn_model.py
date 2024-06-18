@@ -1686,7 +1686,7 @@ class SEDmodel(object):
         W1_init = W1_init.flatten(order='F')
 
         n_eps = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
-        sigma0_init = 0.01
+        sigma0_init = 0.045
         sigmaepsilon_init = 0.1 * np.ones(n_eps)
         L_Omega_init = np.eye(n_eps)
 
