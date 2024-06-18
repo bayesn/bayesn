@@ -2129,7 +2129,7 @@ class SEDmodel(object):
                             continue
                         if meta['PIA'] < 0.5:
                             continue
-                        if zcmb > 0.36:
+                        if zcmb > 0.4:
                             continue
                         # if n_inc > 500:
                         #     continue
