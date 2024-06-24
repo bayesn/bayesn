@@ -1126,8 +1126,10 @@ class SEDmodel(object):
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
-        sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        # sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
+        # sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        sigma0_tform = numpyro.sample('sigma0_tform', dist.HalfNormal())
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * sigma0_tform)
 
         mu_R = numpyro.sample('mu_R', dist.Uniform(1, 5))
         sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
