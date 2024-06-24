@@ -19,6 +19,7 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiagonalNormal, AutoLaplaceApproximation
 import h5py
 import sncosmo
+from sfdmap2 import sfdmap
 from .spline_utils import invKD_irr, spline_coeffs_irr
 from .bayesn_io import write_snana_lcfile
 import pickle
@@ -32,6 +33,7 @@ from jax.random import PRNGKey, split
 from astropy.cosmology import FlatLambdaCDM
 import astropy.table as at
 import astropy.constants as const
+from astropy.coordinates import SkyCoord
 from astropy.io import ascii
 import matplotlib as mpl
 from matplotlib import rc
@@ -39,6 +41,7 @@ import arviz
 import extinction
 import timeit
 from astropy.io import fits
+import astropy.units as u
 from ruamel.yaml import YAML
 import time
 from tqdm import tqdm
@@ -207,6 +210,17 @@ class SEDmodel(object):
         self.__root_dir__ = os.path.dirname(os.path.abspath(__file__))
         print(f'Currently working in {os.getcwd()}')
 
+        if not os.path.exists(os.path.join(self.__root_dir__, 'data', 'dust_maps')):
+            print('-------------')
+            print('SFD dust maps not present, downloading them now for use in BayeSN. This only needs to happen once')
+            print('-------------')
+            os.mkdir(os.path.join(self.__root_dir__, 'data', 'dust_maps'))
+            cmd = f'wget https://github.com/kbarbary/sfddata/archive/master.tar.gz -O {os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz")}'
+            subprocess.run(cmd, shell=True)
+            cmd = f'tar -xzf {os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz")} -C {os.path.join(self.__root_dir__, "data", "dust_maps")}'
+            subprocess.run(cmd, shell=True)
+            os.remove(os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz"))
+        self.sfd = sfdmap.SFDMap(os.path.join(self.__root_dir__, "data", "dust_maps", "sfddata-master"))
         # Load built-in filter_yaml and add custom filters if specified
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
@@ -2344,6 +2358,9 @@ class SEDmodel(object):
                             continue
                         sn = sne_file[sn_ind]
                         meta, data = sn.meta, sn.to_pandas()
+                        coord = SkyCoord(f'{meta["RA"]} {meta["DEC"]}', unit=(u.deg, u.deg), frame='fk4')
+                        print(self.sfd.ebv(meta['RA'], meta['DEC']), meta['MWEBV'], self.sfd.ebv(meta['RA'], meta['DEC']) / meta['MWEBV'])
+                        continue
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         peak_mjd = meta['PEAKMJD']
@@ -2556,6 +2573,7 @@ class SEDmodel(object):
                     snrmax3s.append(snrmax3)
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
+            raise ValueError('Nope')
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
