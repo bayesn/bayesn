@@ -52,6 +52,7 @@ jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
+
 # jax.config.update('jax_platform_name', 'cpu')  # Forces CPU
 
 
@@ -727,7 +728,8 @@ class SEDmodel(object):
         model_mag: array-like
             Matrix containing model magnitudes for all SNe at all time-steps
         """
-        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights)
+        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp,
+                                         weights)
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
@@ -1088,7 +1090,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
                                       weights)
 
             with numpyro.handlers.mask(mask=mask):
@@ -1161,7 +1164,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
                                       weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1217,7 +1221,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
                                       weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1269,10 +1274,10 @@ class SEDmodel(object):
         tauA_LM = numpyro.deterministic('tauA_LM', jnp.tan(tauA_LM_tform))
 
         sigma0_HM_tform = numpyro.sample('sigma0_HM_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0_HM = numpyro.deterministic('sigma0_HM', 0 * 0.1 * jnp.tan(sigma0_HM_tform))
+        sigma0_HM = numpyro.deterministic('sigma0_HM', 0.1 * jnp.tan(sigma0_HM_tform))
 
         sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0_LM = numpyro.deterministic('sigma0_LM', 0 * 0.1 * jnp.tan(sigma0_LM_tform))
+        sigma0_LM = numpyro.deterministic('sigma0_LM', 00.1 * jnp.tan(sigma0_LM_tform))
 
         mass = obs[-7, 0, :]
         M_split = 10
@@ -1379,7 +1384,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1447,7 +1453,8 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1504,7 +1511,8 @@ class SEDmodel(object):
             Av = numpyro.deterministic('AV', HM_flag * Av_HM + (1 - HM_flag) * Av_LM)
 
             Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
-            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
+            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(
+                phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
             Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
             Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
                 phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
@@ -1534,7 +1542,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1600,7 +1609,8 @@ class SEDmodel(object):
             Av = numpyro.deterministic('AV', HM_flag * Av_HM + (1 - HM_flag) * Av_LM)
 
             Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
-            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
+            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(
+                phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
             Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
             Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
                 phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
@@ -1630,8 +1640,9 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
-                                      weights)
+            flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
+                                       weights)
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1656,10 +1667,15 @@ class SEDmodel(object):
         """
         # Set hyperparameter initialisations
         built_in_models = next(os.walk(os.path.join(self.__root_dir__, 'model_files')))[1]
+        use_SALT_init = False
         if os.path.exists(reference_model):
             print(f'Using custom model at {reference_model} to initialise chains')
             with open(reference_model, 'r') as file:
                 params = yaml.load(file)
+        elif reference_model == 'SALT':
+            with open(os.path.join(self.__root_dir__, 'model_files', 'T21_model', 'BAYESN.YAML'), 'r') as file:
+                params = yaml.load(file)
+            use_SALT_init = True
         elif reference_model in built_in_models:
             print(f'Loading built-in model {reference_model} to initialise chains')
             with open(os.path.join(self.__root_dir__, 'model_files', reference_model, 'BAYESN.YAML'), 'r') as file:
@@ -1668,10 +1684,37 @@ class SEDmodel(object):
             raise ValueError("Invalid initialisation method, please choose either 'median' or 'sample', or choose "
                              "either one of the built-in models or a custom model to base the hyperparmeter "
                              "initialisation on")
-        W0_init = params['W0']
+        if use_SALT_init:
+            W0_init = np.array([[0.20873146, 0.4191562, 0.47853541, 0.44364534, 0.27931939,
+                                 0.02876463],
+                                [0.02287195, 0.19528439, 0.23939921, 0.24423658, 0.19553805,
+                                 0.10514768],
+                                [-0.01394594, 0.16012883, 0.20703576, 0.18139337, 0.18752169,
+                                 0.04879769],
+                                [0.05211952, 0.21230367, 0.21941788, 0.18238715, 0.22628804,
+                                 0.10833809],
+                                [0.16342449, 0.26113687, 0.17824492, 0.26722813, 0.24281407,
+                                 0.24059798],
+                                [0.00357404, 0.8877226, -0.52532838, 0.15320149, -0.0052202,
+                                 0.01887124]])
+            W1_init = np.array([[0.25020351, 0.07548069, 0.35706984, 0.49739053, 0.45775709,
+                                 -0.01279618],
+                                [0.30176854, 0.1226694, 0.1773609, 0.24683543, 0.2862417,
+                                 0.21007922],
+                                [0.2395503, 0.11056773, 0.16448685, 0.14649787, 0.30875685,
+                                 0.27951099],
+                                [0.20766914, 0.07622559, 0.10505856, -0.00467749, 0.2222945,
+                                 0.29211311],
+                                [0.09645876, 0.00989212, 0.09898451, 0.09758195, 0.24057851,
+                                 0.26027841],
+                                [-0.27381215, -0.96062658, -0.02757336, 0.01248333, -0.025853,
+                                 -0.00304315]])
+        else:
+            W0_init = params['W0']
+            W1_init = params['W1']
+
         l_knots = params['L_KNOTS']
         tau_knots = params['TAU_KNOTS']
-        W1_init = params['W1']
         RV_init, tauA_init = params['RV'], params['TAUA']
 
         # Interpolate to match new wavelength knots
@@ -1686,9 +1729,209 @@ class SEDmodel(object):
         W1_init = W1_init.flatten(order='F')
 
         n_eps = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
-        sigma0_init = 0.045
-        sigmaepsilon_init = 0.1 * np.ones(n_eps)
-        L_Omega_init = np.eye(n_eps)
+        if use_SALT_init:
+            sigma0_init = 0.045
+            sigmaepsilon_init = np.array([0.07937256, 0.08298936, 0.06163874, 0.08819775, 0.03531586,
+                                          0.03392259, 0.02900307, 0.04988823, 0.04492272, 0.04194507,
+                                          0.04876763, 0.0510525, 0.05176432, 0.04613739, 0.05554335,
+                                          0.07224785, 0.05648526, 0.04069121, 0.03506788, 0.08572987,
+                                          0.16519726, 0.10180583, 0.09682989, 0.23812553])
+            L_Omega_init = np.array([[1.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [5.39763050e-01, 8.25433455e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [4.35266658e-01, 9.50466737e-02, 8.49275805e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-6.80900160e-02, 4.93412516e-02, 3.73319206e-02,
+                                      9.27147103e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-5.56664006e-02, -9.79694813e-02, -9.36800636e-02,
+                                      2.80595482e-02, 9.14252049e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-1.52581286e-01, -1.35615816e-01, -7.96455376e-02,
+                                      3.50015716e-02, 4.11493401e-01, 7.79810381e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-5.39738424e-02, -2.48725407e-02, -4.25273564e-03,
+                                      -3.79867413e-03, 2.34223486e-01, 6.46426301e-02,
+                                      8.38465183e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-4.61553197e-04, -1.52918104e-02, -3.76077530e-02,
+                                      4.93363526e-03, -3.43480361e-02, 7.63728928e-02,
+                                      8.69451632e-03, 8.36294639e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [2.22156858e-01, -1.06632044e-01, -1.06345242e-01,
+                                      2.11388405e-02, 1.04354887e-03, -2.06210860e-01,
+                                      -1.80069308e-01, 2.85589408e-02, 7.70407913e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-2.06845504e-03, 1.67778373e-01, -5.22232566e-02,
+                                      -2.08198089e-02, -1.16700789e-01, -9.80157423e-03,
+                                      -1.45554453e-01, -6.47848344e-03, 3.76660074e-01,
+                                      7.03480790e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-8.39527449e-02, -8.06114862e-03, 1.64845174e-01,
+                                      -6.24499520e-02, -1.85403117e-01, -1.54740900e-01,
+                                      4.82684813e-02, -4.13773346e-02, 3.32090766e-01,
+                                      7.30596097e-02, 6.57026274e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [2.28450721e-03, -2.15948247e-02, -3.39705896e-02,
+                                      2.08355613e-02, 1.89478282e-02, 4.50636856e-03,
+                                      -3.41629954e-02, 1.46746207e-02, -4.42198266e-02,
+                                      4.64993582e-02, 5.92879752e-02, 7.33532962e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [4.05395309e-02, -7.41375324e-02, -4.77590916e-02,
+                                      4.05033799e-02, 1.42831230e-01, -6.88086222e-02,
+                                      -9.48813389e-02, 5.79460145e-02, -8.69957860e-02,
+                                      -1.22860972e-01, -5.57904855e-02, 3.00221681e-03,
+                                      7.03516229e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-9.19098133e-02, 8.08331221e-02, 1.28083762e-02,
+                                      1.42544550e-03, -8.45577335e-02, 1.66465784e-01,
+                                      -3.99450589e-02, 1.16833091e-04, -1.15624411e-01,
+                                      2.52592407e-02, -6.12647204e-02, 1.75020834e-03,
+                                      1.84504044e-01, 6.56423230e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-7.61063979e-02, 2.11522260e-02, 1.29828247e-01,
+                                      -3.57273744e-02, -1.66946593e-01, -1.13886919e-01,
+                                      1.42375802e-01, -4.47480074e-02, -5.45558446e-02,
+                                      -8.54867519e-02, 9.08205625e-02, -1.34414349e-02,
+                                      1.75061788e-01, 1.01742674e-01, 5.92520130e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [3.43008412e-02, -3.46031152e-03, -2.35306943e-02,
+                                      1.00522899e-02, 2.96847518e-02, 1.14404324e-02,
+                                      -5.52459036e-02, 2.18957714e-02, 9.61513202e-03,
+                                      6.00965399e-03, -2.12623612e-02, 1.39636612e-02,
+                                      -4.17390111e-02, 2.93189573e-02, 2.43243540e-02,
+                                      6.14714332e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-8.45211737e-02, -1.34507195e-01, -4.83284936e-02,
+                                      1.34457869e-02, -2.24685085e-02, -9.56075529e-02,
+                                      -2.66369706e-02, 1.90951858e-02, 3.27698554e-02,
+                                      -7.78431510e-02, -2.14969430e-02, 6.59425507e-03,
+                                      -2.64907110e-02, -3.38114616e-02, 2.98580005e-02,
+                                      -3.91579452e-03, 5.87386524e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-1.20916004e-01, 1.55033659e-02, -4.01146564e-02,
+                                      -3.96695459e-04, -9.92332835e-03, 1.36489869e-01,
+                                      2.31606802e-03, -1.32071719e-02, -7.01497406e-03,
+                                      1.09686151e-01, 5.44028737e-03, -7.71907811e-03,
+                                      -1.04099266e-02, -5.76766910e-04, -4.00504923e-02,
+                                      2.44024475e-03, 4.47648227e-02, 5.38200298e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-1.13158635e-01, -3.74730980e-02, 6.97997127e-02,
+                                      -3.06380315e-02, -7.17402019e-02, -2.60576209e-02,
+                                      9.94944417e-02, -2.57912723e-02, -1.00309564e-02,
+                                      -1.41267106e-02, 1.01261019e-01, -9.80878848e-03,
+                                      -2.40754227e-02, -1.65838260e-02, 1.68382740e-02,
+                                      -5.74233395e-03, 1.28437283e-01, 5.11393727e-02,
+                                      4.78000853e-01, 0.00000000e+00, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [3.02629965e-02, -1.87624489e-02, -4.03796023e-02,
+                                      1.45681953e-02, 4.59625181e-02, 1.22376913e-03,
+                                      -3.05507406e-02, 2.20294655e-02, 1.24006602e-02,
+                                      -1.78917740e-02, -4.02801544e-02, 1.54778448e-02,
+                                      6.74094469e-03, -9.07746555e-03, -1.15363483e-02,
+                                      5.60008944e-03, -5.40838207e-02, 1.43800231e-02,
+                                      2.02388454e-02, 4.64214051e-01, 0.00000000e+00,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-7.35784061e-02, -6.91697191e-02, -9.08334443e-03,
+                                      5.99512014e-03, -5.66871678e-02, -5.67669640e-02,
+                                      -1.18362084e-02, 3.34216633e-02, -6.16080797e-02,
+                                      -7.59697780e-02, -2.04088271e-02, -1.07783411e-03,
+                                      1.05110942e-01, 4.76638899e-02, 2.87067727e-03,
+                                      7.70810731e-04, 6.50225591e-02, -6.19203935e-02,
+                                      -1.58311681e-02, 4.71352951e-03, 4.19319681e-01,
+                                      0.00000000e+00, 0.00000000e+00, 0.00000000e+00],
+                                     [-7.05387889e-02, 2.53770451e-02, -1.20265836e-02,
+                                      2.06448569e-03, -3.43150228e-02, 1.17917864e-01,
+                                      6.42923660e-02, 2.68756682e-03, -7.59253974e-02,
+                                      1.04955186e-02, -3.37857320e-02, -6.40359717e-03,
+                                      1.02543975e-01, 1.12969704e-01, -4.24082055e-02,
+                                      -5.68986873e-03, -3.40426423e-02, -2.30301386e-02,
+                                      -2.03038003e-02, 9.39365948e-03, 3.70868451e-02,
+                                      3.67261554e-01, 0.00000000e+00, 0.00000000e+00],
+                                     [-7.09614379e-02, -2.15802284e-02, 4.41136038e-02,
+                                      -3.11886088e-03, -6.04650646e-02, 3.27661514e-03,
+                                      1.05698893e-01, -6.56029621e-04, -6.93143764e-02,
+                                      -2.41228214e-02, 3.19256145e-02, -2.12465077e-02,
+                                      7.38639381e-02, 9.65577270e-03, 2.63551382e-02,
+                                      -8.47259526e-03, 1.25692657e-02, -2.55469248e-02,
+                                      -1.67237997e-02, 3.48571344e-03, 1.12313024e-01,
+                                      4.78873149e-02, 2.96413128e-01, 0.00000000e+00],
+                                     [3.37190458e-02, 3.97257075e-03, -1.70145826e-02,
+                                      6.86136819e-03, 3.11764609e-02, -1.17046071e-02,
+                                      -4.37270679e-02, 2.05979008e-02, 3.38224845e-02,
+                                      1.39989401e-02, -1.49325802e-02, 9.90311001e-03,
+                                      -1.49922117e-02, -1.20872774e-02, -1.18318788e-02,
+                                      1.65665430e-02, -6.40713137e-03, 6.62709746e-03,
+                                      -1.30523743e-03, -2.28282230e-03, -5.57662004e-02,
+                                      1.78896758e-03, 1.63460201e-02, 2.45778101e-01]])
+        else:
+            sigma0_init = 0.045
+            sigmaepsilon_init = 0.1 * np.ones(n_eps)
+            L_Omega_init = np.eye(n_eps)
 
         n_sne = self.data.shape[-1]
 
@@ -1716,11 +1959,22 @@ class SEDmodel(object):
         param_init['epsilon_tform'] = jnp.matmul(np.linalg.inv(L_Sigma), np.random.normal(0, 1, (n_eps, n_sne)))
         param_init['epsilon'] = np.random.normal(0, 1, (n_sne, n_eps))
         param_init['sigmaepsilon_tform'] = jnp.arctan(
-            sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape) / 1.)
+            sigmaepsilon_init + np.random.normal(0, 0.001, sigmaepsilon_init.shape) / 1.)
         param_init['sigmaepsilon'] = sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape)
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+
+        param_init['W0_LM'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
+        param_init['W0_HM'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
+        param_init['mu_R_HM'] = jnp.array(2.8)
+        param_init['sigma_R_HM'] = jnp.array(0.6)
+        param_init['RV_tform_HM'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
+        param_init['RV_tform_LM'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
+        param_init['sigma0_HM'] = jnp.array(sigma0_)
+        param_init['sigma0_LM'] = jnp.array(sigma0_)
+        param_init['tauA_tform_HM'] = jnp.arctan(tauA_ / 1.)
+        param_init['tauA_tform_LM'] = jnp.arctan(tauA_ / 1.)
 
         return param_init
 
@@ -1824,7 +2078,8 @@ class SEDmodel(object):
         # -------------------------
         if args['initialisation'] == 'T21':
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model='T21'))
-
+        elif args['initialisation'] == 'SALT':
+            init_strategy = init_to_value(values=self.initial_guess(args, reference_model='SALT'))
         elif args['initialisation'] == 'median':
             init_strategy = init_to_median()
         elif args['initialisation'] == 'sample':
@@ -1888,7 +2143,8 @@ class SEDmodel(object):
 
         # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
-        if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
+        if args['mode'].lower() == 'fitting' and args[
+            'fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
             def fit_vmap_mcmc(data, weights):
                 """
                 Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
@@ -1993,8 +2249,8 @@ class SEDmodel(object):
             end = timeit.default_timer()
         else:
             mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
-                    num_chains=args['num_chains'],
-                    chain_method=args['chain_method'])
+                        num_chains=args['num_chains'],
+                        chain_method=args['chain_method'])
             rng = PRNGKey(0)
             start = timeit.default_timer()
 
@@ -2226,7 +2482,8 @@ class SEDmodel(object):
         muhat_err = 5
         Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
         samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-            np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+                                         np.power(Ds_err, 2), np.sqrt(
+            (np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
         samples['delM'] = samples['Ds'] - samples['mu']
         if fix_tmax:
             samples['tmax'] = jnp.zeros_like(samples['tmax'])
@@ -2332,7 +2589,7 @@ class SEDmodel(object):
             samples['delM'] = samples['Ds'] - samples['mu']
             if 'tmax' in samples.keys():  # Convert tmax samples into peak_MJD samples
                 samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
-                            1 + z_HEL[None, None, :])
+                        1 + z_HEL[None, None, :])
 
             # Create FITRES file
             if args['snana']:
@@ -2444,7 +2701,8 @@ class SEDmodel(object):
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
                 # Look in standard public repositories for real data/simulations
                 dir_list = ['SNDATA_ROOT/lcmerge', 'SNDATA_ROOT/SIM']
-                sim_list = np.loadtxt(os.path.join(os.environ.get('SNDATA_ROOT'), 'SIM', 'PATH_SNDATA_SIM.LIST'), dtype=str)
+                sim_list = np.loadtxt(os.path.join(os.environ.get('SNDATA_ROOT'), 'SIM', 'PATH_SNDATA_SIM.LIST'),
+                                      dtype=str)
                 dir_list = dir_list + list([sim_dir[1:] for sim_dir in sim_list])
                 pdp = [path[1:] if path[0] == '$' else path for path in args['private_data_path']]
                 dir_list = dir_list + pdp  # Add any private data directories
@@ -2725,7 +2983,7 @@ class SEDmodel(object):
                     else:
                         snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
                         lc_snr3 = lc_snr2[lc_snr2.band_indices !=
-                                      lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                                          lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
                         if lc_snr3.shape[0] == 0:
                             snrmax3 = -99
                         else:
@@ -2786,7 +3044,8 @@ class SEDmodel(object):
                                       'SIM_THETA', 'SIM_AV', 'SIM_RV'])
             else:
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
-                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
+                                snrmax3s],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
@@ -2820,7 +3079,7 @@ class SEDmodel(object):
                     else:
                         peak_mjd = meta['SEARCH_PEAKMJD']
                     if 'BAND' in data.columns:  # This column can have different names which can be confusing, let's
-                                                # just rename it so it's always the same
+                        # just rename it so it's always the same
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
                     zhel = meta['REDSHIFT_HELIO']
@@ -3113,7 +3372,9 @@ class SEDmodel(object):
         keep_shape = t.shape
         t = t.flatten(order='F')
         map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
-        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,2,0)
+        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,
+                                                                                                                     2,
+                                                                                                                     0)
         spectra = self.get_spectra(theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp)
 
         # Host extinction
@@ -3129,7 +3390,8 @@ class SEDmodel(object):
         return l_o, spectra, param_dict
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
-                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
+                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True,
+                             write_to_files=False,
                              output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
@@ -3330,10 +3592,12 @@ class SEDmodel(object):
                                                                                                                      0)
         t = t.reshape(keep_shape, order='F')
         if mag:
-            data = self.get_mag_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
+            data = self.get_mag_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask,
+                                      J_t,
                                       hsiao_interp, band_weights)
         else:
-            data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
+            data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask,
+                                       J_t,
                                        hsiao_interp, band_weights)
         # Apply error if specified
         yerr = jnp.array(yerr)
