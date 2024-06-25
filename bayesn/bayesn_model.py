@@ -2100,7 +2100,7 @@ class SEDmodel(object):
         elif args['mode'].lower() == 'training_poprv':
             nuts_kernel = NUTS(self.train_model_popRV, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
-                               dense_mass=[('W0', 'W1', 'sigma0_tform', 'mu_R', 'sigma_R', 'sigmaepsilon_tform', 'L_Omega', 'tauA_tform')],
+                               dense_mass=[('sigma0_tform', 'Ds')],
                                find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'training_poprv_noeps':
