@@ -1610,6 +1610,7 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['peakmjd_key'] = args.get('peakmjd_key', 'PEAKMJD')
         args['jobsplit'] = args.get('jobsplit')
         if args['jobsplit'] is not None:
             args['snana'] = True
@@ -2345,7 +2346,7 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        peak_mjd = meta['SIM_PEAKMJD']
+                        peak_mjd = meta[args['peakmjd_key']]
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
@@ -2456,7 +2457,7 @@ class SEDmodel(object):
                         continue
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_file), default_tablename='OBS')
                     data = lcdata['OBS'].to_pandas()
-                    peak_mjd = meta['SIM_PEAKMJD']
+                    peak_mjd = meta[args['peakmjd_key']]
                     sn_name = meta['SNID']
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
