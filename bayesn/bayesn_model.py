@@ -2100,7 +2100,7 @@ class SEDmodel(object):
         elif args['mode'].lower() == 'training_poprv':
             nuts_kernel = NUTS(self.train_model_popRV, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
-                               dense_mass=[('sigma0_tform', 'Ds')],
+                               dense_mass=False,
                                find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'training_poprv_noeps':
@@ -2824,7 +2824,7 @@ class SEDmodel(object):
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = self.cosmo.distmod(zhd)
+                        data['dist_mod'] = meta['SIM_DLMU']  # self.cosmo.distmod(zhd)
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
