@@ -1769,7 +1769,38 @@ class SEDmodel(object):
             raise ValueError("Invalid mode, must select one of 'training_globalRV', 'training_popRV', 'fitting',"
                              "'dust', 'dust_split_mag', 'dust_split_sed' or 'dust_redshift'")
 
-        # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
+        # self.data, self.band_weights = self.data[..., 0:3], self.band_weights[0:3, ...]
+
+        def fit_vmap_quick_tmax(data, weights):
+            """
+            Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
+            device
+
+            Parameters
+            ----------
+            obs: array-like
+                Data to fit, from output of process_dataset
+            weights: array-like
+                Band-weights to calculate photometry
+
+            Returns
+            -------
+
+            sample_dict: dict
+                Samples and other information from MCMC fit
+
+            """
+            optimizer = Adam(0.01)
+            model = self.fit_model_globalRV_noeps
+            # First start with the Laplace Approximation
+            laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_to_median())
+            svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
+
+            svi_result = svi.run(PRNGKey(123), 1000, data[..., None], weights[None, ...], progress_bar=False)
+
+            params, losses = svi_result.params, svi_result.losses
+            laplace_median = laplace_guide.median(params)
+            return {**laplace_median}
 
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
             def fit_vmap_mcmc(data, weights):
@@ -1796,6 +1827,37 @@ class SEDmodel(object):
                             num_chains=args['num_chains'], chain_method=args['chain_method'], progress_bar=False)
                 mcmc.run(rng_key, data[..., None], weights[None, ...])
                 return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
+
+            map = jax.vmap(fit_vmap_quick_tmax, in_axes=(2, 0))
+            medians = map(self.data, self.band_weights)
+            tmax = medians['tmax']
+            print(tmax)
+            print(self.data[0, ...])
+            print(self.data.shape)
+            self.data = self.data.at[0, ...].set(self.data[0, ...] - tmax.T)
+            keep = (self.data[0, ...] > -10) & (self.data[0, ...] < 40)
+            self.data = self.data.at[-1, ...].set(self.data[-1, ...] * keep)
+            new_data = jnp.zeros_like(self.data)
+            start = time.time()
+            for i in range(self.data.shape[-1]):
+                sn_data = self.data[..., i]
+                sn_data = sn_data[:, sn_data[-1, :] > 0]
+                N_data = sn_data.shape[1]
+                new_data = new_data.at[:, :N_data, i].set(sn_data)
+                new_data = new_data.at[2, N_data:, i].set(1 / jnp.sqrt(2 * np.pi))
+            self.data = new_data
+            end = time.time()
+            print('Took', end - start)
+            drop_rows = (self.data[-1, ...].sum(axis=1) < 1).sum()
+            if drop_rows > 0:
+                self.data = self.data[:, :-drop_rows, :]
+            print(self.data[-1, ...])
+            print(self.data[0, ...])
+            print(self.data.shape)
+            medians = map(self.data, self.band_weights)
+            tmax = medians['tmax']
+            print(tmax)
+            raise ValueError('Nope')
 
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
@@ -2718,7 +2780,7 @@ class SEDmodel(object):
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
                     zhel = meta['REDSHIFT_HELIO']
-                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
+                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel) - 30
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
                     for f in data.FLT.unique():
@@ -2756,14 +2818,15 @@ class SEDmodel(object):
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
-                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    # lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                     if sn_lc is None:
                         sn_lc = lc.copy()
                     else:
                         sn_lc = pd.concat([sn_lc, lc])
                 sne.append(sn)
                 peak_mjds.append(peak_mjd)
-                t_ranges.append((lc['t'].min(), lc['t'].max()))
+                sn_lc = sn_lc.sort_values(by='t')
+                t_ranges.append((sn_lc['t'].min(), sn_lc['t'].max()))
                 n_obs.append(lc.shape[0])
                 all_lcs.append(sn_lc)
                 # Set up FITRES table data
