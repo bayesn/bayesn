@@ -1127,7 +1127,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
         # sigma0_tform = numpyro.sample('sigma0_tform', dist.HalfNormal())
         # sigma0 = numpyro.deterministic('sigma0', 0.1 * sigma0_tform)
 
