@@ -1165,7 +1165,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
                                       self.hsiao_interp,
                                       weights)
@@ -1965,6 +1967,7 @@ class SEDmodel(object):
         param_init['sigmaepsilon'] = sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape)
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
+        param_init['Ds_tform'] = jnp.array(np.random.normal(np.zeros_like(self.data[-3, 0, :]), 1))
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
         param_init['W0_LM'] = jnp.array(W0_init + np.random.normal(0, 0.01, W0_init.shape[0]))
@@ -2754,7 +2757,6 @@ class SEDmodel(object):
                 if not os.path.exists(head_file):
                     head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')  # Look for .fits.gz if .fits not found
                 phot_file = head_file.replace("HEAD", "PHOT")
-                print(phot_file, head_file)
                 sne_file = sncosmo.read_snana_fits(head_file, phot_file)
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in sne_file[0].meta.keys()
