@@ -1057,7 +1057,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
 
         RV = numpyro.sample('RV', dist.Uniform(1, 5))
 
@@ -1127,7 +1127,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
         # sigma0_tform = numpyro.sample('sigma0_tform', dist.HalfNormal())
         # sigma0 = numpyro.deterministic('sigma0', 0.1 * sigma0_tform)
 
@@ -1197,7 +1197,7 @@ class SEDmodel(object):
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0 = numpyro.deterministic('sigma0', 0 * 0.1 * jnp.tan(sigma0_tform))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
 
         mu_R = numpyro.sample('mu_R', dist.Uniform(1, 5))
         sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
@@ -1224,7 +1224,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
                                       self.hsiao_interp,
                                       weights)
@@ -1281,7 +1283,7 @@ class SEDmodel(object):
         sigma0_HM = numpyro.deterministic('sigma0_HM', 0.1 * jnp.tan(sigma0_HM_tform))
 
         sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
-        sigma0_LM = numpyro.deterministic('sigma0_LM', 00.1 * jnp.tan(sigma0_LM_tform))
+        sigma0_LM = numpyro.deterministic('sigma0_LM', 0.1 * jnp.tan(sigma0_LM_tform))
 
         mass = obs[-7, 0, :]
         M_split = 10
@@ -1325,7 +1327,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t,
                                       self.hsiao_interp,
                                       weights)
@@ -1387,7 +1391,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
                                        self.hsiao_interp,
                                        weights)
@@ -1545,7 +1551,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
                                        self.hsiao_interp,
                                        weights)
@@ -1643,7 +1651,9 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
                                        self.hsiao_interp,
                                        weights)
@@ -2826,7 +2836,7 @@ class SEDmodel(object):
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = meta['SIM_DLMU']  # self.cosmo.distmod(zhd)
+                        data['dist_mod'] = self.cosmo.distmod(zhd)
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
