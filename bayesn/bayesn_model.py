@@ -1330,6 +1330,7 @@ class SEDmodel(object):
             # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
             Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
+
             flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t,
                                       self.hsiao_interp,
                                       weights)
@@ -1990,8 +1991,8 @@ class SEDmodel(object):
         param_init['RV_tform_LM'] = jnp.array(np.random.uniform(0, 1, self.data.shape[-1]))
         param_init['sigma0_HM_tform'] = jnp.arctan(sigma0_ / 0.1)
         param_init['sigma0_LM_tform'] = jnp.arctan(sigma0_ / 0.1)
-        param_init['tauA_tform_HM'] = jnp.arctan(tauA_ / 1.)
-        param_init['tauA_tform_LM'] = jnp.arctan(tauA_ / 1.)
+        param_init['tauA_HM_tform'] = jnp.arctan(tauA_ / 1.)
+        param_init['tauA_LM_tform'] = jnp.arctan(tauA_ / 1.)
 
         return param_init
 
