@@ -1285,9 +1285,6 @@ class SEDmodel(object):
         sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
         sigma0_LM = numpyro.deterministic('sigma0_LM', 0.1 * jnp.tan(sigma0_LM_tform))
 
-        print(mu_R_LM, sigma_R_LM, sigma0_LM)
-        raise ValueError('Nope')
-
         mass = obs[-7, 0, :]
         M_split = 10
         HM_flag = mass > M_split
