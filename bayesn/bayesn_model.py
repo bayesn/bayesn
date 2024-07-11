@@ -2797,8 +2797,6 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
-                        if meta['HOSTGAL_LOGMASS'] > 10:
-                            continue
                         peak_mjd = meta[mjd_key]
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
