@@ -36,7 +36,7 @@ from astropy.io import ascii
 import matplotlib as mpl
 from matplotlib import rc
 import arviz
-import extinction
+import dust_extinction.parameter_averages as dust_ext
 import timeit
 from astropy.io import fits
 from ruamel.yaml import YAML
@@ -488,7 +488,7 @@ class SEDmodel(object):
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
 
-    def _calculate_band_weights(self, redshifts, ebv):
+    def _calculate_band_weights(self, redshifts, ebv, redlaw='F99'):
         """
         Calculates the observer-frame band weights, including the effect of Milky Way extinction, for each SN
 
@@ -533,7 +533,8 @@ class SEDmodel(object):
         av = self.RV_MW * ebv
         all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
         all_lam = all_lam.flatten(order='F')
-        mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
+        dust_fn = getattr(dust_ext, redlaw)(float(self.RV_MW))
+        mw_ext = -2.5*np.log10(dust_fn.extinguish(10000/all_lam, Av=1))
         mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order='F')
         mw_ext = mw_ext * av[:, None]
         mw_ext = jnp.power(10, -0.4 * mw_ext)
@@ -1905,7 +1906,7 @@ class SEDmodel(object):
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
-            sigma_R=False, mag=False):
+            sigma_R=False, mag=False, redlaw='F99'):
         """
         Method to fit light curve data loaded into memory with BayeSN model
 
@@ -2015,7 +2016,7 @@ class SEDmodel(object):
         data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
         data = data.at[9, :, 0].set(np.ones_like(t))
 
-        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
+        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :], redlaw=redlaw)
 
         # Update dust parameters if specified manually
         if RV:
@@ -2267,6 +2268,7 @@ class SEDmodel(object):
         if 'data_table' in args.keys() and 'data_root' not in args.keys():
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
+        redlaw = args.get('redlaw', 'F99')
         survey_dict = {}
         c = 299792.458
         if 'version_photometry' in args.keys():  # If using all files in directory
@@ -2589,7 +2591,7 @@ class SEDmodel(object):
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
-            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :], redlaw=redlaw)
             self.peak_mjds = np.array(peak_mjds)
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
@@ -2759,7 +2761,7 @@ class SEDmodel(object):
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
-            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :], redlaw=redlaw)
             self.peak_mjds = np.array(peak_mjds)
 
             # Prep FITRES table
@@ -2774,7 +2776,7 @@ class SEDmodel(object):
             self.fitres_table = table
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
-                          eps=None):
+                          eps=None, redlaw='F99'):
         """
         Simulates spectra for given parameter values in the observer-frame. If parameter values are not set, model
         priors will be sampled.
@@ -2940,18 +2942,20 @@ class SEDmodel(object):
         # Host extinction
         host_ext = np.zeros((N, l_r.shape[0], 1))
         for i in range(N):
-            host_ext[i, :, 0] = extinction.fitzpatrick99(l_r, AV[i], RV[i])
+            dust_fn = getattr(dust_ext, redlaw)(float(RV[i]))
+            host_ext[i, :, 0] = -2.5*np.log10(dust_fn.extinguish(10000/l_r, Av=AV[i]))
 
         # MW extinction
         mw_ext = np.zeros((N, l_o.shape[1], 1))
         for i in range(N):
-            mw_ext[i, :, 0] = extinction.fitzpatrick99(l_o[i, ...], 3.1 * ebv_mw[i], 3.1)
+            dust_fn = getattr(dust_ext, redlaw)(3.1)
+            mw_ext[i, :, 0] = -2.5*np.log10(dust_fn.extinguish(10000/l_o[i, ...], Av=3.1*ebv_mw[i]))
 
         return l_o, spectra, param_dict
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
                              logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
-                             output_dir=None):
+                             output_dir=None, redlaw='F99'):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
         files if requested
@@ -3138,7 +3142,7 @@ class SEDmodel(object):
                 band_indices[i * num_per_band: (i + 1) * num_per_band] = self.band_dict[band]
             band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
         mask = np.ones_like(band_indices)
-        band_weights = self._calculate_band_weights(z, ebv_mw)
+        band_weights = self._calculate_band_weights(z, ebv_mw, redlaw=redlaw)
 
         t = jnp.repeat(t[..., None], N, axis=1)
         t = t - tmax[None, :]

@@ -2,3 +2,6 @@ plots/*
 results/*
 data/lcs/simulations/*
 model_files/T21_model/T21_free_tmax
+bayesn.egg-info/
+build/
+*/__pycache__/
