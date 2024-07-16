@@ -488,7 +488,18 @@ class SEDmodel(object):
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
 
-    def _calculate_band_weights(self, redshifts, ebv):
+    def calculate_mw_extinction(self, redshifts, ebv):
+        # Apply MW extinction
+        av = self.RV_MW * ebv
+        all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
+        all_lam = all_lam.flatten(order='F')
+        mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
+        mw_ext = mw_ext.reshape((redshifts.shape[0], self.model_wave.shape[0]), order='F')
+        mw_ext = mw_ext * av[:, None]
+        mw_ext = jnp.power(10, -0.4 * mw_ext)
+        return mw_ext
+
+    def _calculate_band_weights(self, redshifts):
         """
         Calculates the observer-frame band weights, including the effect of Milky Way extinction, for each SN
 
@@ -518,8 +529,6 @@ class SEDmodel(object):
         int_locs = flat_locs.astype(jnp.int32)
         remainders = flat_locs - int_locs
 
-        self.band_interpolate_weights = self.band_interpolate_weights[self.used_band_inds, ...]
-
         start = self.band_interpolate_weights[..., int_locs]
         end = self.band_interpolate_weights[..., int_locs + 1]
 
@@ -529,16 +538,7 @@ class SEDmodel(object):
         sum = jnp.sum(weights, axis=1)
         weights /= sum[:, None, :]
 
-        # Apply MW extinction
-        av = self.RV_MW * ebv
-        all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
-        all_lam = all_lam.flatten(order='F')
-        mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
-        mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order='F')
-        mw_ext = mw_ext * av[:, None]
-        mw_ext = jnp.power(10, -0.4 * mw_ext)
-
-        weights = weights * mw_ext[..., None]
+        weights = weights * self.mw_ext[..., None]
 
         # We need an extra term of 1 + z from the filter contraction.
         weights /= (1 + redshifts)[:, None, None]
@@ -902,6 +902,71 @@ class SEDmodel(object):
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
             flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
+    def fit_model_photoz(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+        """
+        Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for tmax
+        as well as theta, epsilon, Av and distance modulus
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
+            tmax = tmax * 0 - 2.28
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            zhat = obs[-5, 0, sn_index]
+            zhat_err = obs[-4, 0, sn_index] + 0.005
+            ztform = numpyro.sample('ztform', dist.Normal(0, 1))
+            z = numpyro.deterministic('z', zhat + zhat_err * ztform)
+            # z = jnp.array([0.01925012]) # zhat
+            muhat = obs[-3, 0, sn_index]
+            weights = self._calculate_band_weights(z)
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            Ds = Ds * 0 + 34.47
+            theta = theta * 0 + 1.27
+            AV = AV * 0 + 0.23
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            # plt.plot(self.model_wave, weights[0, :, 62])
+            # plt.show()
+            print(theta, AV, Ds, zhat, z)
+            print(flux)
+            # raise ValueError('Nope')
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
@@ -1610,6 +1675,7 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['photoz'] = args.get('photoz', False)
         args['jobsplit'] = args.get('jobsplit')
         if args['jobsplit'] is not None:
             args['snana'] = True
@@ -1706,7 +1772,10 @@ class SEDmodel(object):
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
         elif args['mode'].lower() == 'fitting':
-            if self.model_type == 'pop_RV':
+            if args['photoz']:
+                nuts_kernel = NUTS(self.fit_model_photoz, adapt_step_size=True, init_strategy=init_strategy,
+                                   max_tree_depth=10)
+            elif self.model_type == 'pop_RV':
                 nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_strategy,
                                    max_tree_depth=10)
             elif self.model_type == 'fixed_RV':
@@ -1837,7 +1906,7 @@ class SEDmodel(object):
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
                       drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
-                      mag=False):
+                      mag=False, photoz=False, chain_method='parallel'):
         """
         Method to fit light curve contained in SNANA-format text file using BayeSN model
 
@@ -1899,13 +1968,13 @@ class SEDmodel(object):
         samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
                                      fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, RV=RV, mu_R=mu_R,
-                                     sigma_R=sigma_R, mag=mag)
+                                     sigma_R=sigma_R, mag=mag, photoz=photoz, chain_method=chain_method)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
-            sigma_R=False, mag=False):
+            sigma_R=False, mag=False, photoz=False, chain_method='parallel'):
         """
         Method to fit light curve data loaded into memory with BayeSN model
 
@@ -2015,7 +2084,8 @@ class SEDmodel(object):
         data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
         data = data.at[9, :, 0].set(np.ones_like(t))
 
-        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
+        self.mw_ext = self.calculate_mw_extinction(data[-5, 0, :], data[-2, 0, :])
+        band_weights = self._calculate_band_weights(data[-5, 0, :])
 
         # Update dust parameters if specified manually
         if RV:
@@ -2027,13 +2097,16 @@ class SEDmodel(object):
             self.mu_R = jnp.array(mu_R)
             self.sigma_R = jnp.array(sigma_R)
             self.model_type = 'pop_RV'
-        if self.model_type == 'fixed_RV':
+        if photoz:
+            nuts_kernel = NUTS(self.fit_model_photoz, adapt_step_size=True, init_strategy=init_to_median(),
+                               max_tree_depth=10)
+        elif self.model_type == 'fixed_RV':
             nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
                                max_tree_depth=10)
         elif self.model_type == 'pop_RV':
             nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
                                max_tree_depth=10)
-        mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
+        mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method=chain_method)
         rng = PRNGKey(0)
 
         theta_val = 0
@@ -2589,8 +2662,9 @@ class SEDmodel(object):
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
-            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
+            self.mw_ext = self.calculate_mw_extinction(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :])
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
             idsurvey = [self.survey_id] * len(sne)
@@ -2759,8 +2833,9 @@ class SEDmodel(object):
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
-            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
+            self.mw_ext = self.calculate_mw_extinction(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :])
 
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
