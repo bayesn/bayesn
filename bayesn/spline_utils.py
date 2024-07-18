@@ -19,7 +19,7 @@ def invKD_irr(x):
 	----------
 	x : :py:class:`numpy.array`
 		Numpy array containing the locations of the cubic spline knots.
-	
+
 	Returns
 	-------
 	KD : :py:class:`numpy.array`

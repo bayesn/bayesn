@@ -196,7 +196,7 @@ class SEDmodel(object):
     """
 
     def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
-                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
+                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}, redlaw='F19'):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
         self.start_time = time.time()
@@ -263,10 +263,17 @@ class SEDmodel(object):
         self.J_l_T = device_put(self.J_l_T)
         self.hsiao_flux = device_put(self.hsiao_flux)
         self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
-        self.xk = jnp.array(
-            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
-             1e4 / 2600.])
-        KD_x = invKD_irr(self.xk)
+        if redlaw == 'F99':
+            self.xk = jnp.array(
+                [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110.,
+                    1e4 / 2700., 1e4 / 2600.])
+            KD_x = invKD_irr(self.xk)
+        # Loading F19 redlaw if necessary
+        if redlaw == 'F19':
+            F19_table = Table.read(os.path.join(self.__rootdir__, 'redlaws', 'F19_tabulated.dat'), format='ascii')
+            self.xk = F19_table['x'].data
+            self.yk = F19_table['k_3.02'].data + a['deltak'].data * (RV - 3.10) * 0.990
+            KD_x = invKD_irr(self.xk19)
         self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
@@ -593,7 +600,7 @@ class SEDmodel(object):
 
         model_spectra = H_grid * 10 ** (-0.4 * W_grid)
 
-        # Extinction----------------------------------------------------------
+        # Extinction-with-Fitzpatrick 1999------------------------------------
         f99_x0 = 4.596
         f99_gamma = 0.99
         f99_c2 = -0.824 + 4.717 / RV
@@ -619,6 +626,23 @@ class SEDmodel(object):
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
+        # Extinction-with-Fitzpatrick 2099------------------------------------
+        yk = jnp.zeros((num_batch, 102))
+        yk[:, i].set(a['k_3.02'].data + a['deltak'].data * (RV - 3.1) * 0.990
+        yk = yk.at[:, 0].set(-RV)
+        yk = yk.at[:, 1].set(0.26469 * RV / 3.1 - RV)
+        yk = yk.at[:, 2].set(0.82925 * RV / 3.1 - RV)
+        yk = yk.at[:, 3].set(-0.422809 + 1.00270 * RV + 2.13572e-4 * RV ** 2 - RV)
+        yk = yk.at[:, 4].set(-5.13540e-2 + 1.00216 * RV - 7.35778e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 5].set(0.700127 + 1.00184 * RV - 3.32598e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 6].set(
+            1.19456 + 1.01707 * RV - 5.46959e-3 * RV ** 2 + 7.97809e-4 * RV ** 3 - 4.45636e-5 * RV ** 4 - RV)
+        yk = yk.at[:, 7].set(f19_c1 + f19_c2 * self.xk[7] + f19_c3 * f19_d1)
+        yk = yk.at[:, 8].set(f19_c1 + f19_c2 * self.xk[8] + f19_c3 * f19_d2)
+
+        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])  # RV[..., None]
+        f_A = 10 ** (-0.4 * A)
+        model_spectra = model_spectra * f_A[..., None]
         return model_spectra
 
     def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
