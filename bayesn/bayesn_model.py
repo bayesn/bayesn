@@ -1994,6 +1994,9 @@ class SEDmodel(object):
         param_init['tauA_HM_tform'] = jnp.arctan(tauA_ / 1.)
         param_init['tauA_LM_tform'] = jnp.arctan(tauA_ / 1.)
 
+        param_init['AV_HM'] = jnp.array(np.random.exponential(tauA_, n_sne))
+        param_init['AV_LM'] = jnp.array(np.random.exponential(tauA_, n_sne))
+
         return param_init
 
     def parse_yaml_input(self, args, cmd_args):
