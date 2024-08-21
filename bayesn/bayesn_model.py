@@ -1612,6 +1612,19 @@ class SEDmodel(object):
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['peakmjd_key'] = args.get('peakmjd_key', 'PEAKMJD')
         args['jobsplit'] = args.get('jobsplit')
+        args['keep_list'] = args.get('keep_list')
+        if args['keep_list'] is not None:
+            keep_list = pd.read_csv(args['keep_list'], comment='#', delim_whitespace=True)
+            if keep_list.shape[1] == 1:
+                keep_list = np.loadtxt(args['keep_list'])
+            else:
+                if 'CID' in keep_list.columns:
+                    keep_list = keep_list.CID.values
+                elif 'SNID' in keep_list.columns:
+                    keep_list = keep_list.SNID.values
+            args['SNID_keep_list'] = keep_list.astype(str)
+        else:
+            args['SNID_keep_list'] = None
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2344,6 +2357,12 @@ class SEDmodel(object):
                             continue
                         sn = sne_file[sn_ind]
                         meta, data = sn.meta, sn.to_pandas()
+                        sn_name = meta['SNID']
+                        if isinstance(sn_name, bytes):
+                            sn_name = sn_name.decode('utf-8')
+                        sn_name = str(sn_name)
+                        if args['SNID_keep_list'] is not None and sn_name not in args['SNID_keep_list']:
+                            continue
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
                         peak_mjd = meta[args['peakmjd_key']]
@@ -2400,9 +2419,6 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        sn_name = meta['SNID']
-                        if isinstance(sn_name, bytes):
-                            sn_name = sn_name.decode('utf-8')
                         sne.append(sn_name)
                         peak_mjds.append(peak_mjd)
                         sn_type.append(meta.get('TYPE', 0))
@@ -2461,6 +2477,9 @@ class SEDmodel(object):
                     sn_name = meta['SNID']
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
+                    sn_name = str(sn_name)
+                    if args['SNID_keep_list'] is not None and sn_name not in args['SNID_keep_list']:
+                        continue
                     zhel = meta['REDSHIFT_HELIO']
                     zcmb = meta['REDSHIFT_FINAL']
                     zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
@@ -2559,6 +2578,9 @@ class SEDmodel(object):
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
+            if N_sn < 1:
+                raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
+                                 'SNIDs in the data?')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
             all_data = np.zeros((N_sn, N_obs, N_col))
@@ -2634,6 +2656,11 @@ class SEDmodel(object):
                 sn_files = row.files.split(',')
                 sn_lc = None
                 sn = row.SNID
+                if isinstance(sn, bytes):
+                    sn = sn.decode('utf-8')
+                sn = str(sn)
+                if args['SNID_keep_list'] is not None and sn not in args['SNID_keep_list']:
+                    continue
                 data_root = args['data_root']
                 for file in sn_files:
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
@@ -2727,6 +2754,9 @@ class SEDmodel(object):
                 snrmax2s.append(snrmax2)
                 snrmax3s.append(snrmax3)
             N_sn = sn_list.shape[0]
+            if len(n_obs) < 1:
+                raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
+                                 'SNIDs in the data?')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
             all_data = np.zeros((N_sn, N_obs, N_col))
@@ -2774,6 +2804,8 @@ class SEDmodel(object):
                                   'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
                                   'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
+            print(self.data.shape)
+            raise ValueError('Nope')
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
