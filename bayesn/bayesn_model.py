@@ -973,11 +973,11 @@ class SEDmodel(object):
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         mu_R_HM = numpyro.sample('mu_R_HM', dist.Uniform(1, 5))
-        sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(0.5))
+        sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(2))
         phi_alpha_R_HM = norm.cdf((self.trunc_val - mu_R_HM) / sigma_R_HM)
 
         mu_R_LM = numpyro.sample('mu_R_LM', dist.Uniform(1, 5))
-        sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(0.5))
+        sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(2))
         phi_alpha_R_LM = norm.cdf((self.trunc_val - mu_R_LM) / sigma_R_LM)
 
         tauA_HM_tform = numpyro.sample('tauA_HM_tform', dist.Uniform(0, jnp.pi / 2.))
@@ -992,7 +992,7 @@ class SEDmodel(object):
         sigma0_LM_tform = numpyro.sample('sigma0_LM_tform', dist.Uniform(0, jnp.pi / 2.))
         sigma0_LM = numpyro.deterministic('sigma0_LM', 0.1 * jnp.tan(sigma0_LM_tform))
 
-        M_step = numpyro.sample('M_step', dist.Uniform(-0.1, 0.1))
+        M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
 
         mass = obs[-7, 0, :]
         M_split = 10
@@ -1008,8 +1008,7 @@ class SEDmodel(object):
             Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
             Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
             Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
-            Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
-                phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
+            Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
             Rv = numpyro.deterministic('Rv', HM_flag * Rv_HM + (1 - HM_flag) * Rv_LM)
 
             M0 = self.M0 + (1 - HM_flag) * M_step
@@ -1076,11 +1075,11 @@ class SEDmodel(object):
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         mu_R_HM = numpyro.sample('mu_R_HM', dist.Uniform(1, 5))
-        sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(0.5))
+        sigma_R_HM = numpyro.sample('sigma_R_HM', dist.HalfNormal(2))
         phi_alpha_R_HM = norm.cdf((self.trunc_val - mu_R_HM) / sigma_R_HM)
 
         mu_R_LM = numpyro.sample('mu_R_LM', dist.Uniform(1, 5))
-        sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(0.5))
+        sigma_R_LM = numpyro.sample('sigma_R_LM', dist.HalfNormal(2))
         phi_alpha_R_LM = norm.cdf((self.trunc_val - mu_R_LM) / sigma_R_LM)
 
         tauA_HM_tform = numpyro.sample('tauA_HM_tform', dist.Uniform(0, jnp.pi / 2.))
