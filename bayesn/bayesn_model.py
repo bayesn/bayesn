@@ -2148,7 +2148,7 @@ class SEDmodel(object):
                                '1921033', '1921361', '1922067', '1923060', '1923155', '1923415',
                                '1925122', '1927242', '1929024', '1929063', '1929216', '1943111',
                                '1948209', '1948484', '1968046']
-            drop_list = drop_list + extra_drop_list #+ hres_drop_list
+            drop_list = drop_list # + extra_drop_list #+ hres_drop_list
             tdiffs = []
             sne, peak_mjds = [], []
             # For FITRES table
