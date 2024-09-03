@@ -2209,6 +2209,8 @@ class SEDmodel(object):
                 self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
                 self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
                 self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
+                self.fitres_table['PEAKMJD'] = samples['peak_MJD'].mean(axis=(0, 1))
+                self.fitres_table['PEAKMJDERR'] = samples['peak_MJD'].std(axis=(0, 1))
                 # if not args['fit_method'] == 'vi':
                 self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
                 self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
@@ -2804,8 +2806,6 @@ class SEDmodel(object):
                                   'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
                                   'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
-            print(self.data.shape)
-            raise ValueError('Nope')
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
