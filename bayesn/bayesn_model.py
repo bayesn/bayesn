@@ -1844,14 +1844,11 @@ class SEDmodel(object):
             map = jax.vmap(fit_vmap_quick_tmax, in_axes=(2, 0))
             medians = map(self.data, self.band_weights)
             tmax = medians['tmax']
-            print(tmax)
-            print(self.data[0, ...])
-            print(self.data.shape)
             self.data = self.data.at[0, ...].set(self.data[0, ...] - tmax.T)
             keep = (self.data[0, ...] > -10) & (self.data[0, ...] < 40)
             self.data = self.data.at[-1, ...].set(self.data[-1, ...] * keep)
             new_data = jnp.zeros_like(self.data)
-            start = time.time()
+            # start = time.time()
             for i in range(self.data.shape[-1]):
                 sn_data = self.data[..., i]
                 sn_data = sn_data[:, sn_data[-1, :] > 0]
@@ -1859,18 +1856,18 @@ class SEDmodel(object):
                 new_data = new_data.at[:, :N_data, i].set(sn_data)
                 new_data = new_data.at[2, N_data:, i].set(1 / jnp.sqrt(2 * np.pi))
             self.data = new_data
-            end = time.time()
-            print('Took', end - start)
+            # end = time.time()
+            # print('Took', end - start)
             drop_rows = (self.data[-1, ...].sum(axis=1) < 1).sum()
             if drop_rows > 0:
                 self.data = self.data[:, :-drop_rows, :]
-            print(self.data[-1, ...])
-            print(self.data[0, ...])
-            print(self.data.shape)
-            medians = map(self.data, self.band_weights)
-            tmax = medians['tmax']
-            print(tmax)
-            raise ValueError('Nope')
+            # print(self.data[-1, ...])
+            # print(self.data[0, ...])
+            # print(self.data.shape)
+            # medians = map(self.data, self.band_weights)
+            # tmax = medians['tmax']
+            # print(tmax)
+            # raise ValueError('Nope')
 
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
