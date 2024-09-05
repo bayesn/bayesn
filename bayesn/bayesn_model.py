@@ -1047,7 +1047,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
 
@@ -1146,7 +1147,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_mag_batch(M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
 
@@ -1247,7 +1249,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
 
@@ -1320,7 +1323,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
             with numpyro.handlers.mask(mask=mask):
@@ -1380,7 +1384,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
@@ -1448,7 +1453,8 @@ class SEDmodel(object):
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
@@ -1535,7 +1541,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
@@ -1631,7 +1638,8 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
             flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
 
