@@ -1,4 +1,5 @@
-include bayesn/data/hsiao.h5
+include bayesn/data/*
+include bayesn/data/example_lcs/*
 include bayesn/bayesn-filters/*
 include bayesn/bayesn-filters/filters/*
 include bayesn/bayesn-filters/filters/CTIO/*
@@ -11,7 +12,6 @@ include bayesn/bayesn-filters/filters/LCO/*
 include bayesn/bayesn-filters/filters/LCO/Dupont/*
 include bayesn/bayesn-filters/filters/LCO/Swope/*
 include bayesn/bayesn-filters/filters/LSST/*
-include bayesn/bayesn-filters/filters/LSST/2017-04_approx/*
 include bayesn/bayesn-filters/filters/NULL/*
 include bayesn/bayesn-filters/filters/PS1/*
 include bayesn/bayesn-filters/filters/standard/*
@@ -23,6 +23,8 @@ include bayesn/bayesn-filters/filters/Swift/UVOT/*
 include bayesn/bayesn-filters/filters/USNO/*
 include bayesn/bayesn-filters/filters/USNO/USNO40/*
 include bayesn/bayesn-filters/filters/ZTF/*
+include bayesn/bayesn-filters/filters/ATLAS/ATLAS/*
+include bayesn/bayesn-filters/filters/UKIRT/WFCAM/*
 include bayesn/bayesn-filters/standards/*
 include bayesn/model_files/M20_model/BAYESN.INFO
 include bayesn/model_files/M20_model/BAYESN.YAML
@@ -31,4 +33,3 @@ include bayesn/model_files/T21_model/BAYESN.YAML
 include bayesn/model_files/W22_model/BAYESN.INFO
 include bayesn/model_files/W22_model/BAYESN.YAML
 include bayesn/model_files/README.md
-

@@ -1,352 +1,384 @@
-standards_root: standards
 standards:
   vega:
-    path: alpha_lyr_stis_010.fits
+    path: standards/alpha_lyr_stis_010.fits
   bd17:
-    path: bd_17d4708_stisnic_007.dat
-filters_root: filters
+    path: standards/bd_17d4708_stisnic_007.dat
 filters:
   B:
     magsys: vega
     magzero: 0.0
-    path: standard/stritzinger/b_stritzinger
+    path: filters/standard/stritzinger/b_stritzinger
   B_CSP:
     magsys: bd17
     magzero: 9.896
-    path: LCO/Swope/B_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/B_tel_ccd_atm_ext_1.2.dat
   B_CSP2:
     magsys: vega
     magzero: 0.03
-    path: LCO/Swope/B_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/B_CSP2_tel_ccd_atm_ext_1.2.dat
   B_SWIFT:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonB_UVOT.dat
+    path: filters/Swift/UVOT/photonB_UVOT.dat
   F105W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/IR/F105W.dat
+    path: filters/HST/WFC3/IR/F105W.dat
   F125W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/IR/F125W.dat
+    path: filters/HST/WFC3/IR/F125W.dat
   F140W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/IR/F140W.dat
+    path: filters/HST/WFC3/IR/F140W.dat
   F160W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/IR/F160W.dat
+    path: filters/HST/WFC3/IR/F160W.dat
   F225W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F225W.dat
+    path: filters/HST/WFC3/UVIS2/F225W.dat
   F275W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F275W.dat
+    path: filters/HST/WFC3/UVIS2/F275W.dat
   F300X:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F300X.dat
+    path: filters/HST/WFC3/UVIS2/F300X.dat
   F336W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F336W.dat
+    path: filters/HST/WFC3/UVIS2/F336W.dat
   F390W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F390W.dat
+    path: filters/HST/WFC3/UVIS2/F390W.dat
   F438W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F438W.dat
+    path: filters/HST/WFC3/UVIS2/F438W.dat
   F475W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F475W.dat
+    path: filters/HST/WFC3/UVIS2/F475W.dat
   F555W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F555W.dat
+    path: filters/HST/WFC3/UVIS2/F555W.dat
   F625W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F625W.dat
+    path: filters/HST/WFC3/UVIS2/F625W.dat
   F814W:
     magsys: ab
     magzero: 0.0
-    path: HST/WFC3/UVIS2/F814W.dat
+    path: filters/HST/WFC3/UVIS2/F814W.dat
   H:
     magsys: vega
     magzero: 0.0
-    path: standard/2MASS_PAIRITEL/2MASS_PAIRITEL_H.dat
+    path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_H.dat
   H_AND:
     magsys: vega
     magzero: 0.0
-    path: CTIO/ANDICAM/Handicam.dat
+    path: filters/CTIO/ANDICAM/Handicam.dat
   H_P:
     magsys: vega
     magzero: 0.0
-    path: standard/Persson/hfilter
+    path: filters/standard/Persson/hfilter
   H_RC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Swope/H_SWO_TAM_scan_atm.dat
+    path: filters/LCO/Swope/H_SWO_TAM_scan_atm.dat
   H_RCDP:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/H_RetroCam_duPont_TAMU_atm.dat
+    path: filters/LCO/Dupont/H_RetroCam_duPont_TAMU_atm.dat
   H_WIRC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/H_DUP_TAM_scan_atm.dat
+    path: filters/LCO/Dupont/H_DUP_TAM_scan_atm.dat
+  H_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/H_total.dat
   I:
     magsys: vega
     magzero: 0.0
-    path: standard/stritzinger/i_stritzinger
+    path: filters/standard/stritzinger/i_stritzinger
   J:
     magsys: vega
     magzero: 0.0
-    path: standard/2MASS_PAIRITEL/2MASS_PAIRITEL_J.dat
+    path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_J.dat
   J_AND:
     magsys: vega
     magzero: 0.0
-    path: CTIO/ANDICAM/Jandicam.dat
+    path: filters/CTIO/ANDICAM/Jandicam.dat
   J_P:
     magsys: vega
     magzero: 0.0
-    path: standard/Persson/jfilter
+    path: filters/standard/Persson/jfilter
   J_RC1:
     magsys: vega
     magzero: 0.0
-    path: LCO/Swope/Jrc1_SWO_TAM_scan_atm.dat
+    path: filters/LCO/Swope/Jrc1_SWO_TAM_scan_atm.dat
   J_RC2:
     magsys: vega
     magzero: 0.0
-    path: LCO/Swope/Jrc2_SWO_TAM_scan_atm.dat
+    path: filters/LCO/Swope/Jrc2_SWO_TAM_scan_atm.dat
   J_RCDP:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/J_RetroCam_duPont_TAMU_atm.dat
+    path: filters/LCO/Dupont/J_RetroCam_duPont_TAMU_atm.dat
   J_WIRC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/J_DUP_TAM_scan_atm.dat
+    path: filters/LCO/Dupont/J_DUP_TAM_scan_atm.dat
+  J_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/J_total.dat
   K:
     magsys: vega
     magzero: 0.0
-    path: standard/2MASS_PAIRITEL/2MASS_PAIRITEL_Ks.dat
+    path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_Ks.dat
   K_AND:
     magsys: vega
     magzero: 0.0
-    path: CTIO/ANDICAM/Kandicam.dat
+    path: filters/CTIO/ANDICAM/Kandicam.dat
   K_P:
     magsys: vega
     magzero: 0.0
-    path: standard/Persson/kfilter
+    path: filters/standard/Persson/kfilter
   K_WIRC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/K_DUP_TAM_scan_atm.dat
+    path: filters/LCO/Dupont/K_DUP_TAM_scan_atm.dat
+  K_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/K_total.dat
   R:
     magsys: vega
     magzero: 0.0
-    path: standard/stritzinger/r_stritzinger
+    path: filters/standard/stritzinger/r_stritzinger
   U:
     magsys: vega
     magzero: 0.0
-    path: standard/stritzinger/u_stritzinger
+    path: filters/standard/stritzinger/u_stritzinger
   UVM2:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonUVM2.dat
+    path: filters/Swift/UVOT/photonUVM2.dat
   UVW1:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonUVW1.dat
+    path: filters/Swift/UVOT/photonUVW1.dat
   UVW2:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonUVW2.dat
+    path: filters/Swift/UVOT/photonUVW2.dat
   U_SWIFT:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonU_UVOT.dat
+    path: filters/Swift/UVOT/photonU_UVOT.dat
   V:
     magsys: vega
     magzero: 0.0
-    path: standard/stritzinger/v_stritzinger
+    path: filters/standard/stritzinger/v_stritzinger
   V_CSP:
     magsys: bd17
     magzero: 9.494
-    path: LCO/Swope/V_LC9844_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/V_LC9844_tel_ccd_atm_ext_1.2.dat
   V_CSP2:
     magsys: vega
     magzero: 0.03
-    path: LCO/Swope/V_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/V_CSP2_tel_ccd_atm_ext_1.2.dat
   V_CSP_3009:
     magsys: bd17
     magzero: 9.488
-    path: LCO/Swope/V_LC3009_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/V_LC3009_tel_ccd_atm_ext_1.2.dat
   V_CSP_3014:
     magsys: bd17
     magzero: 9.492
-    path: LCO/Swope/V_LC3014_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/V_LC3014_tel_ccd_atm_ext_1.2.dat
   V_SWIFT:
     magsys: vega
     magzero: 0.0
-    path: Swift/UVOT/photonV_UVOT.dat
+    path: filters/Swift/UVOT/photonV_UVOT.dat
   Y_AND:
     magsys: vega
     magzero: 0.0
-    path: CTIO/ANDICAM/Yandicam.dat
+    path: filters/CTIO/ANDICAM/Yandicam.dat
   Y_P:
     magsys: vega
     magzero: 0.0
-    path: standard/Persson/yfilter
+    path: filters/standard/Persson/yfilter
   Y_RC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Swope/Y_SWO_TAM_scan_atm.dat
+    path: filters/LCO/Swope/Y_SWO_TAM_scan_atm.dat
   Y_RCDP:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/Y_RetroCam_duPont_TAMU_atm.dat
+    path: filters/LCO/Dupont/Y_RetroCam_duPont_TAMU_atm.dat
   Y_WIRC:
     magsys: vega
     magzero: 0.0
-    path: LCO/Dupont/Y_DUP_TAM_scan_atm.dat
+    path: filters/LCO/Dupont/Y_DUP_TAM_scan_atm.dat
+  Y_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/Y_total.dat
   g_CSP:
     magsys: bd17
     magzero: 9.644
-    path: LCO/Swope/g_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/g_tel_ccd_atm_ext_1.2.dat
   g_CSP2:
     magsys: bd17
     magzero: 9.64
-    path: LCO/Swope/g_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/g_CSP2_tel_ccd_atm_ext_1.2.dat
   g_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_g.txt
+    path: filters/DECam/decam_g.txt
   g_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_g.dat
+    path: filters/LSST/total_g.dat
+    lam_unit: nm
   g_PS1:
     magsys: ab
     magzero: 0.0
-    path: PS1/g_filt_revised.txt
+    path: filters/PS1/g_filt_revised.txt
   g_prime:
     magsys: bd17
     magzero: 9.64
-    path: USNO/USNO40/usno_g.res
+    path: filters/USNO/USNO40/usno_g.res
   i_CSP:
     magsys: bd17
     magzero: 9.25
-    path: LCO/Swope/i_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/i_tel_ccd_atm_ext_1.2.dat
   i_CSP2:
     magsys: bd17
     magzero: 9.25
-    path: LCO/Swope/i_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/i_CSP2_tel_ccd_atm_ext_1.2.dat
   i_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_i.txt
+    path: filters/DECam/decam_i.txt
   i_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_i.dat
+    path: filters/LSST/total_i.dat
+    lam_unit: nm
   i_PS1:
     magsys: ab
     magzero: 0.0
-    path: PS1/i_filt_tonry.txt
+    path: filters/PS1/i_filt_tonry.txt
   i_prime:
     magsys: bd17
     magzero: 9.25
-    path: USNO/USNO40/usno_i.res
+    path: filters/USNO/USNO40/usno_i.res
   p48g:
     magsys: ab
     magzero: 0.0
-    path: ZTF/p48g.txt
+    path: filters/ZTF/p48g.txt
   p48i:
     magsys: ab
     magzero: 0.0
-    path: ZTF/p48i.txt
+    path: filters/ZTF/p48i.txt
   p48r:
     magsys: ab
     magzero: 0.0
-    path: ZTF/p48r.txt
+    path: filters/ZTF/p48r.txt
+  c_ATLAS:
+    magsys: ab
+    magzero: 0.0
+    path: filters/ATLAS/ATLAS/c_total.dat
+  o_ATLAS:
+    magsys: ab
+    magzero: 0.0
+    path: filters/ATLAS/ATLAS/o_total.dat
   r_CSP:
     magsys: bd17
     magzero: 9.352
-    path: LCO/Swope/r_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/r_tel_ccd_atm_ext_1.2.dat
   r_CSP2:
     magsys: bd17
     magzero: 9.35
-    path: LCO/Swope/r_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/r_CSP2_tel_ccd_atm_ext_1.2.dat
   r_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_r.txt
+    path: filters/DECam/decam_r.txt
   r_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_r.dat
+    path: filters/LSST/total_r.dat
+    lam_unit: nm
   r_PS1:
     magsys: ab
     magzero: 0.0
-    path: PS1/r_filt_tonry.txt
+    path: filters/PS1/r_filt_tonry.txt
   r_prime:
     magsys: bd17
     magzero: 9.35
-    path: USNO/USNO40/usno_r.res
+    path: filters/USNO/USNO40/usno_r.res
   u_CSP:
     magsys: bd17
     magzero: 10.518
-    path: LCO/Swope/u_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/u_tel_ccd_atm_ext_1.2.dat
   u_CSP2:
     magsys: bd17
     magzero: 10.56
-    path: LCO/Swope/u_CSP2_tel_ccd_atm_ext_1.2.dat
+    path: filters/LCO/Swope/u_CSP2_tel_ccd_atm_ext_1.2.dat
   u_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_u.txt
+    path: filters/DECam/decam_u.txt
   u_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_u.dat
+    path: filters/LSST/total_u.dat
+    lam_unit: nm
   u_prime:
     magsys: bd17
     magzero: 10.56
-    path: USNO/USNO40/usno_u.res
+    path: filters/USNO/USNO40/usno_u.res
   y_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_y.txt
+    path: filters/DECam/decam_y.txt
   y_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_y.dat
+    path: filters/LSST/total_y.dat
+    lam_unit: nm
   y_PS1:
     magsys: ab
     magzero: 0.0
-    path: PS1/y_filt_tonry.txt
+    path: filters/PS1/y_filt_tonry.txt
   z_DES:
     magsys: ab
     magzero: 0.0
-    path: DECam/decam_z.txt
+    path: filters/DECam/decam_z.txt
   z_LSST:
     magsys: ab
     magzero: 0.0
-    path: LSST/2017-04_approx/LSST_z.dat
+    path: filters/LSST/total_z.dat
+    lam_unit: nm
   z_PS1:
     magsys: ab
     magzero: 0.0
-    path: PS1/z_filt_tonry.txt
+    path: filters/PS1/z_filt_tonry.txt
   z_prime:
     magsys: bd17
     magzero: 9.23
-    path: USNO/USNO40/usno_z.res
+    path: filters/USNO/USNO40/usno_z.res
+  z_WFCAM:
+    magsys: vega
+    magzero: 0.0
+    path: filters/UKIRT/WFCAM/z_total.dat

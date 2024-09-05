@@ -3,8 +3,8 @@
 Defining Filters
 ===================
 
-BayeSN includes a selection of filters for convenience. Alternatively, you can use your own filters through a simple
-yaml file, allowing new or updated filters to be easily implemented independently of updates to the package.
+BayeSN includes a selection of filters and standards for convenience. Alternatively, you can use your own through a
+simple yaml file, allowing new or updated filters to be easily implemented independently of updates to the package.
 
 Built-in filters
 -----------------
@@ -100,15 +100,31 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Names: `Y_AND`, `J_AND`, `H_AND`, `K_AND`
         - Source:
 
+- UKIRT
+
+    - WFCAM *zYJHK* filters
+
+        - Names: `z_WFCAM`, `Y_WFCAM`, `J_WFCAM`, `H_WFCAM`, `K_WFCAM`
+        - Source: Hewett+06, 2009MNRAS.394..675H
+
+- ATLAS
+
+    - ATLAS *co* filters
+
+        - Names: `c_ATLAS`, `o_ATLAS`
+        - Source: Tonry+18, 2018PASP..130f4505T
+
+
 Specifying custom filters
 ---------------------------
 
 One of the arguments for the ``input.yaml`` file outlined in :ref:`running_bayesn`, ``filters``, is used to specify a
-path to a separate yaml file which details any custom filters you wish to use. If this argument is not specified,
-the code will default to using the built-in filters.
+path to a separate yaml file which details any custom filters and standards you wish to add beyond those already
+included. Any custom filters or standards will get included along with those built-in, so you'll be able to mix and
+match between in-built filters and custom ones. Note that if you give a custom filter/standard the same name as a
+built-in filter/standard, your custom one will be used instead of the built-in one.
 
-This yaml file can be a small file containing a small number of filters, or one large file containing all the filters
-you might ever possibly want to use which only needs to be made once. This file should have the following structure:
+The filter yaml to specify custom filters and standards should have the following structure:
 
 .. code-block:: yaml
 
@@ -135,11 +151,7 @@ These arguments are described as follows:
 - ``standards_root``: A directory which all paths in ``standards`` are defined relative to. For example, if the standard spectrum for Vega is located at ``\data\standards\VEGA_STANDARD.fits`` and BD17 is at ``\data\filters\BD17_STANDARD.fits``, you can just set ``standards_root: \data\standards`` and use ``path: VEGA_STANDARD.fits`` within the key for Vega and similar for BD17. Alternatively, if you use a relative path this will be treated as being relative to the location of the filters yaml file. You can also use an environment variable here as part of the path e.g. $SNDATA_ROOT. This is an optional argument present for convenience, if not specified it is assumed that the paths for each band are all full paths rather than paths relative to ``standards_root``.
 - ``standards``: Keys in here define all of the standards you wish to use. For each standard, the key is the name (this can be any string of your choosing), and each must have a ``path`` specifying the location of the reference spectrum for each standard - this can be either a FITS file with named columns for WAVELENGTH and FLUX, or a text file with columns for each.
 - ``filters_root``: This specifies a directory which all paths in ``filters`` are defined relative to, behaving exactly as ``standards_root`` does for ``standards``. Again, if you use a relative path this will be treated as being relative to the location of the filters yaml file.
-- ``filters``: Keys in here define all of the filters you wish you use. For each filter, the key is the name (again, this can be any string of your choosing). Each filter must have a ``magsys`` key which either corresponds to one of the standard names defined in ``standards`` or is set to 'ab' (see note below), defining the magnitude system for each band. Each filter must also have a ``magzero`` key, specifying the magnitude offset for the filter, and a ``path`` specifying the location of the filter response for each filter. Optionally, you can provide a ``lam_unit`` key - by default, BayeSN expects you to use filter responses with wavelength in Angstroms, but you can specify either 'nm' or 'micron' if your filter responses use nanometres or micrometres respectively and the units will be converted into Angstroms under-the-hood.
-
-Please note, the AB reference source is treated as an analytic function within the code so nothing needs to be included
-in ``standards`` for the AB magnitude system, any filter with ``magsys: ab`` will automatically work. If your filters
-only use the AB magnitude system, you can just omit the ``standards`` and ``standards_root`` keys entirely.
+- ``filters``: Keys in here define all of the filters you wish you use. For each filter, the key is the name (again, this can be any string of your choosing). Each filter must have a ``magsys`` key which either corresponds to one of the built-in standards ('vega', 'bd17' or 'ab') or a custom standard name defined in ``standards``, defining the magnitude system for each band. Each filter must also have a ``magzero`` key, specifying the magnitude offset for the filter, and a ``path`` specifying the location of the filter response for each filter. Optionally, you can provide a ``lam_unit`` key - by default, BayeSN expects you to use filter responses with wavelength in Angstroms, but you can specify either 'nm' or 'micron' if your filter responses use nanometres or micrometres respectively and the units will be converted into Angstroms under-the-hood.
 
 Automatic filter dropping
 --------------------------

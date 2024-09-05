@@ -206,10 +206,7 @@ class SEDmodel(object):
         self.__root_dir__ = os.path.dirname(os.path.abspath(__file__))
         print(f'Currently working in {os.getcwd()}')
 
-        # Use built-in filters if filters.yaml is not provided
-        if filter_yaml is None:
-            filter_yaml = os.path.join(self.__root_dir__, 'bayesn-filters', 'filters.yaml')
-
+        # Load built-in filter_yaml and add custom filters if specified
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
         self.hsiao_interp = None
@@ -231,6 +228,9 @@ class SEDmodel(object):
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
                                     f'of the built-in model {built_in_models}')
 
+        # Define example light curve for jupyter notebook demos
+        self.example_lc = os.path.join(self.__root_dir__, 'data', 'example_lcs', 'Foundation_DR1_2016W.txt')
+
         self.l_knots = jnp.array(params['L_KNOTS'])
         self.tau_knots = jnp.array(params['TAU_KNOTS'])
         self.W0 = jnp.array(params['W0'])
@@ -251,21 +251,6 @@ class SEDmodel(object):
 
         self.used_band_inds = None
         self._setup_band_weights()
-
-        KD_l = invKD_irr(self.l_knots)
-        self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
-        self.KD_t = device_put(invKD_irr(self.tau_knots))
-        self._load_hsiao_template()
-
-        self.ZPT = 27.5  # Zero point
-        self.J_l_T = device_put(self.J_l_T)
-        self.hsiao_flux = device_put(self.hsiao_flux)
-        self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
-        self.xk = jnp.array(
-            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
-             1e4 / 2600.])
-        KD_x = invKD_irr(self.xk)
-        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
@@ -327,19 +312,51 @@ class SEDmodel(object):
                                   band_max_log_wave, band_spacing)
         band_wave = 10 ** band_log_wave
 
-        if not os.path.exists(self.filter_yaml):
-            raise FileNotFoundError(f'Specified filter yaml {self.filter_yaml} does not exist')
-        with open(self.filter_yaml, 'r') as file:
+        # Load in-built filter yaml first
+        with open(os.path.join(self.__root_dir__, 'bayesn-filters', 'filters.yaml'), 'r') as file:
             filter_dict = yaml.load(file)
 
-        # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
-        if 'standards' in filter_dict.keys():
-            if 'standards_root' in filter_dict.keys():
-                standards_root = filter_dict['standards_root']
+        # Prepend root locations for in-built filters
+        for key, val in filter_dict['standards'].items():
+            filter_dict['standards'][key]['path'] = os.path.join(self.__root_dir__, 'bayesn-filters', val['path'])
+
+        for key, val in filter_dict['filters'].items():
+            filter_dict['filters'][key]['path'] = os.path.join(self.__root_dir__, 'bayesn-filters', val['path'])
+
+        # Add custom filters, if specified
+        if self.filter_yaml is not None:
+            if not os.path.exists(self.filter_yaml):
+                raise FileNotFoundError(f'Specified filter yaml {self.filter_yaml} does not exist')
+            with open(self.filter_yaml, 'r') as file:
+                custom_filter_dict = yaml.load(file)
+            # Add custom standards if specified---------------------
+            if 'standards' in custom_filter_dict.keys():
+                if 'standards_root' in custom_filter_dict.keys():
+                    standards_root = custom_filter_dict['standards_root']
+                else:
+                    standards_root = ''
+                for key, val in custom_filter_dict['standards'].items():
+                    path = os.path.join(standards_root, val['path'])
+                    # Fill environment variables if used e.g. $SNDATA_ROOT
+                    split_path = os.path.normpath(path).split(os.path.sep)
+                    root = split_path[0]
+                    if root[:1] == '$':
+                        env = os.getenv(root[1:])
+                        if env is None:
+                            raise FileNotFoundError(f'The environment variable {root} was not found')
+                        path = os.path.join(env, *split_path[1:])
+                    elif not os.path.isabs(path):  # If relative path, prepend yaml location
+                        path = os.path.join(os.path.split(os.path.abspath(self.filter_yaml))[0], path)
+                    custom_filter_dict['standards'][key]['path'] = path
+                    # Add custom standard and overwrite existing one of same name if present
+                    filter_dict['standards'][key] = custom_filter_dict['standards'][key]
+            # Add custom filters
+            if 'filters_root' in custom_filter_dict.keys():
+                filters_root = custom_filter_dict['filters_root']
             else:
-                standards_root = ''
-            for key, val in filter_dict['standards'].items():
-                path = os.path.join(standards_root, val['path'])
+                filters_root = ''
+            for key, val in custom_filter_dict['filters'].items():
+                path = os.path.join(filters_root, val['path'])
                 # Fill environment variables if used e.g. $SNDATA_ROOT
                 split_path = os.path.normpath(path).split(os.path.sep)
                 root = split_path[0]
@@ -349,30 +366,29 @@ class SEDmodel(object):
                         raise FileNotFoundError(f'The environment variable {root} was not found')
                     path = os.path.join(env, *split_path[1:])
                 elif not os.path.isabs(path):  # If relative path, prepend yaml location
-                    path = os.path.join(os.path.split(self.filter_yaml)[0], path)
-                if '.fits' in path:  # If fits file
-                    with fits.open(path) as hdu:
-                        standard_df = pd.DataFrame.from_records(hdu[1].data)
-                    standard_lam, standard_f = standard_df.WAVELENGTH.values, standard_df.FLUX.values
-                else:
-                    standard_txt = np.loadtxt(path)
-                    standard_lam, standard_f = standard_txt[:, 0], standard_txt[:, 1]
-                filter_dict['standards'][key]['lam'] = standard_lam
-                filter_dict['standards'][key]['f_lam'] = standard_f
-        else:
-            print('You have not provided any standard spectra e.g. Vega in filter input yaml, this is fine as long '
-                  'as everything is AB, otherwise make sure to add this')
+                    path = os.path.join(os.path.split(os.path.abspath(self.filter_yaml))[0], path)
+                custom_filter_dict['filters'][key]['path'] = path
+                # Add custom filter and overwrite existing one of same name if present
+                filter_dict['filters'][key] = custom_filter_dict['filters'][key]
+
+        # Load standard spectra if necessary, AB is just calculated analytically so no standard spectrum is required----
+        for key, val in filter_dict['standards'].items():
+            path = val['path']
+            if '.fits' in path:  # If fits file
+                with fits.open(path) as hdu:
+                    standard_df = pd.DataFrame.from_records(hdu[1].data)
+                standard_lam, standard_f = standard_df.WAVELENGTH.values, standard_df.FLUX.values
+            else:
+                standard_txt = np.loadtxt(path)
+                standard_lam, standard_f = standard_txt[:, 0], standard_txt[:, 1]
+            filter_dict['standards'][key]['lam'] = standard_lam
+            filter_dict['standards'][key]['f_lam'] = standard_f
 
         def ab_standard_flam(l):  # Can just use analytic function for AB spectrum
             f = (const.c.to('AA/s').value / 1e23) * (l ** -2) * 10 ** (-48.6 / 2.5) * 1e23
             return f
 
         # Load filters------------------------------
-        if 'filters_root' in filter_dict.keys():
-            filters_root = filter_dict['filters_root']
-        else:
-            filters_root = ''
-
         band_weights, zps, offsets = [], [], []
         self.band_dict, self.zp_dict, self.band_lim_dict = {}, {}, {}
 
@@ -388,22 +404,11 @@ class SEDmodel(object):
 
         band_ind = 1
         for key, val in filter_dict['filters'].items():
-            path = os.path.join(filters_root, val['path'])
-            # Fill environment variables if used e.g. $SNDATA_ROOT
-            split_path = os.path.normpath(path).split(os.path.sep)
-            root = split_path[0]
-            if root[:1] == '$':
-                env = os.getenv(root[1:])
-                if env is None:
-                    raise FileNotFoundError(f'The environment variable {root} was not found')
-                path = os.path.join(env, *split_path[1:])
-            elif not os.path.isabs(path):  # If relative path, prepend yaml location
-                path = os.path.join(os.path.split(self.filter_yaml)[0], path)
             band, magsys, offset = key, val['magsys'], val['magzero']
             try:
-                R = np.loadtxt(path)
+                R = np.loadtxt(val['path'])
             except:
-                raise FileNotFoundError(f'Filter response not found for {key}')
+                raise FileNotFoundError(f'Filter response file {val["path"]} not found for {key}')
 
             # Convert wavelength units if required, model is defined in Angstroms
             units = val.get('lam_unit', 'AA')
@@ -465,6 +470,27 @@ class SEDmodel(object):
         self.band_interpolate_spacing = band_spacing
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
+
+        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
+        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
+
+        KD_l = invKD_irr(self.l_knots)
+        self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
+        self.KD_t = device_put(invKD_irr(self.tau_knots))
+        self._load_hsiao_template()
+        self.sim = False  # Keep track of whether data is simulated
+
+        self.ZPT = 27.5  # Zero point
+        self.J_l_T = device_put(self.J_l_T)
+        self.hsiao_flux = device_put(self.hsiao_flux)
+        self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
+        self.xk = jnp.array(
+            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
+             1e4 / 2600.])
+        KD_x = invKD_irr(self.xk)
+        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
 
     def _calculate_band_weights(self, redshifts, ebv):
         """
@@ -592,7 +618,21 @@ class SEDmodel(object):
         yk = yk.at[:, 7].set(f99_c1 + f99_c2 * self.xk[7] + f99_c3 * f99_d1)
         yk = yk.at[:, 8].set(f99_c1 + f99_c2 * self.xk[8] + f99_c3 * f99_d2)
 
-        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])  # RV[..., None]
+        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])
+
+        c2 = -0.824 + 4.717 / RV[..., None]
+        c1 = 2.030 - 3.007 * c2
+        x2 = self.uv_x * self.uv_x
+        y = x2 - f99_x0 * f99_x0
+        d = x2 / (y * y + x2 * f99_gamma * f99_gamma)
+        k = c1 + c2 * self.uv_x + f99_c3 * d
+
+        A = A.at[:, self.uv_ind1].set(AV[..., None] * (1. + k / RV[..., None]))
+        y = self.uv_x - f99_c5
+        y2 = y * y
+        k += f99_c4 * (0.5392 * y2 + 0.05644 * y2 * y)
+        A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[self.uv_ind3] / RV[..., None]))
+
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
@@ -771,7 +811,7 @@ class SEDmodel(object):
 
         return X
 
-    def fit_model_globalRV(self, obs, weights):
+    def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -782,6 +822,19 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
+
+        Returns
+        -------
 
         """
         sample_size = obs.shape[-1]
@@ -820,7 +873,56 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_popRV(self, obs, weights):
+    def fit_model_globalRV_vi(self, obs, weights):
+        """
+        Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
+        tmax as well as theta, epsilon, Av and distance modulus. This model is slightly modified for ZLTN VI.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
+    def fit_model_popRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
         maximum as well as theta, epsilon, AV, RV and distance modulus.
@@ -831,6 +933,16 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
 
         """
         sample_size = obs.shape[-1]
@@ -1732,6 +1844,7 @@ class SEDmodel(object):
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
 
         print(f'Current mode: {args["mode"]}')
+        print('Running...')
 
         if args['mode'].lower() == 'training_globalrv':
             nuts_kernel = NUTS(self.train_model_globalRV, adapt_step_size=True, target_accept_prob=0.8,
@@ -2295,6 +2408,17 @@ class SEDmodel(object):
                         mwebvs.append(meta.get('MWEBV', -9.))
                         host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                         host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
+                        if self.sim:
+                            sim_gentypes.append(meta['SIM_GENTYPE'])
+                            sim_template_ids.append(meta['SIM_TEMPLATE_INDEX'])
+                            sim_libids.append(meta['SIM_LIBID'])
+                            sim_zcmbs.append(meta['SIM_REDSHIFT_CMB'])
+                            sim_vpecs.append(meta['SIM_VPEC'])
+                            sim_dlmags.append(meta['SIM_DLMU'])
+                            sim_pkmjds.append(meta['SIM_PEAKMJD'])
+                            sim_thetas.append(meta['SIM_THETA'])
+                            sim_AVs.append(meta['SIM_AV'])
+                            sim_RVs.append(meta['SIM_RV'])
                         snrmax1 = np.max(lc.flux / lc.flux_err)
                         lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                         if lc_snr2.shape[0] == 0:
