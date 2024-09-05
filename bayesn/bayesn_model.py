@@ -631,7 +631,7 @@ class SEDmodel(object):
         y = self.uv_x - f99_c5
         y2 = y * y
         k += f99_c4 * (0.5392 * y2 + 0.05644 * y2 * y)
-        A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[self.uv_ind3] / RV[..., None]))
+        A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[..., self.uv_ind3] / RV[..., None]))
 
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
