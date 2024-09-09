@@ -1867,7 +1867,8 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
-        args['jobsplit'] = args.get('jobsplit')
+        args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['ignore_file'] = args.get('ignore_file', None)
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2233,6 +2234,12 @@ class SEDmodel(object):
             raise ValueError('If using data_table, please also pass data_root (which defines the location that the '
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
+        if args['ignore_file'] is not None:
+            ignore_file = pd.read_csv(args['ignore_file'], names=['IGNORE', 'CID', 'MJD', 'BAND'], sep='\s+')
+        else:
+            ignore_file = pd.DataFrame([], columns=['IGNORE', 'CID', 'MJD', 'BAND'])
+        ignore_file['dropstr'] = ignore_file.apply(lambda row: f'{row.MJD:.2f}{row.BAND}', axis=1)
+        drop_CIDs = ignore_file.CID.values
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -2365,6 +2372,7 @@ class SEDmodel(object):
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             print('Reading light curves...')
+            dropped = 0
             if file_format.lower() == 'fits':  # If FITS format
                 ntot, n_inc = 0, 0
                 # Check if sim or real data
@@ -2407,10 +2415,10 @@ class SEDmodel(object):
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
                         sn_name = meta['SNID'].decode('utf-8')
-                        if sn_name in drop_list:
-                            continue
-                        if sn_name not in SALT_keep_list:
-                            continue
+                        # if sn_name in drop_list:
+                        #     continue
+                        # if sn_name not in SALT_keep_list:
+                        #     continue
                         if meta['PIA'] < 0.5:
                             continue
                         if zcmb > 0.4:
@@ -2418,6 +2426,13 @@ class SEDmodel(object):
                         # if n_inc > 500:
                         #     continue
                         # print(sn_ind + 1, len(sne_file), ntot, n_inc)
+                        if int(sn_name) in drop_CIDs:
+                            sn_ignore = ignore_file[ignore_file.CID == int(sn_name)]
+                            data['dropstr'] = data.apply(lambda row: f'{row.MJD:.2f}{row.BAND}', axis=1)
+                            init_num = data.shape[0]
+                            data = data[~data.dropstr.isin(sn_ignore.dropstr.values)]
+                            ndrop = init_num - data.shape[0]
+                            dropped += ndrop
                         zhel_err = 5e-4  # Need to handle this better if not defined
                         zcmb_err = 5e-4  # Need to handle this better if not defined
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
