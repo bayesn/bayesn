@@ -1867,7 +1867,7 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
-        args['sim_prescale'] = args.get('sim_prescale', 1)
+        args['jobsplit'] = args.get('jobsplit')
         args['ignore_file'] = args.get('ignore_file', None)
         if args['jobsplit'] is not None:
             args['snana'] = True
