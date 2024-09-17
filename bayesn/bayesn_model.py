@@ -272,22 +272,6 @@ class SEDmodel(object):
         self.used_band_inds = None
         self._setup_band_weights()
 
-        KD_l = invKD_irr(self.l_knots)
-        self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
-        self.KD_t = device_put(invKD_irr(self.tau_knots))
-        self._load_hsiao_template()
-        self.sim = False  # Keep track of whether data is simulated
-
-        self.ZPT = 27.5  # Zero point
-        self.J_l_T = device_put(self.J_l_T)
-        self.hsiao_flux = device_put(self.hsiao_flux)
-        self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
-        self.xk = jnp.array(
-            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
-             1e4 / 2600.])
-        KD_x = invKD_irr(self.xk)
-        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
-
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
     def _load_hsiao_template(self):
@@ -507,6 +491,27 @@ class SEDmodel(object):
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
 
+        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
+        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
+
+        KD_l = invKD_irr(self.l_knots)
+        self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
+        self.KD_t = device_put(invKD_irr(self.tau_knots))
+        self._load_hsiao_template()
+        self.sim = False  # Keep track of whether data is simulated
+
+        self.ZPT = 27.5  # Zero point
+        self.J_l_T = device_put(self.J_l_T)
+        self.hsiao_flux = device_put(self.hsiao_flux)
+        self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
+        self.xk = jnp.array(
+            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
+             1e4 / 2600.])
+        KD_x = invKD_irr(self.xk)
+        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
+
     def _calculate_band_weights(self, redshifts, ebv):
         """
         Calculates the observer-frame band weights, including the effect of Milky Way extinction, for each SN
@@ -633,7 +638,21 @@ class SEDmodel(object):
         yk = yk.at[:, 7].set(f99_c1 + f99_c2 * self.xk[7] + f99_c3 * f99_d1)
         yk = yk.at[:, 8].set(f99_c1 + f99_c2 * self.xk[8] + f99_c3 * f99_d2)
 
-        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])  # RV[..., None]
+        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])
+
+        c2 = -0.824 + 4.717 / RV[..., None]
+        c1 = 2.030 - 3.007 * c2
+        x2 = self.uv_x * self.uv_x
+        y = x2 - f99_x0 * f99_x0
+        d = x2 / (y * y + x2 * f99_gamma * f99_gamma)
+        k = c1 + c2 * self.uv_x + f99_c3 * d
+
+        A = A.at[:, self.uv_ind1].set(AV[..., None] * (1. + k / RV[..., None]))
+        y = self.uv_x - f99_c5
+        y2 = y * y
+        k += f99_c4 * (0.5392 * y2 + 0.05644 * y2 * y)
+        A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[..., self.uv_ind3] / RV[..., None]))
+
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
