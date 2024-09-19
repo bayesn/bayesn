@@ -2820,10 +2820,11 @@ class SEDmodel(object):
                 self.fitres_table = table
         elif args['file_format'] == 'snoopy':
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
+            all_lcs, n_obs, sne, peak_mjds = [], [], [], []
             if 'version_photometry' in args.keys():
                 data_dir = args['version_photometry']
                 file_list = os.listdir(data_dir)
-                for file_name in file_list:
+                for file_name in tqdm(file_list[:20], total=len(file_list)):
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(data_dir, file_name)
                     with open(path, 'r') as file:
@@ -2832,7 +2833,7 @@ class SEDmodel(object):
                             if i == 0:
                                 sn, zhel, ra, dec = line.split(' ')
                             if line[:6] == 'filter':
-                                filter = line.split(' ')[1][:-1]
+                                filter = line.strip('\n').split(' ')[1]
                             vals = line.split(' ')
                             if line[0] == '#':
                                 continue
@@ -2841,7 +2842,9 @@ class SEDmodel(object):
                                 mag.append(float(vals[1]))
                                 mag_err.append(float(vals[2]))
                                 filters.append(filter)
-                    data = pd.DataFrame(np.array([mjd, mag, mag_err, filters]).T, columns=['MJD', 'MAG', 'MAG_ERR', 'BAND'])
+                    data = pd.DataFrame(np.array([mjd, mag, mag_err, filters]).T,
+                                        columns=['MJD', 'MAG', 'MAGERR', 'BAND']).astype({'MJD': float, 'MAG': float, 'MAGERR': float})
+                    data = data[~data.BAND.isin(args['drop_bands'])]  # Skip certain bands
                     zhel, ra, dec = float(zhel), float(ra), float(dec)
                     mwebv = self.sfd.ebv(ra, dec)
                     # If filter not in map_dict, assume one-to-one mapping------
@@ -2864,8 +2867,72 @@ class SEDmodel(object):
                         if f not in used_bands:
                             used_bands.append(f)
                             used_band_dict[self.band_dict[f]] = len(used_bands) - 1
-                    break
-            raise ValueError('Nope')
+                    if data.empty:
+                        continue
+                    # zps = data.FLT.apply(lambda x: self.zp_dict[x])
+                    # zp_flux = 10 ** (zps / 2.5)
+                    # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
+                    data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
+                    data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
+                    peak_mjd = np.average(data.MJD, weights=(data.flux / data.flux_err) ** 2)
+                    plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
+                    plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
+                    plt.show()
+                    data['t'] = (data['MJD'] - peak_mjd) / (1 + zhel)
+                    # plt.errorbar(data['t'], data['flux'], data['flux_err'], fmt='x')
+                    # plt.show()
+                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
+                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data['redshift'] = zhel
+                    data['redshift_error'] = 5e-4
+                    data['MWEBV'] = mwebv
+                    data['mass'] = -99
+                    data['dist_mod'] = self.cosmo.distmod(zhel)
+                    data['mask'] = 1
+                    lc = data[
+                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
+                         'dist_mod', 'MWEBV', 'mask']]
+                    lc = lc.dropna(subset=['flux', 'flux_err'])
+                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    all_lcs.append(lc)
+                    n_obs.append(lc.shape[0])
+                    sne.append(sn)
+                    peak_mjds.append(peak_mjd)
+            N_sn = len(all_lcs)
+            N_obs = np.max(n_obs)
+            N_col = lc.shape[1]
+            all_data = np.zeros((N_sn, N_obs, N_col))
+            print('Saving light curves to standard grid...')
+            for i in tqdm(range(len(all_lcs))):
+                lc = all_lcs[i]
+                all_data[i, :lc.shape[0], :] = lc.values
+                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+            all_data = all_data.T
+            t = all_data[0, ...]
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
+            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
+            # Mask out negative fluxes, only for mag data--------------------------
+            for i in range(len(all_lcs)):
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
+                mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
+            # ---------------------------------------------------------------------
+            if 'training' in args['mode'].lower():
+                self.data = device_put(mag_data)
+            else:
+                self.data = device_put(flux_data)
+            self.sn_list = sne
+            self.J_t = device_put(J_t)
+            self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
+            self.zps = self.zps[self.used_band_inds]
+            self.offsets = self.offsets[self.used_band_inds]
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.peak_mjds = np.array(peak_mjds)
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
