@@ -169,7 +169,7 @@ filters:
   H_NOT:
     magsys: vega
     magzero: 13.5633
-    path: filters/NOT/NOTCam/not_h.dat
+    path: filters/NOT/NOTCam/H.dat
   H_NOT_eff:
     magsys: vega
     magzero: 13.5633
@@ -221,7 +221,7 @@ filters:
   H_TNG:
     magsys: vega
     magzero: 0.0
-    path: filters/NOT/TNG/TNG_NICS.H.dat
+    path: filters/TNG/H.dat
   H_WFCAM:
     magsys: vega
     magzero: 0.0
@@ -325,7 +325,7 @@ filters:
   J_NOT:
     magsys: vega
     magzero: 13.6060
-    path: filters/NOT/NOTCam/not_j.dat
+    path: filters/NOT/NOTCam/J.dat
   J_NOT_eff:
     magsys: vega
     magzero: 13.6060
@@ -381,7 +381,7 @@ filters:
   J_TNG:
     magsys: vega
     magzero: 0.0
-    path: filters/NOT/TNG/TNG_NICS.J.dat
+    path: filters/TNG/J.dat
   J_VISTA:
     magsys: vega
     magzero: 0.0
@@ -399,6 +399,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/J_WHIRC.dat
+  Js_TNG:
+    magsys: vega
+    magzero: 0.0
+    path: filters/TNG/Js.dat
   K:
     magsys: vega
     magzero: 0.0
@@ -443,7 +447,7 @@ filters:
   K_TNG:
     magsys: vega
     magzero: 0.0
-    path: filters/NOT/TNG/TNG_NICS.K.dat
+    path: filters/TNG/K.dat
   K_WFCAM:
     magsys: vega
     magzero: 0.0
@@ -456,6 +460,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/K_WHIRC.dat
+  Ks_CSP:
+    magsys: vega
+    magzero: 0.0
+    path: filters/LCO/Swope/kfilter
   Ks_HAWKI_1:
     magsys: vega
     magzero: 0.0
@@ -478,7 +486,7 @@ filters:
   Ks_NOT:
     magsys: vega
     magzero: 12.7954
-    path: filters/NOT/NOTCam/not_ks.dat
+    path: filters/NOT/NOTCam/Ks.dat
   Ks_NOT_eff:
     magsys: vega
     magzero: 12.7954
@@ -499,6 +507,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/HCT/TIRSPEC/HCT_TIRSPEC.Kshort.dat
+  Ks_TNG:
+    magsys: vega
+    magzero: 0.0
+    path: filters/TNG/Ks.dat
   Ks_VISTA:
     magsys: vega
     magzero: 0.0
@@ -509,6 +521,14 @@ filters:
     magzero: 0.0
     path: filters/GeminiNorth/NIRI/NIRI_K_prime.dat
     lam_unit: nm
+  K_prime_NOT:
+    magsys: vega
+    magzero: 12.7954
+    path: filters/NOT/NOTCam/K_prime.dat
+  K_prime_TNG:
+    magsys: vega
+    magzero: 0.0
+    path: filters/TNG/K_prime.dat
   L_prime_NIRI:
     magsys: vega
     magzero: 0.0
@@ -723,6 +743,10 @@ filters:
     magzero: 0.0
     path: filters/GeminiNorth/NIRI/NIRI_Y_cold_PK50.dat
     lam_unit: nm
+  Y_NOT:
+    magsys: vega
+    magzero: 13.5633
+    path: filters/NOT/NOTCam/Y.dat
   Y_P:
     magsys: vega
     magzero: 0.0
@@ -760,6 +784,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/UKIRT/WFCAM/Y_total.dat
+  Z_NOT:
+    magsys: vega
+    magzero: 13.5633
+    path: filters/NOT/NOTCam/Z.dat
   Z_VISTA:
     magsys: vega
     magzero: 0.0

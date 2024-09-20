@@ -41,7 +41,7 @@ include bayesn/bayesn-filters/filters/NOT/*
 include bayesn/bayesn-filters/filters/NOT/ALFOSC/*
 include bayesn/bayesn-filters/filters/NOT/MOSCA/*
 include bayesn/bayesn-filters/filters/NOT/NOTCam/*
-include bayesn/bayesn-filters/filters/NOT/TNG/*
+include bayesn/bayesn-filters/filters/NOT/*
 include bayesn/bayesn-filters/filters/NULL/*
 include bayesn/bayesn-filters/filters/OAM/TJO/*
 include bayesn/bayesn-filters/filters/Palomar/*
@@ -63,6 +63,7 @@ include bayesn/bayesn-filters/filters/standard/Persson/*
 include bayesn/bayesn-filters/filters/standard/stritzinger/*
 include bayesn/bayesn-filters/filters/Swift/*
 include bayesn/bayesn-filters/filters/Swift/UVOT/*
+include bayesn/bayesn-filters/filters/TNG/*
 include bayesn/bayesn-filters/filters/UKIRT/WFCAM/*
 include bayesn/bayesn-filters/filters/USNO/USNO40/*
 include bayesn/model_files/M20_model/BAYESN.INFO

@@ -20,6 +20,7 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
         - Names: `U`, `B`, `V`, `R`, `I`
         - Source: Strinzinger+11, 2005PASP..117..810S
+
     - 2MASS Peters Automated Infrared Imaging Telescope *JHK* filters
 
         - Names: `J`, `H`, `K`
@@ -85,7 +86,7 @@ provide a map to match up the names in the data files with the BayeSN names, as 
     - ANDICAM *YJHK* filters
 
         - Names: `Y_AND`, `J_AND`, `H_AND`, `K_AND`
-        - Source:
+        - Source: https://noirlab.edu/science/programs/ctio/filters/andicam
 
     - Dark Energy Camera (DECam) *griz* filters
 
@@ -118,10 +119,10 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
 - Gemini North
 
-    - NIRI *JH* filters
+    - NIRI *YJHKKsK'L'M'* filters and  *H-K notch* filter (all scanned warm), the estimated *Y* filter transmission at 65 K, and that convolved with the (warm) transmission profile of the PK50 filter.
 
-        - Names: `J_NIRI`, `H_NIRI`
-        - Source: SNooPy
+        - Names: `Y_NIRI`, `J_NIRI`, `H_NIRI`, `K_NIRI`, `Ks_NIRI`, `K_prime_NIRI`, `L_prime_NIRI`, `M_prime_NIRI`, `HK_notch_NIRI`, `Y_NIRI_COLD`, `Y_NIRI_COLD_PK50`
+        - Source: https://www.gemini.edu/instrumentation/niri/components#Filters
 
 - HCT
 
@@ -202,6 +203,10 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Names: `Y_RC`, `J_RC1`, `J_RC2`, `H_RC`
         - Source: Krisciunas+2017, 2017AJ....154..211K, https://csp.obs.carnegiescience.edu/data/filters
 
+    - Abandoned *Ks* Swope filter
+        - Names: `Ks_CSP`
+        - Source: Contreras+2010, 2010AJ....139..519C
+
     - Different Persson *YJHK* filters?
 
         - Names: `Y_P1`, `J_P1`, `H_P1`, `K_P1`
@@ -235,27 +240,22 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Names: `u_LSST`, `g_LSST`, `r_LSST`, `i_LSST`, `z_LSST`, `y_LSST`
         - Source: https://github.com/lsst/throughputs
 
-- NOT
+- Nordic Optical Telescope (NOT)
 
     - ALFOSC *UBVRIgriz* filters and *UBVRI* natural filters
 
         - Names:  `U_ALFOSC`, `B_ALFOSC`, `V_ALFOSC`, `R_ALFOSC`, `I_ALFOSC`, `g_ALFOSC`, `r_ALFOSC`, `i_ALFOSC`, `z_ALFOSC`, `U_ALFOSC_nat`, `B_ALFOSC_nat`, `V_ALFOSC_nat`, `R_ALFOSC_nat`, `I_ALFOSC_nat`
-        - Source: Tomas Muller-Bravo
+        - Source: https://www.not.iac.es/instruments/filters/filters.php
 
     - MOSCA *UBVRI* effective filters
 
         - Names: `U_MOSCA`, `B_MOSCA`, `V_MOSCA`, `R_MOSCA`, `I_MOSCA`
         - Source: Tomas Muller-Bravo
 
-    - NOTCam *JHKs* filters and effective filters, *K* effective filter
+    - NOTCam *ZYJHKK'Ks* filters and effective filters (total throughput) for *JHKKs*
 
-        - Names: `J_NOT`, `H_NOT`, `Ks_NOT`, `J_NOT_eff`, `H_NOT_eff`, `Ks_NOT_eff`, `K_NOT_eff`
-        - Source: Tomas Muller-Bravo
-
-    - TNG-NICS *JHK* filters
-
-        - Names: `J_TNG`, `H_TNG`, `K_TNG`
-        - Source: Tomas Muller-Bravo
+        - Names: `Z_NOT`, `Y_NOT`, `J_NOT`, `H_NOT`, `K_NOT`, `K_prime_NOT`, `Ks_NOT`, `J_NOT_eff`, `H_NOT_eff`, `K_NOT_eff`, `Ks_NOT_eff`
+        - Source: https://www.not.iac.es/instruments/notcam/filters/, effective filters from Tomas Muller-Bravo
 
 - OAM
 
@@ -290,6 +290,23 @@ provide a map to match up the names in the data files with the BayeSN names, as 
         - Names: `g_PS1`, `r_PS1`, `i_PS1`, `z_PS1`, `y_PS1`, `w_PS1`, `open_PS1`
         - Source: Tonry+12, 2012ApJ...750...99T
 
+- Paranal
+
+    - UT4 High Acuity Wide field K-band Imager (HAWK-I) *YJH* filters and two *Ks* filters, one used from Aug 2007 until Dec 3, 2007 and the other used starting Jan 2008
+
+        - Names: `Y_HAWKI`, `J_HAWKI`, `H_HAWKI`, `Ks_HAWKI_1`, `Ks_HAWKI_2`
+        - Source: https://www.eso.org/sci/facilities/paranal/instruments/hawki/inst.html
+
+    - UT3 Infrared Spectrometer And Array Camera (ISAAC) *JHKs* filters
+
+        - Names: `J_ISAAC`, `H_ISAAC`, `Ks_ISAAC`
+        - Source: SVO
+
+    - VISTA InfraRed Camera (VIRCAM) *ZYJHKs* filters
+
+        - Names: `Z_VISTA`, `Y_VISTA`, `J_VISTA`, `H_VISTA`, `Ks_VISTA`
+        - Source: https://www.eso.org/sci/facilities/paranal/decommissioned/vircam/inst.html
+
 - Spitzer
 
     - IRAC *3.6/4.5/5.8/8.0* filters
@@ -310,6 +327,14 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
         - Names: `U_SWIFT`, `B_SWIFT`, `V_SWIFT`, `UVW1`, `UVW2`, `UVM2`
         - Source: Poole+08, 2008MNRAS.383..627P
+
+- Telescopio Nazionale Galileo (TNG)
+
+    - Near Infrared Camera Spectrometer (NICS) *JHKK'Ks* filters
+
+        - Names: `J_TNG`, `H_TNG`, `K_TNG`, `K_prime_TNG`, `Ks_TNG`
+        - Source: https://www.tng.iac.es/instruments/nics/imaging.html#filters
+
 - United States Naval Observatory (USNO)
 
     - 40-inch telescope *u'g'r'i'z'* filters
