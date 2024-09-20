@@ -159,11 +159,13 @@ filters:
   H_HAWKI:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/HAWKI/Paranal_HAWKI.H.dat.txt
+    path: filters/Paranal/HAWKI/H.dat
+    lam_unit: nm
   H_NIRI:
     magsys: vega
     magzero: 0.0
     path: filters/GeminiNorth/NIRI/NIRI_H.dat
+    lam_unit: nm
   H_NOT:
     magsys: vega
     magzero: 13.5633
@@ -227,7 +229,8 @@ filters:
   H_VISTA:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/VISTA/Paranal_VISTA.H.dat.txt
+    path: filters/Paranal/VISTA/H.dat
+    lam_unit: nm
   H_WIRC:
     magsys: vega
     magzero: 0.0
@@ -236,6 +239,11 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/H_WHIRC.dat
+  HK_notch_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_HKnotch.dat
+    lam_unit: nm
   I:
     magsys: vega
     magzero: 0.033
@@ -307,11 +315,13 @@ filters:
   J_HAWKI:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/HAWKI/Paranal_HAWKI.J.dat.txt
+    path: filters/Paranal/HAWKI/J.dat
+    lam_unit: nm
   J_NIRI:
     magsys: vega
     magzero: 0.0
     path: filters/GeminiNorth/NIRI/NIRI_J.dat
+    lam_unit: nm
   J_NOT:
     magsys: vega
     magzero: 13.6060
@@ -375,7 +385,8 @@ filters:
   J_VISTA:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/VISTA/Paranal_VISTA.J.dat.txt
+    path: filters/Paranal/VISTA/J.dat
+    lam_unit: nm
   J_WFCAM:
     magsys: vega
     magzero: 0.0
@@ -408,6 +419,11 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Baade/K.dat
+  H_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_K.dat
+    lam_unit: nm
   K_NOT_eff:
     magsys: vega
     magzero: 12.8350
@@ -440,10 +456,25 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/K_WHIRC.dat
+  Ks_HAWKI_1:
+    magsys: vega
+    magzero: 0.0
+    path: filters/Paranal/HAWKI/Ks1.dat
+    lam_unit: nm
+  Ks_HAWKI_2:
+    magsys: vega
+    magzero: 0.0
+    path: filters/Paranal/HAWKI/Ks2.dat
+    lam_unit: nm
   Ks_ISAAC:
     magsys: vega
     magzero: 0.0
     path: filters/Paranal/ISAAC/Paranal_ISAAC.Ks.dat.txt
+  Ks_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_Ks.dat
+    lam_unit: nm
   Ks_NOT:
     magsys: vega
     magzero: 12.7954
@@ -471,7 +502,23 @@ filters:
   Ks_VISTA:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/VISTA/Paranal_VISTA.Ks.dat.txt
+    path: filters/Paranal/VISTA/Ks.dat
+    lam_unit: nm
+  K_prime_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_K_prime.dat
+    lam_unit: nm
+  L_prime_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_L_prime.dat
+    lam_unit: nm
+  M_prime_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_M_prime.dat
+    lam_unit: nm
   NUV_GALEX:
     magsys: ab
     magzero: 0.0
@@ -656,6 +703,26 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/CTIO/ANDICAM/Yandicam.dat
+  Y_HAWKI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/Paranal/HAWKI/Y.dat
+    lam_unit: nm
+  Y_NIRI:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_Y.dat
+    lam_unit: nm
+  Y_NIRI_cold:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_Y_cold.dat
+    lam_unit: nm
+  Y_NIRI_cold_PK50:
+    magsys: vega
+    magzero: 0.0
+    path: filters/GeminiNorth/NIRI/NIRI_Y_cold_PK50.dat
+    lam_unit: nm
   Y_P:
     magsys: vega
     magzero: 0.0
@@ -683,7 +750,8 @@ filters:
   Y_VISTA:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/VISTA/Paranal_VISTA.Y.dat.txt
+    path: filters/Paranal/VISTA/Y.dat
+    lam_unit: nm
   Y_WIRC:
     magsys: vega
     magzero: 0.0
@@ -692,6 +760,11 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/UKIRT/WFCAM/Y_total.dat
+  Z_VISTA:
+    magsys: vega
+    magzero: 0.0
+    path: filters/Paranal/VISTA/Z.dat
+    lam_unit: nm
   g_CSP:
     magsys: bd17
     magzero: 9.644
