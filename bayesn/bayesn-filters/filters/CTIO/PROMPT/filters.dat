@@ -1,0 +1,6 @@
+Bp1      Bprompt1.dat    VegaB=0.04  PROMPT B-band, telescope 1
+Bp35     Bprompt35.dat   VegaB=0.04  PROMPT B-band, telescope 3,5
+Vp135    Vprompt135.dat  VegaB=0.016 PROMPT V-band, telescopes 1,3,5 
+gp3      gprompt3.dat    bd17B=9.638 PROMPT g-band, telescope 3
+rp5      rprompt5.dat    bd17B=9.357 PROMPT r-band, telescope 5
+ip5      iprompt5.dat    bd17B=9.264 PROMPT i-band, telescope 5

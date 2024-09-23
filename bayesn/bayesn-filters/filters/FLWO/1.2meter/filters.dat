@@ -1,0 +1,20 @@
+U4sh U_4sh_harris.dat 14.1224 FLWO 1.2m+4Shooter Harris U filter
+B4sh B_4sh_harris.dat 15.3924 FLWO 1.2m+4Shooter Harris B filter
+V4sh V_4sh_harris.dat 14.9956 FLWO 1.2m+4Shooter Harris V filter
+R4sh R_4sh_harris.dat 15.0661 FLWO 1.2m+4Shooter Harris R filter
+I4sh I_4sh_harris.dat 14.4977 FLWO 1.2m+4Shooter Harris I filter
+Bk BHJune2011.txt VegaB=0.03 FLWO 1.2m+Keplercam B filter CfA3 + CfA4 period1
+Bk1 BHJune2011.txt VegaB=0.03 FLWO 1.2m+Keplercam B filter CfA3 + CfA4 period1
+Bk2 BHOct2010.txt VegaB=0.03 FLWO 1.2m+Keplercam B filter CfA4 period 2
+Vk VH_smooth_June.dat VegaB=0.03 FLWO 1.2m+Keplercam V filter CfA3 + CfA4 period 1
+Vk1 VH_smooth_June.dat VegaB=0.03 FLWO 1.2m+Keplercam V filter CfA3 + CfA4 period 1
+Vk2 VH_smooth_Oct.dat VegaB=0.03 FLWO 1.2m+Keplercam V filter CfA4 period 2
+uk uprime_keplercam.dat 14.4188 FLWO 1.2m+Keplercam u' filter
+uk1 uprime_keplercam.dat 14.4188 FLWO 1.2m+Keplercam u' filter
+uk2 uprime_keplercam.dat 14.4188 FLWO 1.2m+Keplercam u' filter CfA4 period 2
+rk rfunction.txt bd17B=9.3594 FLWO 1.2m+Keplercam r' filter
+rk1 rfunction.txt bd17B=9.3594 FLWO 1.2m+Keplercam r' filter CfA3 + CfA4 period 1
+rk2 rfunction.txt bd17B=9.3594 FLWO 1.2m+Keplercam r' filter CfA4 period 2
+ik ifunction.txt bd17B=9.2606 FLWO 1.2m+Keplercam i' filter
+ik1 ifunction.txt bd17B=9.2606 FLWO 1.2m+Keplercam i' filter CfA3 + CfA4 period 1
+ik2 ifunction.txt bd17B=9.2606 FLWO 1.2m+Keplercam i' filter CfA4 period 2
