@@ -2824,10 +2824,7 @@ class SEDmodel(object):
             if 'version_photometry' in args.keys():
                 data_dir = args['version_photometry']
                 file_list = os.listdir(data_dir)
-                file_list = file_list[:30]
                 for file_name in tqdm(file_list, total=len(file_list)):
-                    print(file_name)
-                    continue
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(data_dir, file_name)
                     with open(path, 'r') as file:
@@ -2877,10 +2874,10 @@ class SEDmodel(object):
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                    peak_mjd = np.average(data.MJD, weights=data.flux ** 2)
-                    plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
-                    plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
-                    plt.show()
+                    peak_mjd = np.average(data[(data.flux / data.flux_err) > 5].MJD, weights=data[(data.flux / data.flux_err) > 5].flux ** 2)
+                    # plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
+                    # plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
+                    # plt.show()
                     data['t'] = (data['MJD'] - peak_mjd) / (1 + zhel)
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
