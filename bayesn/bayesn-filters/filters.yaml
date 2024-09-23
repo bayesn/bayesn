@@ -300,10 +300,6 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/CMO/2.5-m/F040JMKO.dat
-  J_ISAAC:
-    magsys: vega
-    magzero: 0.0
-    path: filters/Paranal/ISAAC/Paranal_ISAAC.J.dat.txt
   J_FS:
     magsys: vega
     magzero: 0.0
@@ -399,31 +395,23 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/J_WHIRC.dat
+  Js_ISAAC:
+    magsys: vega
+    magzero: 0.0
+    path: filters/Paranal/ISAAC/Paranal_ISAAC.Js.dat.txt
   Js_TNG:
     magsys: vega
     magzero: 0.0
     path: filters/TNG/Js.dat
-  K:
-    magsys: vega
-    magzero: 0.0
-    path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_Ks.dat
   K_AND:
     magsys: vega
     magzero: 0.00047
     path: filters/CTIO/ANDICAM/Kandicam.dat
-  K_O2K:
-    magsys: vega
-    magzero: 0.0
-    path: filters/CAHA/O2K/CAHA_Omega2000.K.dat
   K_CMO:
     magsys: vega
     magzero: 0.0
     path: filters/CMO/2.5-m/F051KSMK.dat
-  K_FS:
-    magsys: vega
-    magzero: 0.0
-    path: filters/LCO/Baade/K.dat
-  H_NIRI:
+  K_NIRI:
     magsys: vega
     magzero: 0.0
     path: filters/GeminiNorth/NIRI/NIRI_K.dat
@@ -436,10 +424,6 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/standard/Persson/kfilter
-  K_P1:
-    magsys: vega
-    magzero: 0.0
-    path: filters/LCO/Persson/K_persson_alum_atm.dat
   K_SIRIUS:
     magsys: vega
     magzero: 0.0
@@ -460,10 +444,18 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/KPNO/WIYN/K_WHIRC.dat
+  Ks:
+    magsys: vega
+    magzero: 0.0
+    path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_Ks.dat
   Ks_CSP:
     magsys: vega
     magzero: 0.0
     path: filters/LCO/Swope/kfilter
+  Ks_FS:
+    magsys: vega
+    magzero: 0.0
+    path: filters/LCO/Baade/Ks.dat
   Ks_HAWKI_1:
     magsys: vega
     magzero: 0.0
@@ -478,6 +470,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/Paranal/ISAAC/Paranal_ISAAC.Ks.dat.txt
+  Ks_O2K:
+    magsys: vega
+    magzero: 0.0
+    path: filters/CAHA/O2K/CAHA_Omega2000.Ks.dat
   Ks_NIRI:
     magsys: vega
     magzero: 0.0
@@ -499,6 +495,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/LaSilla/NTT/LaSilla_SOFI.Ks.dat
+  Ks_P1:
+    magsys: vega
+    magzero: 0.0
+    path: filters/LCO/Persson/Ks_persson_alum_atm.dat
   Ks_PANIC:
     magsys: vega
     magzero: 0.0
