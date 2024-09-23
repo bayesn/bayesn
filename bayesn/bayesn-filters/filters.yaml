@@ -427,7 +427,7 @@ filters:
   K_SIRIUS:
     magsys: vega
     magzero: 0.0
-    path: filters/IRSF/SIRIUS/IRSF_SIRIUS.K.dat
+    path: filters/IRSF/SIRIUS/IRSF_Sirius.K.dat
   K_TNG:
     magsys: vega
     magzero: 0.0
