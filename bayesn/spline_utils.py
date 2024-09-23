@@ -92,10 +92,11 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True, hermite=False, x_extre
 		If True uses cubic Hermite spline interpolation to 
 		fall back towards zero outside the knot range. If False
 		uses linear extrapolation.
-	x_extreme : "hsiao", "gap", or two-tuple
+	x_extreme : "hsiao_t", "hsiao_l", "gap", or two-tuple
 		Method for setting the outer knots if doing hermite
 		extrapolation. The surface will go to zero at these points.
-		If "hsiao" uses the limits of the Hsiao template: [1000, 25000]
+		If "hsiao_*" uses the limits of the Hsiao template.
+		If "hsiao_l": [1000, 25000]. If "hsiao_t": [-15, 85].
 		If "gap" extends beyond the existing knots by one step of
 		size equal to the adjacent inter-knot space.
 		If a two-tuple, uses the custom limits provided.
@@ -112,10 +113,16 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True, hermite=False, x_extre
 	X = np.zeros((n_x_int,n_x))
 
 	if hermite is True:
-		if x_extreme == "hsiao":
+		if x_extreme == "hsiao_l":
 			x_extreme = np.array([1000, 25000])
+		elif x_extreme == "hsiao_t":
+			x_extreme = np.array([-19, 85])
 		elif x_extreme == "gap":
 			x_extreme = np.array([2*x[0] - x[1], 2*x[-1] - x[-2]])
+		elif isinstance(x_extreme, str):
+			raise ValueError("x_extreme not recognised! " +
+				"Found {}.".format(x_extreme) +
+				"\nArgument must be 'gap', 'hsiao_t', 'hsiao_l' or a two-tuple.")
 
 	if not allow_extrap and ((max(x_int) > max(x)) or (min(x_int) < min(x))):
 		raise ValueError("Interpolation point out of bounds! " + 
