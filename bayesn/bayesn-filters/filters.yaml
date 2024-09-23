@@ -510,7 +510,7 @@ filters:
   Ks_TNG:
     magsys: vega
     magzero: 0.0
-    path: filters/TNG/Ks.dat
+    path: filters/TNG/Ks_guess.dat
   Ks_VISTA:
     magsys: vega
     magzero: 0.0
