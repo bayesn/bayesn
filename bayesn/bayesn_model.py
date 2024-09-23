@@ -2874,7 +2874,7 @@ class SEDmodel(object):
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                    peak_mjd = np.average(data[(data.flux / data.flux_err) > 5].MJD, weights=data[(data.flux / data.flux_err) > 5].flux ** 2)
+                    peak_mjd = np.average(data[(data.flux / data.flux_err) > 3].MJD, weights=data[(data.flux / data.flux_err) > 3].flux ** 2)
                     # plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
                     # plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
                     # plt.show()
