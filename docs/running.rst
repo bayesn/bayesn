@@ -51,6 +51,7 @@ The keys which can be specified are described below. Depending on whether you ar
 - ``version_photometry``: The path to an SNANA input directory. Use this if you are running on NERSC Perlmutter and want to use an SNANA input directory. The code will look for a directory with this name in typical public directories within SNDATA_ROOT, or optionally private directories if you specify them using the argument ``private_data_path`` below. Otherwise, use a combination of ``data_table`` and ``data_root`` instead.
 - ``private_data_path``: If you are using NERSC Perlmutter and wish to use a directory located in a private location, add a path to the location where your directory sits and it will be added to the default list of locations ``version_photometry`` searches for.
 - ``drop_bands``: A list of bands which are present in the data files that you are using which you do not wish to include in the analysis, optional.
+- ``save_fit_errors``: Boolean to specify if you want to save model fit errors in the produced LCPLOT table, only relevant when fitting. This will add a bit of computation time as it will involve calculating model photometry for each step along the chains for all SNe fitted. If False, only the light curve corresponding to the posterior mean of each parameter will be saved in the LCPLOT file; if True, the mean and standard deviation of model photometry across all posterior samples will be saved. Defaults to False.
 
 There are a few extra keys present in the code not yet documented here, which are specific for usage within SNANA.
 
