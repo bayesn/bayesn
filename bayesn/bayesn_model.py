@@ -257,20 +257,6 @@ class SEDmodel(object):
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
-        self.warning = "Error detected, exterminating process!\n\
-                           /           \n\
-                      ___              \n\
-              D>=G==='   '.            \n\
-                    |======|           \n\
-                    |======|           \n\
-                )--/]IIIIII]           \n\
-                   |_______|           \n\
-                   C O O O D           \n\
-                  C O  O  O D          \n\
-                 C  O  O  O  D         \n\
-                 C__O__O__O__D         \n\
-                [_____________]"
-
     def _load_hsiao_template(self):
         """
         Loads the Hsiao template from the internal HDF5 file.
@@ -2724,8 +2710,6 @@ class SEDmodel(object):
                                                 # just rename it so it's always the same
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
-                    if sn == 'SN2016afk':
-                        data = data[~data.FLT.isin(['r'])]
                     zhel = meta['REDSHIFT_HELIO']
                     data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
