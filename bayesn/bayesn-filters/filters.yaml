@@ -151,7 +151,7 @@ filters:
   H_ISAAC:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/ISAAC/Paranal_ISAAC.H.dat.txt
+    path: filters/Paranal/ISAAC/Paranal_ISAAC.H.dat
   H_FS:
     magsys: vega
     magzero: 0.0
@@ -398,7 +398,7 @@ filters:
   Js_ISAAC:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/ISAAC/Paranal_ISAAC.Js.dat.txt
+    path: filters/Paranal/ISAAC/Paranal_ISAAC.Js.dat
   Js_TNG:
     magsys: vega
     magzero: 0.0
@@ -469,7 +469,7 @@ filters:
   Ks_ISAAC:
     magsys: vega
     magzero: 0.0
-    path: filters/Paranal/ISAAC/Paranal_ISAAC.Ks.dat.txt
+    path: filters/Paranal/ISAAC/Paranal_ISAAC.Ks.dat
   Ks_O2K:
     magsys: vega
     magzero: 0.0
