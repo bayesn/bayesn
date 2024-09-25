@@ -2186,41 +2186,41 @@ class SEDmodel(object):
                 samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
                             1 + z_HEL[None, None, :])
 
-                # Create lcplot file
-                muhat_err = 5
-                Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-                muhat = self.data[-3, 0, :]
-                samples['mu'] = np.random.normal(
-                    (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-                    np.power(Ds_err, 2),
-                    np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
-                samples['delM'] = samples['Ds'] - samples['mu']
+            # Create lcplot file
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            muhat = self.data[-3, 0, :]
+            samples['mu'] = np.random.normal(
+                (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
+                np.power(Ds_err, 2),
+                np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+            samples['delM'] = samples['Ds'] - samples['mu']
 
-                t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
-                bands = []
-                for sn in self.sn_list:
-                    bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
+            t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
+            bands = []
+            for sn in self.sn_list:
+                bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
 
-                f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
-                                              num_samples=None,
-                                              mag=False, mean=not args['save_fit_errors'])
-                f, ferr = f.mean(axis=1), f.std(axis=1)
+            f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
+                                          num_samples=None,
+                                          mag=False, mean=not args['save_fit_errors'])
+            f, ferr = f.mean(axis=1), f.std(axis=1)
 
-                self.lcplot_data['DATA_FLAG'] = 1
-                z_hel = self.data[-5, 0, :]
-                for i, sn in enumerate(self.sn_list):
-                    fit_df = pd.DataFrame()
-                    fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
-                    fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
-                    fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
-                    fit_df['FLT'] = np.tile(bands[i], len(t))
-                    fit_df['CID'] = sn
-                    fit_df['DATA_FLAG'] = 0
-                    self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
+            self.lcplot_data['DATA_FLAG'] = 1
+            z_hel = self.data[-5, 0, :]
+            for i, sn in enumerate(self.sn_list):
+                fit_df = pd.DataFrame()
+                fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
+                fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
+                fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
+                fit_df['FLT'] = np.tile(bands[i], len(t))
+                fit_df['CID'] = sn
+                fit_df['DATA_FLAG'] = 0
+                self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
 
-                self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
-                self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
-                                        index=False)
+            self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
+            self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
+                                    index=False)
 
             # Create FITRES file
             # if args['snana']:
