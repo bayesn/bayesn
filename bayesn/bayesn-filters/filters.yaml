@@ -279,11 +279,11 @@ filters:
   I_MOSCA:
     magsys: vega
     magzero: 14.373480459
-    path: filters/NOT/MOSCA/not_i_mo_mod.dat
+    path: filters/NOT/MOSCA/not_i_mo.dat
   Ic_TJO:
     magsys: vega
     magzero: 0.0
-    path: filters/OAM/TJO/TJO_MEIA.I.dat
+    path: filters/OAM/TJO/TJO_MEIA.Ic.dat
   J:
     magsys: vega
     magzero: 0.0
@@ -427,7 +427,7 @@ filters:
   K_SIRIUS:
     magsys: vega
     magzero: 0.0
-    path: filters/IRSF/SIRIUS/IRSF_SIRIUS.K.dat
+    path: filters/IRSF/SIRIUS/IRSF_Sirius.K.dat
   K_TNG:
     magsys: vega
     magzero: 0.0
@@ -578,7 +578,7 @@ filters:
   R_MOSCA:
     magsys: vega
     magzero: 14.8976482706
-    path: filters/NOT/MOSCA/not_r_mo_mod.dat
+    path: filters/NOT/MOSCA/not_r_mo.dat
   R_P48:
     magsys: ab
     magzero: 0.0
@@ -686,7 +686,7 @@ filters:
   V_CTIO:
     magsys: vega
     magzero: 0.0250590302
-    path: CTIO/0.9meter/CTIO_V.dat
+    path: filters/CTIO/0.9meter/CTIO_V.dat
   V_IOO:
     magsys: vega
     magzero: 0.0
@@ -706,7 +706,7 @@ filters:
   V_MOSCA:
     magsys: vega
     magzero: 14.9349509438
-    path: filters/NOT/MOSCA/not_v_mo_mod.dat
+    path: filters/NOT/MOSCA/not_v_mo.dat
   V_PROMPT_135:
     magsys: vega
     magzero: 0.016

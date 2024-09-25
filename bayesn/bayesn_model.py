@@ -20,8 +20,6 @@ from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiago
 import h5py
 import sncosmo
 from sfdmap2 import sfdmap
-import dustmaps.sfd
-from dustmaps.config import config
 from .spline_utils import invKD_irr, spline_coeffs_irr
 from .bayesn_io import write_snana_lcfile
 import pickle
@@ -212,20 +210,19 @@ class SEDmodel(object):
         self.__root_dir__ = os.path.dirname(os.path.abspath(__file__))
         print(f'Currently working in {os.getcwd()}')
 
-        config['data_dir'] = os.path.join(self.__root_dir__, 'data', 'dust_maps')
+        # config['data_dir'] = os.path.join(self.__root_dir__, 'data', 'dust_maps')
         if not os.path.exists(os.path.join(self.__root_dir__, 'data', 'dust_maps')):
             print('-------------')
             print('SFD dust maps not present, downloading them now for use in BayeSN. This only needs to happen once')
             print('-------------')
             os.mkdir(os.path.join(self.__root_dir__, 'data', 'dust_maps'))
-            dustmaps.sfd.fetch()
+            # dustmaps.sfd.fetch()
             cmd = f'wget https://github.com/kbarbary/sfddata/archive/master.tar.gz -O {os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz")}'
             subprocess.run(cmd, shell=True)
             cmd = f'tar -xzf {os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz")} -C {os.path.join(self.__root_dir__, "data", "dust_maps")}'
             subprocess.run(cmd, shell=True)
             os.remove(os.path.join(self.__root_dir__, "data", "dust_maps", "sfdmap.tar.gz"))
         self.sfd = sfdmap.SFDMap(os.path.join(self.__root_dir__, "data", "dust_maps", "sfddata-master"))
-        self.sfd2 = dustmaps.sfd.SFDQuery()
         # Load built-in filter_yaml and add custom filters if specified
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
@@ -2824,7 +2821,7 @@ class SEDmodel(object):
             if 'version_photometry' in args.keys():
                 data_dir = args['version_photometry']
                 file_list = os.listdir(data_dir)
-                for file_name in tqdm(file_list[:20], total=len(file_list)):
+                for file_name in tqdm(file_list, total=len(file_list)):
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(data_dir, file_name)
                     with open(path, 'r') as file:
@@ -2874,13 +2871,11 @@ class SEDmodel(object):
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
-                    peak_mjd = np.average(data.MJD, weights=(data.flux / data.flux_err) ** 2)
-                    plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
-                    plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
-                    plt.show()
-                    data['t'] = (data['MJD'] - peak_mjd) / (1 + zhel)
-                    # plt.errorbar(data['t'], data['flux'], data['flux_err'], fmt='x')
+                    peak_mjd = np.average(data[(data.flux / data.flux_err) > 3].MJD, weights=data[(data.flux / data.flux_err) > 3].flux ** 2)
+                    # plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
+                    # plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
                     # plt.show()
+                    data['t'] = (data['MJD'] - peak_mjd) / (1 + zhel)
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
                     data['redshift'] = zhel
