@@ -2960,7 +2960,7 @@ class SEDmodel(object):
                     peak_mjds.append(peak_mjd)
             elif 'data_table' in args.keys():
                 table_path = os.path.join(args['data_root'], args['data_table'])
-                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True).iloc[100:150, :]
+                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True).iloc[:50, :]
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
                     sn, peak_mjd, file = row.values
@@ -3638,6 +3638,7 @@ class SEDmodel(object):
             max_bands = len(bands)
 
         flux_grid = jnp.zeros((N_sne, num_samples, max_bands, len(t)))
+        band_weights = self.band_weights
 
         print('Getting best fit light curves from chains...')
         for i in tqdm(np.arange(N_sne)):
@@ -3665,6 +3666,7 @@ class SEDmodel(object):
 
             if mean:
                 theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+            self.band_weights = band_weights[i:i+1, ...]
 
             lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
