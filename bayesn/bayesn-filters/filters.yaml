@@ -46,15 +46,15 @@ filters:
     path: filters/Lick/KAIT/kait_B.dat
   B_ALFOSC:
     magsys: vega
-    magzero: 19.9290
+    magzero: 0.0
     path: filters/NOT/ALFOSC/ALFOSC_B_Bes_440_100_74.dat
   B_ALFOSC_nat:
     magsys: vega
-    magzero: 6.2063
+    magzero: 0.03
     path: filters/NOT/ALFOSC/not_b_al_mod_lambda.dat
   B_MOSCA:
     magsys: vega
-    magzero: 15.3527377344
+    magzero: 0.03
     path: filters/NOT/MOSCA/not_b_mo_mod.dat
   B_PROMPT_1:
     magsys: vega
@@ -168,11 +168,11 @@ filters:
     lam_unit: nm
   H_NOT:
     magsys: vega
-    magzero: 13.5633
+    magzero: 0.07141909
     path: filters/NOT/NOTCam/H.dat
   H_NOT_eff:
     magsys: vega
-    magzero: 13.5633
+    magzero: 0.00183781
     path: filters/NOT/NOTCam/not_h_eff.dat
   H_NSFCam:
     magsys: vega
@@ -270,15 +270,15 @@ filters:
     path: filters/Lick/KAIT/kait_I.dat
   I_ALFOSC:
     magsys: vega
-    magzero: 19.5085
+    magzero: 0.0
     path: filters/NOT/ALFOSC/ALFOSC_i_int_797_157_12.dat
   I_ALFOSC_nat:
     magsys: vega
-    magzero: 4.6809
+    magzero: 0.02398223
     path: filters/NOT/ALFOSC/not_i_al_lambda.dat
   I_MOSCA:
     magsys: vega
-    magzero: 14.373480459
+    magzero: 0.0240
     path: filters/NOT/MOSCA/not_i_mo.dat
   Ic_TJO:
     magsys: vega
@@ -320,11 +320,11 @@ filters:
     lam_unit: nm
   J_NOT:
     magsys: vega
-    magzero: 13.6060
+    magzero: 0.0154005
     path: filters/NOT/NOTCam/J.dat
   J_NOT_eff:
     magsys: vega
-    magzero: 13.6060
+    magzero: 0.02718289
     path: filters/NOT/NOTCam/not_j_eff.dat
   J_NSFCam:
     magsys: vega
@@ -418,7 +418,7 @@ filters:
     lam_unit: nm
   K_NOT_eff:
     magsys: vega
-    magzero: 12.8350
+    magzero: -0.00122598
     path: filters/NOT/NOTCam/not_k_eff.dat
   K_P:
     magsys: vega
@@ -481,11 +481,11 @@ filters:
     lam_unit: nm
   Ks_NOT:
     magsys: vega
-    magzero: 12.7954
+    magzero: -0.07698455
     path: filters/NOT/NOTCam/Ks.dat
   Ks_NOT_eff:
     magsys: vega
-    magzero: 12.7954
+    magzero: -0.00004966
     path: filters/NOT/NOTCam/not_ks_eff.dat
   Ks_NSFCam:
     magsys: vega
@@ -523,7 +523,7 @@ filters:
     lam_unit: nm
   K_prime_NOT:
     magsys: vega
-    magzero: 12.7954
+    magzero: 0.0
     path: filters/NOT/NOTCam/K_prime.dat
   K_prime_TNG:
     magsys: vega
@@ -553,11 +553,11 @@ filters:
     path: filters/FLWO/1.2meter/R_4sh_harris.dat
   R_ALFOSC:
     magsys: vega
-    magzero: 19.6851
+    magzero: 0.00002543
     path: filters/NOT/ALFOSC/ALFOSC_R_Bes_650_130_76.dat
   R_ALFOSC_nat:
     magsys: vega
-    magzero: 5.3809
+    magzero: 0.0300227
     path: filters/NOT/ALFOSC/not_r_al_lambda.dat
   R_AND:
     magsys: vega
@@ -577,7 +577,7 @@ filters:
     path: filters/Lick/KAIT/kait_R.dat
   R_MOSCA:
     magsys: vega
-    magzero: 14.8976482706
+    magzero: 0.03001364
     path: filters/NOT/MOSCA/not_r_mo.dat
   R_P48:
     magsys: ab
@@ -621,11 +621,11 @@ filters:
     path: filters/FLWO/1.2meter/U_4sh_harris.dat
   U_ALFOSC:
     magsys: vega
-    magzero: 18.5079
+    magzero: 0.00000196
     path: filters/NOT/ALFOSC/ALFOSC_U_Bes_362_60_7.dat
   U_ALFOSC_nat:
     magsys: vega
-    magzero: 5.0324
+    magzero: 0.01996927
     path: filters/NOT/ALFOSC/not_u_al_mod_lambda.dat
   U_CTIO:
     magsys: vega
@@ -637,7 +637,7 @@ filters:
     path: filters/Lick/KAIT/kait_U.dat
   U_MOSCA:
     magsys: vega
-    magzero: 14.0686033931
+    magzero: 0.0200452
     path: filters/NOT/MOSCA/not_u_mo_mod.dat
   U_SWIFT:
     magsys: vega
@@ -657,11 +657,11 @@ filters:
     path: filters/FLWO/1.2meter/V_4sh_harris.dat
   V_ALFOSC:
     magsys: vega
-    magzero: 19.7210
+    magzero: -0.00001437
     path: filters/NOT/ALFOSC/ALFOSC_V_Bes_530_80_75.dat
   V_ALFOSC_nat:
     magsys: vega
-    magzero: 5.5858
+    magzero: 0.02997186
     path: filters/NOT/ALFOSC/not_v_al_lambda.dat
   V_AND:
     magsys: vega
@@ -705,7 +705,7 @@ filters:
     path: filters/Lick/KAIT/kait_V.dat
   V_MOSCA:
     magsys: vega
-    magzero: 14.9349509438
+    magzero: 0.03
     path: filters/NOT/MOSCA/not_v_mo.dat
   V_PROMPT_135:
     magsys: vega
@@ -745,7 +745,7 @@ filters:
     lam_unit: nm
   Y_NOT:
     magsys: vega
-    magzero: 13.5633
+    magzero: 0.0
     path: filters/NOT/NOTCam/Y.dat
   Y_P:
     magsys: vega
@@ -786,7 +786,7 @@ filters:
     path: filters/UKIRT/WFCAM/Y_total.dat
   Z_NOT:
     magsys: vega
-    magzero: 13.5633
+    magzero: 0.0
     path: filters/NOT/NOTCam/Z.dat
   Z_VISTA:
     magsys: vega
