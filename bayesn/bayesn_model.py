@@ -2960,7 +2960,7 @@ class SEDmodel(object):
                     peak_mjds.append(peak_mjd)
             elif 'data_table' in args.keys():
                 table_path = os.path.join(args['data_root'], args['data_table'])
-                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
+                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)#.iloc[42:43, :]
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
                     sn, peak_mjd, file = row.values
@@ -2986,7 +2986,6 @@ class SEDmodel(object):
                                         columns=['MJD', 'MAG', 'MAGERR', 'BAND']).astype(
                         {'MJD': float, 'MAG': float, 'MAGERR': float})
                     data = data[~data.BAND.isin(args['drop_bands'])]  # Skip certain bands
-                    print(sn, data.shape)
                     zhel, ra, dec = float(zhel), float(ra), float(dec)
                     mwebv = self.sfd.ebv(ra, dec)
                     # If filter not in map_dict, assume one-to-one mapping------
@@ -3258,7 +3257,7 @@ class SEDmodel(object):
 
         return l_o, spectra, param_dict
 
-    def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
+    def simulate_light_curve(self, t, N, bands, yerr=None, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
                              logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
                              output_dir=None):
         """
@@ -3468,19 +3467,20 @@ class SEDmodel(object):
             data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
                                        hsiao_interp, band_weights)
         # Apply error if specified
-        yerr = jnp.array(yerr)
-        if err_type == 'mag' and not mag:
-            yerr = yerr * (np.log(10) / 2.5) * data
-        if len(yerr.shape) == 0:  # Single error for all data points
-            yerr = np.ones_like(data) * yerr
-        elif len(yerr.shape) == 1:
-            assert data.shape[0] == yerr.shape[0], f'If passing a 1d array, shape of yerr must match number of ' \
-                                                   f'simulated data points per objects, {data.shape[0]}'
-            yerr = np.repeat(yerr[..., None], N, axis=1)
-        else:
-            assert data.shape == yerr.shape, f'If passing a 2d array, shape of yerr must match generated data shape' \
-                                             f' of {data.shape}'
-        data = np.random.normal(data, yerr)
+        if yerr is not None:
+            yerr = jnp.array(yerr)
+            if err_type == 'mag' and not mag:
+                yerr = yerr * (np.log(10) / 2.5) * data
+            if len(yerr.shape) == 0:  # Single error for all data points
+                yerr = np.ones_like(data) * yerr
+            elif len(yerr.shape) == 1:
+                assert data.shape[0] == yerr.shape[0], f'If passing a 1d array, shape of yerr must match number of ' \
+                                                       f'simulated data points per objects, {data.shape[0]}'
+                yerr = np.repeat(yerr[..., None], N, axis=1)
+            else:
+                assert data.shape == yerr.shape, f'If passing a 2d array, shape of yerr must match generated data shape' \
+                                                 f' of {data.shape}'
+            data = np.random.normal(data, yerr)
 
         if write_to_files and mag:
             if output_dir is None:
