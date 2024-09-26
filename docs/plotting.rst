@@ -7,6 +7,22 @@ Currently, BayeSN does not include dedicated plotting tools. However, it does pr
 retrieve model fluxes/magnitudes from posterior samples or simulate light curves/spectra from the SED model, ready for
 plotting using your preferred approach.
 
+Quick plots using LCPLOT table
+-----------------------------------
+
+If you run light curve fits using the command line ``run_bayesn`` script with an input yaml file, an LCPLOT file will
+automatically be saved in the output directory. This is a table which contains both the data that was fit by the model
+as well as the model fit itself at 2 day intervals. These are both contained together; rows containing data are marked
+by DATA_FLAG=1, while rows containing the fits have DATA_FLAG=0. This file will contain fits for each photometric band
+that had data which was fit by the model, and is designed to let you quickly look at the fits for large data samples.
+
+This file will optionally contain model fit uncertainties as well, depending on whether you set
+``save_fit_errors: True`` in the input yaml file. This is left as False by default, as calculating model photometry
+for every posterior sample across hundreds of SNe can be quite time-consuming in postprocessing. If False, the
+data files will just contain the model fit for the posterior means of all parameters for each SN. If True, the FLUXCAL
+and FLUXCALERR columns will respectively contain the mean and standard deviation of the model photometry across all
+posterior samples.
+
 Plotting light curve fits from posterior samples
 -----------------------------------------------------------
 

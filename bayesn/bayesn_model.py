@@ -5,6 +5,7 @@ BayeSN Optical+NIR SED model.
 
 import os
 import subprocess
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -267,6 +268,7 @@ class SEDmodel(object):
         self.trunc_val = 1.2
 
         self.used_band_inds = None
+        self.band_weights = None
         self._setup_band_weights()
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
@@ -487,6 +489,7 @@ class SEDmodel(object):
         self.band_interpolate_spacing = band_spacing
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
+        self.used_band_dict = {val: val for val in self.band_dict.values()}
 
         self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
         self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
@@ -1646,6 +1649,7 @@ class SEDmodel(object):
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['jobsplit'] = args.get('jobsplit')
+        args['save_fit_errors'] = args.get('save_fit_errors', False)
         args['file_format'] = args.get('file_format', 'snana').lower()
         if args['jobsplit'] is not None:
             args['snana'] = True
@@ -1654,7 +1658,6 @@ class SEDmodel(object):
             args['snana'] = False
         args['jobid'] = args['jobsplit'][0]
         args['njobtot'] = args['jobsplit'][1] * args['sim_prescale']
-        args['jobid'] = args['jobsplit'][0]
 
         if not (args['mode'] == 'fitting' and args['snana']):
             try:
@@ -1795,7 +1798,7 @@ class SEDmodel(object):
                 if expand_dim:
                     val = val[None, ...]
                 if len(val.shape) == 4:
-                    samples[key] = val.transpose(1, 2, 0, 3)
+                    samples[key] = val.transpose(1, 2, 3, 0)
                 else:
                     samples[key] = val.transpose(1, 2, 0)
             end = timeit.default_timer()
@@ -1873,6 +1876,7 @@ class SEDmodel(object):
             mcmc.print_summary()
             samples = mcmc.get_samples(group_by_chain=True)
         print(f'Total inference runtime: {end - start} seconds')
+        # samples = {}
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
@@ -2132,6 +2136,10 @@ class SEDmodel(object):
         -------
 
         """
+        # with open('/Users/matt/Documents/SAINTS_test/SAINTS_fit/fitv0/chains.pkl', 'rb') as file:
+        #     samples = pickle.load(file)
+        # samples['eps'] = samples['eps'].transpose(0, 1, 3, 2)
+
         if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
@@ -2204,52 +2212,88 @@ class SEDmodel(object):
                 samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
                             1 + z_HEL[None, None, :])
 
-            # Create FITRES file
-            if args['snana']:
-                # fetch snana version that includes tag + commit;
-                # e.g., v11_05-4-gd033611.
-                # Use same git command as in Makefile for C code
-                SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
-                if SNANA_DIR != 'NULL':
-                    cmd = f'cd {SNANA_DIR}; git describe --always --tags'
-                    ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
-                    snana_version = ret.stdout.replace('\n', '')
-                else:
-                    snana_version = 'NULL'
-                self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
-                                          '# VERSION_PHOTOMETRY:': args['version_photometry'],
-                                          '# TABLE NAME:': 'FITRES\n#'}
+            # Create lcplot file
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            muhat = self.data[-3, 0, :]
+            samples['mu'] = np.random.normal(
+                (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
+                np.power(Ds_err, 2),
+                np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+            samples['delM'] = samples['Ds'] - samples['mu']
 
-                n_sn = samples['mu'].shape[-1]
-                drop_keys = ['diverging', '_auto_latent']
-                for key in drop_keys:
-                    if key in samples.keys():
-                        del samples[key]
-                summary = arviz.summary(samples)
-                summary = summary[~summary.index.str.contains('tform')]
-                rhat = summary.r_hat.values
-                sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
+            t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
+            bands = []
+            for sn in self.sn_list:
+                bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
 
-                self.fitres_table['MU_LCFIT'] = samples['mu'].mean(axis=(0, 1))
-                self.fitres_table['MUERR_LCFIT'] = samples['mu'].std(axis=(0, 1))
-                self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
-                self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
-                self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
-                self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
-                # if not args['fit_method'] == 'vi':
-                self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
-                self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
-                self.fitres_table.round(4)
+            f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
+                                          num_samples=None,
+                                          mag=False, mean=not args['save_fit_errors'])
+            f, ferr = f.mean(axis=1), f.std(axis=1)
 
-                drop_count = pd.isna(self.fitres_table['MU_LCFIT']).sum()
-                self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU_LCFIT'])]
+            self.lcplot_data['DATA_FLAG'] = 1
+            z_hel = self.data[-5, 0, :]
+            for i, sn in enumerate(self.sn_list):
+                fit_df = pd.DataFrame()
+                fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
+                fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
+                fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
+                fit_df['FLT'] = np.tile(bands[i], len(t))
+                fit_df['CID'] = sn
+                fit_df['DATA_FLAG'] = 0
+                self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
 
-                # Reorder to put SIM columns last
-                new_cols = [col for col in self.fitres_table.columns if 'SIM' not in col] + \
-                           [col for col in self.fitres_table.columns if 'SIM' in col]
-                self.fitres_table = self.fitres_table[new_cols]
+            self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
+            self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
+                                    index=False)
 
-                sncosmo.write_lc(self.fitres_table, f'{args["outfile_prefix"]}.FITRES.TEXT', fmt="snana", metachar="")
+            # # Create FITRES file
+            # # if args['snana']:
+            # # fetch snana version that includes tag + commit;
+            # # e.g., v11_05-4-gd033611.
+            # # Use same git command as in Makefile for C code
+            # SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
+            # if SNANA_DIR != 'NULL':
+            #     cmd = f'cd {SNANA_DIR}; git describe --always --tags'
+            #     ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
+            #     snana_version = ret.stdout.replace('\n', '')
+            # else:
+            #     snana_version = 'NULL'
+            # self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
+            #                           '# VERSION_PHOTOMETRY:': args.get('version_photometry', args.get('data_table')),
+            #                           '# TABLE NAME:': 'FITRES\n#'}
+            #
+            # n_sn = samples['mu'].shape[-1]
+            # drop_keys = ['diverging', '_auto_latent']
+            # for key in drop_keys:
+            #     if key in samples.keys():
+            #         del samples[key]
+            # summary = arviz.summary(samples)
+            # summary = summary[~summary.index.str.contains('tform')]
+            # rhat = summary.r_hat.values
+            # sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
+            #
+            # self.fitres_table['MU_LCFIT'] = samples['mu'].mean(axis=(0, 1))
+            # self.fitres_table['MUERR_LCFIT'] = samples['mu'].std(axis=(0, 1))
+            # self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
+            # self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
+            # self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
+            # self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
+            # # if not args['fit_method'] == 'vi':
+            # self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
+            # self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
+            # self.fitres_table.round(4)
+            #
+            # drop_count = pd.isna(self.fitres_table['MU_LCFIT']).sum()
+            # self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU_LCFIT'])]
+            #
+            # # Reorder to put SIM columns last
+            # new_cols = [col for col in self.fitres_table.columns if 'SIM' not in col] + \
+            #            [col for col in self.fitres_table.columns if 'SIM' in col]
+            # self.fitres_table = self.fitres_table[new_cols]
+            #
+            # sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
 
         if args['snana']:
             self.end_time = time.time()
@@ -2432,7 +2476,7 @@ class SEDmodel(object):
                             data['mask'] = 1
                             lc = data[
                                 ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
-                                 'redshift_error', 'dist_mod', 'MWEBV', 'mask']]
+                                 'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                             lc = lc.dropna(subset=['flux', 'flux_err'])
                             lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                             if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
@@ -2548,7 +2592,7 @@ class SEDmodel(object):
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
-                             'dist_mod', 'MWEBV', 'mask']]
+                             'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
                         lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                         sne.append(sn_name)
@@ -2598,14 +2642,19 @@ class SEDmodel(object):
                         snrmax3s.append(snrmax3)
                     self.survey = meta.get('SURVEY', 'NULL')
                     self.survey_id = survey_dict.get(self.survey, 0)
-                raise ValueError('Nope')
                 N_sn = len(all_lcs)
                 N_obs = np.max(n_obs)
-                N_col = lc.shape[1]
+                N_col = lc.shape[1] - 2
                 all_data = np.zeros((N_sn, N_obs, N_col))
                 print('Saving light curves to standard grid...')
+                lcplot_data = pd.DataFrame()
                 for i in tqdm(range(len(all_lcs))):
                     lc = all_lcs[i]
+                    save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
+                    save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
+                    save_lc.insert(loc=0, column='CID', value=sne[i])
+                    lcplot_data = pd.concat([lcplot_data, save_lc])
+                    lc = lc.iloc[:, :-2]
                     all_data[i, :lc.shape[0], :] = lc.values
                     all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
                 all_data = all_data.T
@@ -2630,10 +2679,12 @@ class SEDmodel(object):
                 self.sn_list = sne
                 self.J_t = device_put(J_t)
                 self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
+                self.used_band_dict = used_band_dict
                 self.zps = self.zps[self.used_band_inds]
                 self.offsets = self.offsets[self.used_band_inds]
                 self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
                 self.peak_mjds = np.array(peak_mjds)
+                self.lcplot_data = lcplot_data
                 # Prep FITRES table
                 varlist = ["SN:"] * len(sne)
                 idsurvey = [self.survey_id] * len(sne)
@@ -2660,161 +2711,169 @@ class SEDmodel(object):
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 n_obs = []
 
-                all_lcs = []
-                t_ranges = []
-                # For FITRES table
-                idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
-                snrmax1s, snrmax2s, snrmax3s = [], [], []
-                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
-                # --------
-                used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
-                sne, peak_mjds = [], []
-                print('Reading light curves...')
-                for i in tqdm(range(sn_list.shape[0])):
-                    row = sn_list.iloc[i]
-                    sn_files = row.files.split(',')
-                    sn_lc = None
-                    sn = row.SNID
-                    data_root = args['data_root']
-                    for file in sn_files:
-                        meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
-                        data = lcdata['OBS'].to_pandas()
-                        if 'SEARCH_PEAKMJD' in sn_list.columns:
-                            peak_mjd = row.SEARCH_PEAKMJD
-                        else:
-                            peak_mjd = meta['SEARCH_PEAKMJD']
-                        if 'BAND' in data.columns:  # This column can have different names which can be confusing, let's
-                                                    # just rename it so it's always the same
-                            data = data.rename(columns={'BAND': 'FLT'})
-                        data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
-                        zhel = meta['REDSHIFT_HELIO']
-                        data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
-                        # If filter not in map_dict, assume one-to-one mapping------
-                        map_dict = args['map']
-                        for f in data.FLT.unique():
-                            if f not in map_dict.keys():
-                                map_dict[f] = f
-                        data['FLT'] = data.FLT.apply(lambda x: map_dict[x])
-                        # Remove bands outside of filter coverage-------------------
-                        for f in data.FLT.unique():
-                            if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
-                                    self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
-                                data = data[~data.FLT.isin([f])]
-                        # Record all used bands-------------------------------------
-                        for f in data.FLT.unique():
-                            if f not in used_bands:
-                                used_bands.append(f)
-                                try:
-                                    used_band_dict[self.band_dict[f]] = len(used_bands) - 1
-                                except KeyError:
-                                    raise KeyError(
-                                        f'Filter {f} not present in BayeSN, check your filter mapping')
-                        # ----------------------------------------------------------
-                        data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                        data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                        data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                        data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
-                        data['flux'] = data['FLUXCAL']
-                        data['flux_err'] = data['FLUXCALERR']
-                        data['redshift'] = zhel
-                        data['redshift_error'] = row.REDSHIFT_CMB_ERR
-                        data['MWEBV'] = meta.get('MWEBV', 0.)
-                        data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
-                        data['mask'] = 1
-                        lc = data[
-                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
-                             'dist_mod', 'MWEBV', 'mask']]
-                        lc = lc.dropna(subset=['flux', 'flux_err'])
-                        lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
-                        if sn_lc is None:
-                            sn_lc = lc.copy()
-                        else:
-                            sn_lc = pd.concat([sn_lc, lc])
-                    sne.append(sn)
-                    peak_mjds.append(peak_mjd)
-                    t_ranges.append((lc['t'].min(), lc['t'].max()))
-                    n_obs.append(lc.shape[0])
-                    all_lcs.append(sn_lc)
-                    # Set up FITRES table data
-                    # (currently just uses second table, should improve for cases where there are multiple lc files)
-                    idsurvey.append(meta.get('IDSURVEY', 'NULL'))
-                    sn_type.append(meta.get('TYPE', 0))
-                    field.append(meta.get('FIELD', 'NULL'))
-                    cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
-                    z_hels.append(zhel)
-                    z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', row.REDSHIFT_CMB_ERR))
-                    z_hds.append(row.REDSHIFT_CMB)
-                    z_hd_errs.append(row.REDSHIFT_CMB_ERR)
-                    vpecs.append(meta.get('VPEC', 0.))
-                    vpec_errs.append(meta.get('VPEC_ERR', self.sigma_pec))
-                    mwebvs.append(meta.get('MWEBV', 0.))
-                    host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
-                    host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
-                    snrmax1 = np.max(lc.flux / lc.flux_err)
-                    lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
-                    if lc_snr2.shape[0] == 0:
-                        snrmax2 = -99
+            all_lcs = []
+            t_ranges = []
+            # For FITRES table
+            idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
+            snrmax1s, snrmax2s, snrmax3s = [], [], []
+            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
+            # --------
+            used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
+            sne, peak_mjds = [], []
+            print('Reading light curves...')
+            for i in tqdm(range(sn_list.shape[0])):
+                row = sn_list.iloc[i]
+                sn_files = row.files.split(',')
+                sn_lc = None
+                sn = row.SNID
+                data_root = args['data_root']
+                for file in sn_files:
+                    meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
+                    data = lcdata['OBS'].to_pandas()
+                    if 'SEARCH_PEAKMJD' in sn_list.columns:
+                        peak_mjd = row.SEARCH_PEAKMJD
+                    else:
+                        peak_mjd = meta['SEARCH_PEAKMJD']
+                    if 'BAND' in data.columns:  # This column can have different names which can be confusing, let's
+                                                # just rename it so it's always the same
+                        data = data.rename(columns={'BAND': 'FLT'})
+                    data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
+                    zhel = meta['REDSHIFT_HELIO']
+                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
+                    # If filter not in map_dict, assume one-to-one mapping------
+                    map_dict = args['map']
+                    for f in data.FLT.unique():
+                        if f not in map_dict.keys():
+                            map_dict[f] = f
+                    data['FLT'] = data.FLT.apply(lambda x: map_dict[x])
+                    # Remove bands outside of filter coverage-------------------
+                    for f in data.FLT.unique():
+                        if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
+                                self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
+                            data = data[~data.FLT.isin([f])]
+                    # Record all used bands-------------------------------------
+                    for f in data.FLT.unique():
+                        if f not in used_bands:
+                            used_bands.append(f)
+                            try:
+                                used_band_dict[self.band_dict[f]] = len(used_bands) - 1
+                            except KeyError:
+                                raise KeyError(
+                                    f'Filter {f} not present in BayeSN, check your filter mapping')
+                    # ----------------------------------------------------------
+                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
+                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
+                    data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
+                    data['flux'] = data['FLUXCAL']
+                    data['flux_err'] = data['FLUXCALERR']
+                    data['redshift'] = zhel
+                    data['redshift_error'] = row.REDSHIFT_CMB_ERR
+                    data['MWEBV'] = meta.get('MWEBV', 0.)
+                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
+                    data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
+                    data['mask'] = 1
+                    lc = data[
+                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
+                         'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
+                    lc = lc.dropna(subset=['flux', 'flux_err'])
+                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    if sn_lc is None:
+                        sn_lc = lc.copy()
+                    else:
+                        sn_lc = pd.concat([sn_lc, lc])
+                sne.append(sn)
+                peak_mjds.append(peak_mjd)
+                t_ranges.append((lc['t'].min(), lc['t'].max()))
+                n_obs.append(lc.shape[0])
+                all_lcs.append(sn_lc)
+                # Set up FITRES table data
+                # (currently just uses second table, should improve for cases where there are multiple lc files)
+                idsurvey.append(meta.get('IDSURVEY', 'NULL'))
+                sn_type.append(meta.get('TYPE', 0))
+                field.append(meta.get('FIELD', 'NULL'))
+                cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
+                z_hels.append(zhel)
+                z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', row.REDSHIFT_CMB_ERR))
+                z_hds.append(row.REDSHIFT_CMB)
+                z_hd_errs.append(row.REDSHIFT_CMB_ERR)
+                vpecs.append(meta.get('VPEC', 0.))
+                vpec_errs.append(meta.get('VPEC_ERR', self.sigma_pec))
+                mwebvs.append(meta.get('MWEBV', 0.))
+                host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
+                host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
+                snrmax1 = np.max(lc.flux / lc.flux_err)
+                lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                if lc_snr2.shape[0] == 0:
+                    snrmax2 = -99
+                    snrmax3 = -99
+                else:
+                    snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                    lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                      lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                    if lc_snr3.shape[0] == 0:
                         snrmax3 = -99
                     else:
-                        snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
-                        lc_snr3 = lc_snr2[lc_snr2.band_indices !=
-                                          lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
-                        if lc_snr3.shape[0] == 0:
-                            snrmax3 = -99
-                        else:
-                            snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
-                    snrmax1s.append(snrmax1)
-                    snrmax2s.append(snrmax2)
-                    snrmax3s.append(snrmax3)
-                N_sn = sn_list.shape[0]
-                N_obs = np.max(n_obs)
-                N_col = lc.shape[1]
-                all_data = np.zeros((N_sn, N_obs, N_col))
-                print('Saving light curves to standard grid...')
-                for i in tqdm(range(len(all_lcs))):
-                    lc = all_lcs[i]
-                    all_data[i, :lc.shape[0], :] = lc.values
-                    all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
-                    # all_data[i, lc.shape[0]:, 3] = 10  # Arbitrarily set all masked points to H-band
-                all_data = all_data.T
-                t = all_data[0, ...]
-                keep_shape = t.shape
-                t = t.flatten(order='F')
-                J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
-                                                                         order='F').transpose(1, 2, 0)
-                flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
-                mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
-                # Mask out negative fluxes, only for mag data--------------------------
-                for i in range(len(all_lcs)):
-                    mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
-                    mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
-                    mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
-                    mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
-                # ---------------------------------------------------------------------
-                sne = sn_list['SNID'].values
-                self.sn_list = sne
-                if 'training' in args['mode'].lower():
-                    self.data = device_put(mag_data)
-                else:
-                    self.data = device_put(flux_data)
-                self.J_t = device_put(J_t)
-                self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
-                self.zps = self.zps[self.used_band_inds]
-                self.offsets = self.offsets[self.used_band_inds]
-                self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
-                self.peak_mjds = np.array(peak_mjds)
+                        snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                snrmax1s.append(snrmax1)
+                snrmax2s.append(snrmax2)
+                snrmax3s.append(snrmax3)
+            N_sn = sn_list.shape[0]
+            N_obs = np.max(n_obs)
+            N_col = lc.shape[1] - 2
+            all_data = np.zeros((N_sn, N_obs, N_col))
+            print('Saving light curves to standard grid...')
+            lcplot_data = pd.DataFrame()
+            for i in tqdm(range(len(all_lcs))):
+                lc = all_lcs[i]
+                save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
+                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
+                save_lc.insert(loc=0, column='CID', value=sne[i])
+                lcplot_data = pd.concat([lcplot_data, save_lc])
+                lc = lc.iloc[:, :-2]
+                all_data[i, :lc.shape[0], :] = lc.values
+                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+                # all_data[i, lc.shape[0]:, 3] = 10  # Arbitrarily set all masked points to H-band
+            all_data = all_data.T
+            t = all_data[0, ...]
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
+            mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
+            # Mask out negative fluxes, only for mag data--------------------------
+            for i in range(len(all_lcs)):
+                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
+                mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
+            # ---------------------------------------------------------------------
+            sne = sn_list['SNID'].values
+            self.sn_list = sne
+            if 'training' in args['mode'].lower():
+                self.data = device_put(mag_data)
+            else:
+                self.data = device_put(flux_data)
+            self.J_t = device_put(J_t)
+            self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
+            self.used_band_dict = used_band_dict
+            self.zps = self.zps[self.used_band_inds]
+            self.offsets = self.offsets[self.used_band_inds]
+            self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+            self.peak_mjds = np.array(peak_mjds)
+            self.lcplot_data = lcplot_data
 
-                # Prep FITRES table
-                varlist = ["SN:"] * len(sne)
-                snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
-                snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
-                table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
-                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                               names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR', 'zHD',
-                                      'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
-                                      'SNRMAX2', 'SNRMAX3'])
-                self.fitres_table = table
+            # Prep FITRES table
+            varlist = ["SN:"] * len(sne)
+            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
+            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR', 'zHD',
+                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
+                                  'SNRMAX2', 'SNRMAX3'])
+            self.fitres_table = table
         elif args['file_format'] == 'snoopy':
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             all_lcs, n_obs, sne, peak_mjds = [], [], [], []
@@ -2832,6 +2891,7 @@ class SEDmodel(object):
                             if line[:6] == 'filter':
                                 filter = line.strip('\n').split(' ')[1]
                             vals = line.split(' ')
+                            vals = [val for val in vals if val != '']
                             if line[0] == '#':
                                 continue
                             if len(vals) == 3:
@@ -2872,6 +2932,90 @@ class SEDmodel(object):
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     peak_mjd = np.average(data[(data.flux / data.flux_err) > 3].MJD, weights=data[(data.flux / data.flux_err) > 3].flux ** 2)
+                    # if sn == '2022myp':
+                    #     peak_mjd = 59750
+                    # if sn == '2020kcr':
+                    #     peak_mjd = 58990
+                    plt.title(sn)
+                    plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
+                    plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
+                    plt.show()
+                    data['t'] = (data['MJD'] - peak_mjd) / (1 + zhel)
+                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
+                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data['redshift'] = zhel
+                    data['redshift_error'] = 5e-4
+                    data['MWEBV'] = mwebv
+                    data['mass'] = -99
+                    data['dist_mod'] = self.cosmo.distmod(zhel)
+                    data['mask'] = 1
+                    lc = data[
+                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
+                         'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
+                    lc = lc.dropna(subset=['flux', 'flux_err'])
+                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    all_lcs.append(lc)
+                    n_obs.append(lc.shape[0])
+                    sne.append(sn)
+                    peak_mjds.append(peak_mjd)
+            elif 'data_table' in args.keys():
+                table_path = os.path.join(args['data_root'], args['data_table'])
+                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True).iloc[:50, :]
+                for i in tqdm(range(sn_list.shape[0])):
+                    row = sn_list.iloc[i]
+                    sn, peak_mjd, file = row.values
+                    mjd, mag, mag_err, filters = [], [], [], []
+                    path = os.path.join(args['data_root'], file)
+                    with open(path, 'r') as file:
+                        filter = None
+                        for i, line in enumerate(file):
+                            if i == 0:
+                                sn, zhel, ra, dec = line.split(' ')
+                            if line[:6] == 'filter':
+                                filter = line.strip('\n').split(' ')[1]
+                            vals = line.split(' ')
+                            vals = [val for val in vals if val != '']
+                            if line[0] == '#':
+                                continue
+                            if len(vals) == 3:
+                                mjd.append(float(vals[0]))
+                                mag.append(float(vals[1]))
+                                mag_err.append(float(vals[2]))
+                                filters.append(filter)
+                    data = pd.DataFrame(np.array([mjd, mag, mag_err, filters]).T,
+                                        columns=['MJD', 'MAG', 'MAGERR', 'BAND']).astype(
+                        {'MJD': float, 'MAG': float, 'MAGERR': float})
+                    data = data[~data.BAND.isin(args['drop_bands'])]  # Skip certain bands
+                    zhel, ra, dec = float(zhel), float(ra), float(dec)
+                    mwebv = self.sfd.ebv(ra, dec)
+                    # If filter not in map_dict, assume one-to-one mapping------
+                    map_dict = args['map']
+                    for f in data.BAND.unique():
+                        if f not in map_dict.keys():
+                            map_dict[f] = f
+                    data['FLT'] = data.BAND.apply(lambda x: map_dict[x])
+
+                    # Remove bands outside of filter coverage-------------------
+                    for f in data.FLT.unique():
+                        if f not in self.band_lim_dict.keys():
+                            raise KeyError(f'Filter {f} not present in BayeSN, check your filter mapping or add this '
+                                           f'filter')
+                        if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
+                                self.band_lim_dict[f][1] / self.l_knots[-1] - 1):
+                            data = data[~data.FLT.isin([f])]
+                    # Record all used bands-------------------------------------
+                    for f in data.FLT.unique():
+                        if f not in used_bands:
+                            used_bands.append(f)
+                            used_band_dict[self.band_dict[f]] = len(used_bands) - 1
+                    if data.empty:
+                        continue
+                    # zps = data.FLT.apply(lambda x: self.zp_dict[x])
+                    # zp_flux = 10 ** (zps / 2.5)
+                    # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
+                    data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
+                    data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
+                    # plt.title(sn)
                     # plt.errorbar(data['MJD'], data['flux'], data['flux_err'], fmt='x')
                     # plt.vlines(peak_mjd, 0, data['flux'].max(), ls='--')
                     # plt.show()
@@ -2886,7 +3030,7 @@ class SEDmodel(object):
                     data['mask'] = 1
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
-                         'dist_mod', 'MWEBV', 'mask']]
+                         'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
                     all_lcs.append(lc)
@@ -2895,11 +3039,17 @@ class SEDmodel(object):
                     peak_mjds.append(peak_mjd)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
-            N_col = lc.shape[1]
+            N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
             print('Saving light curves to standard grid...')
+            lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
+                save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
+                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
+                save_lc.insert(loc=0, column='CID', value=sne[i])
+                lcplot_data = pd.concat([lcplot_data, save_lc])
+                lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
             all_data = all_data.T
@@ -2924,10 +3074,12 @@ class SEDmodel(object):
             self.sn_list = sne
             self.J_t = device_put(J_t)
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
+            self.used_band_dict = used_band_dict
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
+            self.lcplot_data = lcplot_data
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
@@ -3105,7 +3257,7 @@ class SEDmodel(object):
 
         return l_o, spectra, param_dict
 
-    def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
+    def simulate_light_curve(self, t, N, bands, yerr=None, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
                              logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
                              output_dir=None):
         """
@@ -3291,11 +3443,13 @@ class SEDmodel(object):
             for i, band in enumerate(bands):
                 if band not in self.band_dict.keys():
                     raise ValueError(f'{band} is present in filters yaml file')
-                band_indices[i * num_per_band: (i + 1) * num_per_band] = self.band_dict[band]
+                band_indices[i * num_per_band: (i + 1) * num_per_band] = self.used_band_dict[self.band_dict[band]]
             band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
         mask = np.ones_like(band_indices)
-        band_weights = self._calculate_band_weights(z, ebv_mw)
-
+        if self.band_weights is None:
+            band_weights = self._calculate_band_weights(z, ebv_mw)
+        else:
+            band_weights = self.band_weights
         t = jnp.repeat(t[..., None], N, axis=1)
         t = t - tmax[None, :]
         hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
@@ -3313,19 +3467,20 @@ class SEDmodel(object):
             data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
                                        hsiao_interp, band_weights)
         # Apply error if specified
-        yerr = jnp.array(yerr)
-        if err_type == 'mag' and not mag:
-            yerr = yerr * (np.log(10) / 2.5) * data
-        if len(yerr.shape) == 0:  # Single error for all data points
-            yerr = np.ones_like(data) * yerr
-        elif len(yerr.shape) == 1:
-            assert data.shape[0] == yerr.shape[0], f'If passing a 1d array, shape of yerr must match number of ' \
-                                                   f'simulated data points per objects, {data.shape[0]}'
-            yerr = np.repeat(yerr[..., None], N, axis=1)
-        else:
-            assert data.shape == yerr.shape, f'If passing a 2d array, shape of yerr must match generated data shape' \
-                                             f' of {data.shape}'
-        data = np.random.normal(data, yerr)
+        if yerr is not None:
+            yerr = jnp.array(yerr)
+            if err_type == 'mag' and not mag:
+                yerr = yerr * (np.log(10) / 2.5) * data
+            if len(yerr.shape) == 0:  # Single error for all data points
+                yerr = np.ones_like(data) * yerr
+            elif len(yerr.shape) == 1:
+                assert data.shape[0] == yerr.shape[0], f'If passing a 1d array, shape of yerr must match number of ' \
+                                                       f'simulated data points per objects, {data.shape[0]}'
+                yerr = np.repeat(yerr[..., None], N, axis=1)
+            else:
+                assert data.shape == yerr.shape, f'If passing a 2d array, shape of yerr must match generated data shape' \
+                                                 f' of {data.shape}'
+            data = np.random.normal(data, yerr)
 
         if write_to_files and mag:
             if output_dir is None:
@@ -3425,7 +3580,7 @@ class SEDmodel(object):
         eps_full[:, 1:-1, :] = eps
         return eps_full
 
-    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None):
+    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None, mean=False):
         """
         Returns model photometry for posterior samples from BayeSN fits, which can be used to make light curve fit
         plots.
@@ -3473,10 +3628,23 @@ class SEDmodel(object):
         if isinstance(ebv_mws, float):
             ebv_mws = np.array([ebv_mws])
 
-        flux_grid = jnp.zeros((N_sne, num_samples, len(bands), len(t)))
+        if mean:
+            num_samples = 1
+
+        band_list = isinstance(bands[0], list)
+        if band_list:
+            max_bands = np.max([len(b) for b in bands])
+        else:
+            max_bands = len(bands)
+
+        flux_grid = jnp.zeros((N_sne, num_samples, max_bands, len(t)))
 
         print('Getting best fit light curves from chains...')
         for i in tqdm(np.arange(N_sne)):
+            if band_list:
+                fit_bands = bands[i]
+            else:
+                fit_bands = bands
             theta = chains['theta'][..., i].flatten(order='F')
             AV = chains['AV'][..., i].flatten(order='F')
             tmax = chains['tmax'][..., i].flatten(order='F')
@@ -3492,14 +3660,17 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             del_M = chains['delM'][..., i].flatten(order='F')
 
-            theta, AV, mu, eps, del_M = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...]
+            theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
+                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
 
-            lc, lc_err, params = self.simulate_light_curve(t, num_samples, bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
+            if mean:
+                theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+
+            lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
-                                                           ebv_mw=ebv_mws[i], yerr=0, mag=mag)
+                                                           ebv_mw=ebv_mws[i], yerr=None, mag=mag)
             lc = lc.T
-            lc = lc.reshape(num_samples, len(bands), len(t))
-            flux_grid = flux_grid.at[i, ...].set(lc)
+            lc = lc.reshape(num_samples, len(fit_bands), len(t))
+            flux_grid = flux_grid.at[i, :, :len(fit_bands), :].set(lc)
 
         return flux_grid
