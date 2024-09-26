@@ -2960,7 +2960,7 @@ class SEDmodel(object):
                     peak_mjds.append(peak_mjd)
             elif 'data_table' in args.keys():
                 table_path = os.path.join(args['data_root'], args['data_table'])
-                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)#.iloc[42:43, :]
+                sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True).iloc[:100, :]
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
                     sn, peak_mjd, file = row.values
