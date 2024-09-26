@@ -3668,7 +3668,7 @@ class SEDmodel(object):
 
             lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
-                                                           ebv_mw=ebv_mws[i], yerr=0, mag=mag)
+                                                           ebv_mw=ebv_mws[i], yerr=None, mag=mag)
             lc = lc.T
             lc = lc.reshape(num_samples, len(fit_bands), len(t))
             flux_grid = flux_grid.at[i, :, :len(fit_bands), :].set(lc)
