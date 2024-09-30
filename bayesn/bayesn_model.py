@@ -1869,6 +1869,8 @@ class SEDmodel(object):
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['jobsplit'] = args.get('jobsplit')
         args['ignore_file'] = args.get('ignore_file', None)
+        args['zlim'] = args.get('zlim', 999.)
+        args['salt_cut'] = args.get('salt_cut', False)
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2419,11 +2421,11 @@ class SEDmodel(object):
                         sn_name = meta['SNID'].decode('utf-8')
                         if sn_name in drop_list:
                             continue
-                        # if sn_name not in SALT_keep_list:
-                        #     continue
+                        if args['salt_cut'] and sn_name not in SALT_keep_list:
+                             continue
                         if meta['PIA'] < 0.5:
                             continue
-                        if zcmb > 0.4:
+                        if zcmb > args['zlim']:
                             continue
                         # if n_inc > 500:
                         #     continue
