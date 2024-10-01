@@ -1634,6 +1634,7 @@ class SEDmodel(object):
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['jobsplit'] = args.get('jobsplit')
         args['save_fit_errors'] = args.get('save_fit_errors', False)
+        args['error_floor'] = args.get('error_floor', 0.0)
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2436,10 +2437,12 @@ class SEDmodel(object):
                         # ----------------------------------------------------------
                         data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                         data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                        data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                        data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                         data['flux'] = data['FLUXCAL']
-                        data['flux_err'] = data['FLUXCALERR']
+                        data['flux_err'] = np.max(
+                            np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]),
+                            axis=0)
+                        data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                        data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                         data['redshift'] = zhel
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
@@ -2552,10 +2555,11 @@ class SEDmodel(object):
                     # ----------------------------------------------------------
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                    data['MAGERR'] = np.abs((2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL'])
-                    data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp']))
-                    data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
+                    data['flux'] = data['FLUXCAL']
+                    data['flux_err'] = np.max(
+                        np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
+                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = zhel_err
                     data['MWEBV'] = meta.get('MWEBV', 0.)
@@ -2735,10 +2739,10 @@ class SEDmodel(object):
                     # ----------------------------------------------------------
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                    data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                     data['flux'] = data['FLUXCAL']
-                    data['flux_err'] = data['FLUXCALERR']
+                    data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
+                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
                     data['MWEBV'] = meta.get('MWEBV', 0.)
