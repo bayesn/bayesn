@@ -2286,6 +2286,9 @@ class SEDmodel(object):
 
             sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
 
+            summary = arviz.summary(samples)
+            summary.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.SUMMARY.TEXT'))
+
         if args['snana']:
             self.end_time = time.time()
             cpu_time = self.end_time - self.start_time
