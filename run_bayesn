@@ -33,6 +33,7 @@ parser.add_argument('--outfile_prefix', type=str, required=False)
 parser.add_argument('--private_data_path', type=str, required=False, nargs='*')
 parser.add_argument('--sim_prescale', type=int, required=False)
 parser.add_argument('--save_fit_errors', type=int, required=False)
+parser.add_argument('--error_floor', type=float, required=False)
 cmd_args = parser.parse_args()
 
 if not os.path.exists(cmd_args.input):
