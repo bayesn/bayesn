@@ -1871,6 +1871,10 @@ class SEDmodel(object):
         args['ignore_file'] = args.get('ignore_file', None)
         args['zlim'] = args.get('zlim', 999.)
         args['salt_cut'] = args.get('salt_cut', False)
+        if args['salt_cut'] == 'True':
+            args['salt_cut'] = True
+        elif args['salt_cut'] == 'False':
+            args['salt_cut'] = False
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2422,7 +2426,7 @@ class SEDmodel(object):
                         if sn_name in drop_list:
                             continue
                         if args['salt_cut'] and sn_name not in SALT_keep_list:
-                             continue
+                            continue
                         if meta['PIA'] < 0.5:
                             continue
                         if zcmb > args['zlim']:
