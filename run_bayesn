@@ -34,6 +34,8 @@ parser.add_argument('--private_data_path', type=str, required=False, nargs='*')
 parser.add_argument('--sim_prescale', type=int, required=False)
 parser.add_argument('--zlim', type=float, required=False)
 parser.add_argument('--sim_peakmjd', type=bool, required=False)
+parser.add_argument('--pia_file', type=str, required=False)
+parser.add_argument('--pia_cut', type=float, required=False)
 cmd_args = parser.parse_args()
 
 if not os.path.exists(cmd_args.input):

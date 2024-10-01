@@ -2045,6 +2045,8 @@ class SEDmodel(object):
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['zlim'] = args.get('zlim', 99.)
         args['sim_peakmjd'] = args.get('sim_peakmjd', False)
+        args['pia_file'] = args.get('pia_file')
+        args['pia_cut'] = args.get('pia_cut', None)
         args['jobsplit'] = args.get('jobsplit')
         if args['jobsplit'] is not None:
             args['snana'] = True
@@ -2718,6 +2720,8 @@ class SEDmodel(object):
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
         c = 299792.458
+        if args['pia_cut'] is not None:
+            PIa_file = pd.read_csv(args['pia_file'])
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -2803,6 +2807,13 @@ class SEDmodel(object):
                         peak_mjd = meta[mjd_key]
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
+                        sn_name = meta['SNID']
+                        if isinstance(sn_name, bytes):
+                            sn_name = sn_name.decode('utf-8')
+                        if args['pia_cut'] is not None:
+                            pia = PIa_file[PIa_file.SNID == int(sn_name)].PROB_SNNTRAINV19_z_TRAINDES_V19.values[0]
+                            if pia < args['pia_cut']:
+                                continue
                         if zhel > args['zlim']:
                             continue
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
@@ -2856,9 +2867,6 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        sn_name = meta['SNID']
-                        if isinstance(sn_name, bytes):
-                            sn_name = sn_name.decode('utf-8')
                         sne.append(sn_name)
                         peak_mjds.append(peak_mjd)
                         sn_type.append(meta.get('TYPE', 0))
