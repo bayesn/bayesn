@@ -1648,6 +1648,7 @@ class SEDmodel(object):
             args['SNID_keep_list'] = keep_list.astype(str)
         else:
             args['SNID_keep_list'] = None
+        args['error_floor'] = args.get('error_floor', 0.0)
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2458,10 +2459,12 @@ class SEDmodel(object):
                         # ----------------------------------------------------------
                         data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                         data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                        data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                        data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                         data['flux'] = data['FLUXCAL']
-                        data['flux_err'] = data['FLUXCALERR']
+                        data['flux_err'] = np.max(
+                            np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]),
+                            axis=0)
+                        data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                        data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                         data['redshift'] = zhel
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
@@ -2574,10 +2577,11 @@ class SEDmodel(object):
                     # ----------------------------------------------------------
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                    data['MAGERR'] = np.abs((2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL'])
-                    data['flux'] = data['FLUXCAL']  # np.power(10, -0.4 * (data['MAG'] - data['zp']))
-                    data['flux_err'] = data['FLUXCALERR']  # (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
+                    data['flux'] = data['FLUXCAL']
+                    data['flux_err'] = np.max(
+                        np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
+                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = zhel_err
                     data['MWEBV'] = meta.get('MWEBV', 0.)
@@ -2767,10 +2771,10 @@ class SEDmodel(object):
                     # ----------------------------------------------------------
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['FLUXCAL'])
-                    data['MAGERR'] = (2.5 / np.log(10)) * data['FLUXCALERR'] / data['FLUXCAL']
                     data['flux'] = data['FLUXCAL']
-                    data['flux_err'] = data['FLUXCALERR']
+                    data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
+                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
                     data['MWEBV'] = meta.get('MWEBV', 0.)
@@ -3438,6 +3442,7 @@ class SEDmodel(object):
             max_bands = len(bands)
 
         flux_grid = jnp.zeros((N_sne, num_samples, max_bands, len(t)))
+        band_weights = self.band_weights
 
         print('Getting best fit light curves from chains...')
         for i in tqdm(np.arange(N_sne)):
@@ -3465,6 +3470,9 @@ class SEDmodel(object):
 
             if mean:
                 theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+
+            if self.band_weights is not None:
+                self.band_weights = band_weights[i:i + 1, ...]
 
             lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
