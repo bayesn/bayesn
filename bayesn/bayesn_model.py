@@ -2296,7 +2296,7 @@ class SEDmodel(object):
             SALT_quality_drop_list = ['1283923', '1519038', '1773339', '1247420', '1259412', '1309874', '1314897']
             other_quality_drop_list = ['1246430', '1250432', '1250785', '1251028', '1259544', '1265143', '1277892',
                                        '1283289', '1291639', '1291799', '1292084', '1292834', '1294158', '1323331',
-                                       '1292805', '1446086']
+                                       '1777356', '1292805', '1446086']
             SALT_keep_list = ['1246275', '1246281', '1246314', '1246527', '1246626', '1247022',
                                '1247420', '1248039', '1248084', '1248243', '1248441', '1248677',
                                '1248907', '1248925', '1249090', '1249137', '1249308', '1249483',
@@ -2646,6 +2646,8 @@ class SEDmodel(object):
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
+            print(sne[168], len(sne))
+            raise ValueError('Nope')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
             all_data = np.zeros((N_sn, N_obs, N_col))
