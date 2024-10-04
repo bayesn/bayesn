@@ -445,8 +445,8 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
-            int1 = simpson(lam * zp * R[:, 1], lam)
-            int2 = simpson(lam * R[:, 1], lam)
+            int1 = simpson(lam * zp * R[:, 1], x=lam)
+            int2 = simpson(lam * R[:, 1], x=lam)
             zp = 2.5 * np.log10(int1 / int2)
             self.band_dict[band] = band_ind
             self.band_lim_dict[band] = [band_low_lim, band_up_lim]
