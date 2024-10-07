@@ -3000,6 +3000,10 @@ class SEDmodel(object):
         l_o = l_r[None, ...].repeat(N, axis=0) * (1 + z[:, None])
 
         self.model_wave = l_r
+        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
+        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
         KD_x = invKD_irr(self.xk)
