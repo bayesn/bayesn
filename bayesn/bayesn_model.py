@@ -2120,8 +2120,10 @@ class SEDmodel(object):
 
         param_init['mu_R_0_HM'] = jnp.array(2.8)
         param_init['mu_R_0_LM'] = jnp.array(2.8)
-        param_init['mu_grad_HM'] = jnp.array(0.1)
-        param_init['mu_grad_LM'] = jnp.array(0.1)
+        param_init['mu_grad_HM'] = jnp.array(-0.1)
+        param_init['mu_grad_LM'] = jnp.array(-0.1)
+        param_init['tauA_HM_z_grad'] = jnp.array(-0.01)
+        param_init['tauA_LM_z_grad'] = jnp.array(-0.01)
 
         return param_init
 
@@ -2946,6 +2948,9 @@ class SEDmodel(object):
                             if pia < args['pia_cut']:
                                 continue
                         if zhel > args['zlim']:
+                            continue
+                        mass = meta['HOSTGAL_LOGMASS']
+                        if (mass > 9.9) & (mass < 10.1):
                             continue
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
