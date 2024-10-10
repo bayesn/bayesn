@@ -1459,6 +1459,95 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
+    def train_model_redshift(self, obs, weights):
+        """
+        Numpyro model used for training to learn global parameters
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+
+        Returns
+        -------
+
+        """
+        sample_size = self.data.shape[-1]
+
+        N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        W_mu = jnp.zeros(N_knots)
+
+        W0 = numpyro.sample('W0', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+
+        sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
+                                            dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
+        sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
+        L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        mu_R_0 = numpyro.sample('mu_R_0', dist.Uniform(1, 5))
+        sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(2))
+        # phi_alpha_R_HM = norm.cdf((self.trunc_val - mu_R_0_HM) / sigma_R_HM)
+        mu_z_grad = numpyro.sample('mu_grad', dist.Uniform(-2, 2))
+
+        tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
+        tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
+        tauA_z_grad = numpyro.sample('tauA_z_grad', dist.Uniform(-0.5, 0.5))
+
+        sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+
+            redshift = obs[-5, 0, sn_index]
+
+            tauA = tauA + redshift * tauA_z_grad
+
+            Av = numpyro.sample(f'AV_LM', dist.Exponential(1 / tauA))
+
+            mu_R = mu_R_0 + redshift * mu_z_grad
+
+            phi_alpha_R = norm.cdf((self.trunc_val - mu_R) / sigma_R)
+
+            Rv_tform = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
+            Rv = numpyro.deterministic('Rv_HM', mu_R + sigma_R * ndtri(
+                phi_alpha_R + Rv_tform * (1 - phi_alpha_R)))
+
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            redshift = obs[-5, 0, sn_index]
+            redshift_error = obs[-4, 0, sn_index]
+            muhat = obs[-3, 0, sn_index]
+            ebv = obs[-2, 0, sn_index]
+
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
+                jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            Ds_tform = numpyro.sample('Ds_tform', dist.Normal(0, 1))
+            Ds = numpyro.deterministic('Ds', muhat + Ds_tform * Ds_err)
+
+            flux = self.get_mag_batch(self.M0, theta, Av, W0, W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
+                                      weights)
+
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+
     def dust_model(self, obs, weights):
         """
         Numpryo model used to infer dust properties conditioned on fixed SN population parameters from a previously
@@ -2279,6 +2368,11 @@ class SEDmodel(object):
                                step_size=0.1)
         elif args['mode'].lower() == 'training_mass_split':
             nuts_kernel = NUTS(self.train_model_mass_split, adapt_step_size=True, target_accept_prob=0.8,
+                               init_strategy=init_strategy,
+                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
+                               step_size=0.1)
+        elif args['mode'].lower() == 'training_redshift':
+            nuts_kernel = NUTS(self.train_model_redshift, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
