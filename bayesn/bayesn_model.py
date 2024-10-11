@@ -3093,7 +3093,9 @@ class SEDmodel(object):
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             continue
-                        if mass > 10 and n_HM > 600:
+                        if mass > 10 and n_HM > 999:
+                            continue
+                        if mass < 10 and n_LM > 999:
                             continue
                         if mass > 10:
                             n_HM += 1
