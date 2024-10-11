@@ -3047,12 +3047,6 @@ class SEDmodel(object):
                         mass = meta['HOSTGAL_LOGMASS']
                         if (mass > 9.9) & (mass < 10.1):
                             continue
-                        if n_HM > 600:
-                            continue
-                        if mass > 10:
-                            n_HM += 1
-                        elif mass < 10:
-                            n_LM += 1
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
                         vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
@@ -3099,6 +3093,12 @@ class SEDmodel(object):
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             continue
+                        if n_HM > 600:
+                            continue
+                        if mass > 10:
+                            n_HM += 1
+                        elif mass < 10:
+                            n_LM += 1
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
                         n_obs.append(lc.shape[0])
                         all_lcs.append(lc)
