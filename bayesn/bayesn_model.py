@@ -3093,9 +3093,9 @@ class SEDmodel(object):
                         lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
                         if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             continue
-                        if mass > 10 and n_HM > 999:
+                        if mass > 10 and n_HM > 800:
                             continue
-                        if mass < 10 and n_LM > 999:
+                        if mass < 10 and n_LM > 800:
                             continue
                         if mass > 10:
                             n_HM += 1
@@ -3262,9 +3262,6 @@ class SEDmodel(object):
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
-            print(n_HM, n_LM)
-            print(N_sn)
-            raise ValueError('Nope')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
             all_data = np.zeros((N_sn, N_obs, N_col))
