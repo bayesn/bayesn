@@ -3260,6 +3260,7 @@ class SEDmodel(object):
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
+            print(n_HM, n_LM)
             print(N_sn)
             raise ValueError('Nope')
             N_obs = np.max(n_obs)
