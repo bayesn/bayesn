@@ -2996,6 +2996,7 @@ class SEDmodel(object):
             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
             sim_gentypes, sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags, sim_pkmjds, sim_thetas, \
             sim_AVs, sim_RVs = [], [], [], [], [], [], [], [], [], []
+            n_HM, n_LM = 0, 0
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             if file_format.lower() == 'fits':  # If FITS format
@@ -3045,6 +3046,12 @@ class SEDmodel(object):
                             continue
                         mass = meta['HOSTGAL_LOGMASS']
                         if (mass > 9.9) & (mass < 10.1):
+                            continue
+                        if mass > 10:
+                            n_HM += 1
+                        elif mass < 10:
+                            n_LM += 1
+                        if n_HM > 600:
                             continue
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
@@ -3253,6 +3260,8 @@ class SEDmodel(object):
                 self.survey = meta.get('SURVEY', 'NULL')
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
+            print(N_sn)
+            raise ValueError('Nope')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1]
             all_data = np.zeros((N_sn, N_obs, N_col))
