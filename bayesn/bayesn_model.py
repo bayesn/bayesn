@@ -237,7 +237,6 @@ class SEDmodel(object):
         built_in_models = next(os.walk(os.path.join(self.__root_dir__, "model_files")))[
             1
         ]
-        built_in_redlaws = next(os.walk(os.path.join(self.__root_dir__, "redlaws")))[1]
 
         if os.path.exists(load_model):
             print(f"Loading custom model at {load_model}")
@@ -258,22 +257,6 @@ class SEDmodel(object):
                 f"of the built-in model {built_in_models}"
             )
 
-        if os.path.exists(load_redlaw):
-            print(f"Loading custom reddening law at {load_redlaw}")
-            with open(load_model, "r") as file:
-                redlaw_params = yaml.load(file)
-        elif load_redlaw in built_in_redlaws:
-            print(f"Loading built-in reddening law {load_redlaw}")
-            with open(
-                os.path.join(self.__root_dir__, "redlaws", load_redlaw, "BAYESN.YAML"),
-                "r",
-            ) as file:
-                redlaw_params = yaml.load(file)
-        else:
-            raise FileNotFoundError(
-                f"Specified reddening law {load_redlaw} does not exist and does not correspond to one "
-                f"of the built-in model {built_in_redlaws}"
-            )
         # Define example light curve for jupyter notebook demos
         self.example_lc = os.path.join(
             self.__root_dir__, "data", "example_lcs", "Foundation_DR1_2016W.txt"
@@ -310,14 +293,8 @@ class SEDmodel(object):
         self.J_l_T = device_put(self.J_l_T)
         self.hsiao_flux = device_put(self.hsiao_flux)
         self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
-        self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
-        self.redlaw_num_knots = jnp.array(redlaw_params["NUM_KNOTS"])
-        self.redlaw_rv_coeffs = device_put(jnp.array(redlaw_params["RV_COEFFS"]))
-        self.redlaw_min_order = redlaw_params["MIN_ORDER"]
-        redlaw_KD_x = invKD_irr(self.redlaw_xk)
-        self.M_fitz_block = device_put(
-            spline_coeffs_irr(1e4 / self.model_wave, self.redlaw_xk, redlaw_KD_x)
-        )
+
+        self._load_redlaw(redlaw=load_redlaw)
 
         self.J_t_map = jax.jit(
             jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
@@ -627,6 +604,78 @@ class SEDmodel(object):
 
         return weights
 
+    def _load_redlaw(self, redlaw):
+        built_in_redlaws = next(os.walk(os.path.join(self.__root_dir__, "redlaws")))[1]
+        if os.path.exists(redlaw):
+            print(f"Loading custom reddening law at {redlaw}")
+            with open(load_model, "r") as file:
+                redlaw_params = yaml.load(file)
+        elif redlaw in built_in_redlaws:
+            print(f"Loading built-in reddening law {redlaw}")
+            with open(
+                os.path.join(self.__root_dir__, "redlaws", redlaw, "BAYESN.YAML"),
+                "r",
+            ) as file:
+                redlaw_params = yaml.load(file)
+        else:
+            raise FileNotFoundError(
+                f"Specified reddening law {redlaw} does not exist and does not correspond to one "
+                f"of the built-in model {built_in_redlaws}"
+            )
+
+        self.redlaw_rv_coeffs = device_put(
+            jnp.array(redlaw_params.get("RV_COEFFS", [[1]]))
+        )
+        self.redlaw_num_knots = redlaw_params.get("NUM_KNOTS", 1)
+        self.redlaw_min_order = redlaw_params.get("MIN_ORDER", 0)
+        n_regimes = redlaw_params.get("NUM_REGIMES", 1)
+        ones = jnp.ones((n_regimes, 1))
+        zeros = jnp.zeros((n_regimes, 1))
+        self.redlaw_ax, self.redlaw_bx = [
+            jnp.zeros((len(self.model_wave), 1)) for _ in range(2)
+        ]
+        if "L_KNOTS" in redlaw_params:
+            self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
+            redlaw_KD_x = invKD_irr(self.redlaw_xk)
+            x = self.model_wave
+            if "KNOT_UNITS" in redlaw_params:
+                if "micron" in redlaw_params["KNOT_UNITS"]:
+                    x = x / 1e4
+                if "inverse" in redlaw_params["KNOT_UNITS"]:
+                    x = 1 / x
+
+            self.redlaw_bx = device_put(
+                spline_coeffs_irr(x, self.redlaw_xk, redlaw_KD_x)
+            )
+        for i in range(n_regimes):
+            wl_range = redlaw_params.get("REGIME_WLS", [[0, 10]])[i]
+            idx = jnp.where(
+                (1e4 / self.model_wave >= wl_range[0])
+                & (1e4 / self.model_wave <= wl_range[1]),
+            )
+            if not idx[0].shape[0]:
+                continue
+            x = jnp.array(
+                (1e4 / self.model_wave[idx]) ** redlaw_params.get("REGIME_EXP", ones)[i]
+                + redlaw_params.get("REGIME_OFFSET", zeros)[i]
+            )
+            a_poly = jnp.array(redlaw_params.get("A_POLY_COEFFS", ones)[i])
+            a_rat = jnp.array(redlaw_params.get("A_RATIONAL_COEFFS", zeros)[i])
+            self.redlaw_ax = self.redlaw_ax.at[idx, 0].set(
+                jnp.polyval(a_poly, x)
+                + jnp.nan_to_num(1 / jnp.polyval(a_rat, x), posinf=0, neginf=0)
+            )
+            if "L_KNOTS" in redlaw_params:
+                continue
+            b_poly = jnp.array(redlaw_params.get("B_POLY_COEFFS", ones)[i])
+            b_rat = jnp.array(redlaw_params.get("B_RATIONAL_COEFFS", zeros)[i])
+            self.redlaw_bx = self.redlaw_bx.at[idx, 0].set(
+                jnp.polyval(b_poly, x)
+                + jnp.nan_to_num(1 / jnp.polyval(b_rat, x), posinf=0, neginf=0)
+            )
+        self.redlaw_ax = device_put(self.redlaw_ax)
+        self.redlaw_bx = device_put(self.redlaw_bx)
+
     def get_spectra(self, theta, AV, W0, W1, eps, RV, J_t, hsiao_interp):
         """
         Calculates rest-frame spectra for given parameter values
@@ -678,6 +727,7 @@ class SEDmodel(object):
 
         # Extinction----------------------------------------------------------
         yk = jnp.zeros((num_batch, self.redlaw_num_knots))
+        ones = jnp.ones((1, num_batch))
 
         def body_fun(i, yk):
             return yk.at[:, i].set(
@@ -688,7 +738,7 @@ class SEDmodel(object):
         yk = fori_loop(0, self.redlaw_num_knots, body_fun, yk)
 
         A = AV[..., None] * (
-            1 + (self.M_fitz_block @ yk.T).T / RV[..., None]
+            (self.redlaw_ax @ ones).T + (self.redlaw_bx @ yk.T).T / RV[..., None]
         )  # RV[..., None]
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
