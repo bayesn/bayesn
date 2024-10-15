@@ -1267,10 +1267,7 @@ class SEDmodel(object):
         sample_size = self.data.shape[-1]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
 
-        mu_R = numpyro.sample('mu_R', dist.Uniform(1.2, 6))
-        sigma_R = numpyro.sample('sigma_R', dist.HalfNormal(1))
-        phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
-
+        RV = numpyro.sample('RV', dist.Uniform(1.2, 6))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
         sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
 
@@ -1280,9 +1277,6 @@ class SEDmodel(object):
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
             Av = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
-
-            Rv_tform = numpyro.sample('Rv_tform', dist.Uniform(0, 1))
-            RV = numpyro.deterministic('RV', mu_R + sigma_R * ndtri(phi_alpha_R + Rv_tform * (1 - phi_alpha_R)))
 
             eps_mu = jnp.zeros(N_knots_sig)
             eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
