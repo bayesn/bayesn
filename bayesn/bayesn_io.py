@@ -11,7 +11,7 @@ import time
 
 
 def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio, z_cmb, z_cmb_err, ebv_mw, ra=None,
-                       dec=None, author="anonymous", survey=None, paper=None, filename=None):
+                       dec=None, author="anonymous", survey=None, paper=None, filename=None, extra_dict={}):
     """
     Write user data to an SNANA-like light curve file
 
@@ -116,7 +116,8 @@ def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio,
     filters = ",".join(at.unique(tab, keys="FLT")["FLT"])
     tab.meta.update(
         {"MWEBV:": ebv_mw, "REDSHIFT_HELIO:": z_helio, "REDSHIFT_CMB:": z_cmb, "REDSHIFT_CMB_ERR:": z_cmb_err,
-         "PEAKMJD:": tmax, "FILTERS:": filters, "#": divider, "NOBS:": len(tab), "NVAR:": 6})
+         "PEAKMJD:": tmax, "FILTERS:": filters, **extra_dict,
+         "#": divider, "NOBS:": len(tab), "NVAR:": 6})
 
     # Write to file
     if filename is None:
