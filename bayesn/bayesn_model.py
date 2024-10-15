@@ -3041,7 +3041,7 @@ class SEDmodel(object):
                         if args['pia_cut'] is not None:
                             pia = PIa_file[PIa_file.SNID == int(sn_name)].PROB_SNNTRAINV19_z_TRAINDES_V19.values[0]
                             if args['pia_cut'] > 0.99999:
-                                if meta['SIM_GENTYPE'] != 1:
+                                if meta['SIM_GENTYPE'] != 1 or pia < 0.9:
                                     continue
                             else:
                                 if pia < args['pia_cut']:
