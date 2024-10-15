@@ -3042,6 +3042,8 @@ class SEDmodel(object):
                             pia = PIa_file[PIa_file.SNID == int(sn_name)].PROB_SNNTRAINV19_z_TRAINDES_V19.values[0]
                             if pia < args['pia_cut']:
                                 continue
+                            if args['pia_cut'] > 0.99999 and meta['SIM_GENTYPE'] != 1:
+                                    continue
                         if zhel > args['zlim']:
                             continue
                         mass = meta['HOSTGAL_LOGMASS']
