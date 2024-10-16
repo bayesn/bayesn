@@ -5,7 +5,6 @@ BayeSN Optical+NIR SED model.
 
 import os
 import subprocess
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -285,7 +284,9 @@ class SEDmodel(object):
         self.band_weights = None
         self._setup_band_weights()
 
-        self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
+        self.J_t_map = jax.jit(
+            jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        )
 
     def _load_hsiao_template(self):
         """
@@ -529,12 +530,14 @@ class SEDmodel(object):
         self.band_interpolate_locations = device_put(band_interpolate_locations)
         self.band_interpolate_spacing = band_spacing
         self.band_interpolate_weights = jnp.array(band_weights)
-        self.model_wave = 10 ** model_log_wave
+        self.model_wave = 10**model_log_wave
         self.used_band_dict = {val: val for val in self.band_dict.values()}
 
-        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind1 = (
+            self.model_wave < 2700
+        )  # Need to use separate UV term for F99 law below 2700AA
         self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
-        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_ind3 = (1e4 / self.model_wave[self.uv_ind1]) >= 5.9
         self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
 
         KD_l = invKD_irr(self.l_knots)
@@ -548,10 +551,22 @@ class SEDmodel(object):
         self.hsiao_flux = device_put(self.hsiao_flux)
         self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
         self.xk = jnp.array(
-            [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
-             1e4 / 2600.])
+            [
+                0.0,
+                1e4 / 26500.0,
+                1e4 / 12200.0,
+                1e4 / 6000.0,
+                1e4 / 5470.0,
+                1e4 / 4670.0,
+                1e4 / 4110.0,
+                1e4 / 2700.0,
+                1e4 / 2600.0,
+            ]
+        )
         KD_x = invKD_irr(self.xk)
-        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
+        self.M_fitz_block = device_put(
+            spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x)
+        )
 
     def _calculate_band_weights(self, redshifts, ebv, redlaw="F99"):
         """
@@ -614,6 +629,30 @@ class SEDmodel(object):
         return weights
 
     def _load_redlaw(self, redlaw):
+        """
+        Loads a reddening law from a yaml file.
+
+        Each reddening law is specified as A(x)/A(V) = a(x) + b(x)/RV where
+        {a,b}(x) = x**REGIME_EXP * (P_{a,b}(x) + R_{a,b}(x)/D_{a,b}(x))
+        where P_{a,b}, R_{a,b}, and D_{a,b} are all standard polynomials.
+        If L_KNOTS is provided in the yaml file, b(x) is instead defined as a natural
+        cubic spline with knots at L_KNOTS and values defined by RV**MIN_ORDER times
+        a polynomial function of RV with coefficients given by RV_COEFFS.
+        Example:
+            if a knot's RV_COEFFS list is [m, n, p] and MIN_ORDER is -1
+            the spline value at that knot is given by
+            m*RV**1 + n*RV**0 + p*RV**(-1)
+
+        Encodes the reddening law into the attributes redlaw_ax, redlaw_bx,
+        redlaw_num_knots, redlaw_rv_coeffs, and redlaw_min_order, all of which
+        are accessed by the get_spectra method.
+
+        The recognized YAML keywords and their descriptions are described in the
+        redlaws/README file.
+
+        Returns
+        -------
+        """
         built_in_redlaws = next(os.walk(os.path.join(self.__root_dir__, "redlaws")))[1]
         if os.path.exists(redlaw):
             print(f"Loading custom reddening law at {redlaw}")
@@ -635,55 +674,54 @@ class SEDmodel(object):
         self.redlaw_rv_coeffs = device_put(
             jnp.array(redlaw_params.get("RV_COEFFS", [[1]]))
         )
-        self.redlaw_num_knots = redlaw_params.get("NUM_KNOTS", 1)
+        self.redlaw_num_knots = len(redlaw_params.get("L_KNOTS", [1]))
         self.redlaw_min_order = redlaw_params.get("MIN_ORDER", 0)
-        n_regimes = redlaw_params.get("NUM_REGIMES", 1)
+        n_regimes = len(redlaw_params.get("REGIME_WLS", [1]))
         ones = jnp.ones((n_regimes, 1))
         zeros = jnp.zeros((n_regimes, 1))
-        self.redlaw_ax, self.redlaw_bx = [
-            jnp.zeros((len(self.model_wave), 1)) for _ in range(2)
-        ]
+        redlaw = {}
+        for var in "AB":
+            redlaw[var] = jnp.zeros((len(self.model_wave), 1))
+        x = self.model_wave
+        units = redlaw_params.get("UNITS", "inverse microns")
+        if "micron" in units:
+            x = x / 1e4
+        if "inverse" in units:
+            x = 1 / x
         if "L_KNOTS" in redlaw_params:
             self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
-            redlaw_KD_x = invKD_irr(self.redlaw_xk)
-            x = self.model_wave
-            if "KNOT_UNITS" in redlaw_params:
-                if "micron" in redlaw_params["KNOT_UNITS"]:
-                    x = x / 1e4
-                if "inverse" in redlaw_params["KNOT_UNITS"]:
-                    x = 1 / x
-
-            self.redlaw_bx = device_put(
-                spline_coeffs_irr(x, self.redlaw_xk, redlaw_KD_x)
+            redlaw["B"] = spline_coeffs_irr(
+                x, self.redlaw_xk, invKD_irr(self.redlaw_xk)
             )
         for i in range(n_regimes):
             wl_range = redlaw_params.get("REGIME_WLS", [[0, 10]])[i]
-            idx = jnp.where(
-                (1e4 / self.model_wave >= wl_range[0])
-                & (1e4 / self.model_wave <= wl_range[1]),
-            )
+            idx = jnp.where((wl_range[0] <= x) & (x < wl_range[1]))
             if not idx[0].shape[0]:
                 continue
-            x = jnp.array(
-                (1e4 / self.model_wave[idx]) ** redlaw_params.get("REGIME_EXP", ones)[i]
-                + redlaw_params.get("REGIME_OFFSET", zeros)[i]
-            )
-            a_poly = jnp.array(redlaw_params.get("A_POLY_COEFFS", ones)[i])
-            a_rat = jnp.array(redlaw_params.get("A_RATIONAL_COEFFS", zeros)[i])
-            self.redlaw_ax = self.redlaw_ax.at[idx, 0].set(
-                jnp.polyval(a_poly, x)
-                + jnp.nan_to_num(1 / jnp.polyval(a_rat, x), posinf=0, neginf=0)
-            )
-            if "L_KNOTS" in redlaw_params:
-                continue
-            b_poly = jnp.array(redlaw_params.get("B_POLY_COEFFS", ones)[i])
-            b_rat = jnp.array(redlaw_params.get("B_RATIONAL_COEFFS", zeros)[i])
-            self.redlaw_bx = self.redlaw_bx.at[idx, 0].set(
-                jnp.polyval(b_poly, x)
-                + jnp.nan_to_num(1 / jnp.polyval(b_rat, x), posinf=0, neginf=0)
-            )
-        self.redlaw_ax = device_put(self.redlaw_ax)
-        self.redlaw_bx = device_put(self.redlaw_bx)
+            mod_x = x[idx]
+            for var in "AB":
+                if var == "B" and "L_KNOTS" in redlaw_params:
+                    continue
+                poly = jnp.array(redlaw_params.get(f"{var}_POLY_COEFFS", ones)[i])
+                rem = jnp.array(redlaw_params.get(f"{var}_REMAINDER_COEFFS", zeros)[i])
+                div = jnp.array(redlaw_params.get(f"{var}_DIVISOR_COEFFS", zeros)[i])
+                redlaw[var] = (
+                    redlaw[var]
+                    .at[idx, 0]
+                    .set(
+                        mod_x ** redlaw_params.get("REGIME_EXP", zeros)[i]
+                        * (
+                            jnp.polyval(poly, mod_x)
+                            + jnp.nan_to_num(
+                                jnp.polyval(rem, mod_x) / jnp.polyval(div, mod_x),
+                                posinf=0,
+                                neginf=0,
+                            )
+                        )
+                    )
+                )
+        self.redlaw_ax = device_put(redlaw["A"])
+        self.redlaw_bx = device_put(redlaw["B"])
 
     def get_spectra(self, theta, AV, W0, W1, eps, RV, J_t, hsiao_interp):
         """
@@ -738,13 +776,13 @@ class SEDmodel(object):
         yk = jnp.zeros((num_batch, self.redlaw_num_knots))
         ones = jnp.ones((1, num_batch))
 
-        def body_fun(i, yk):
+        def get_knot_value(i, yk):
             return yk.at[:, i].set(
                 jnp.polyval(self.redlaw_rv_coeffs[i], RV, unroll=16)
                 * RV**self.redlaw_min_order
             )
 
-        yk = fori_loop(0, self.redlaw_num_knots, body_fun, yk)
+        yk = fori_loop(0, self.redlaw_num_knots, get_knot_value, yk)
 
         A = AV[..., None] * (
             (self.redlaw_ax @ ones).T + (self.redlaw_bx @ yk.T).T / RV[..., None]
@@ -2173,32 +2211,32 @@ class SEDmodel(object):
         args.pop("config", None)
 
         # Set default parameters for some parameters if not specified in input.yaml or command line
-        args['num_chains'] = args.get('num_chains', 4)
-        args['num_warmup'] = args.get('num_warmup', 500)
-        args['num_samples'] = args.get('num_samples', 500)
-        args['fit_method'] = args.get('fit_method', 'mcmc')
-        args['chain_method'] = args.get('chain_method', 'parallel')
-        args['initialisation'] = args.get('initialisation', 'median')
-        args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
-        args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
-        args['map'] = args.get('map', {})
-        args['drop_bands'] = args.get('drop_bands', [])
-        args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd()))
-        args['outfile_prefix'] = args.get('outfile_prefix', 'output')
-        args['jobid'] = args.get('jobid', False)
-        pdp = args.get('private_data_path', [])
-        args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
-        args['sim_prescale'] = args.get('sim_prescale', 1)
-        args['jobsplit'] = args.get('jobsplit')
-        args['save_fit_errors'] = args.get('save_fit_errors', False)
-        args['error_floor'] = args.get('error_floor', 0.0)
-        if args['jobsplit'] is not None:
-            args['snana'] = True
+        args["num_chains"] = args.get("num_chains", 4)
+        args["num_warmup"] = args.get("num_warmup", 500)
+        args["num_samples"] = args.get("num_samples", 500)
+        args["fit_method"] = args.get("fit_method", "mcmc")
+        args["chain_method"] = args.get("chain_method", "parallel")
+        args["initialisation"] = args.get("initialisation", "median")
+        args["l_knots"] = args.get("l_knots", self.l_knots.tolist())
+        args["tau_knots"] = args.get("tau_knots", self.tau_knots.tolist())
+        args["map"] = args.get("map", {})
+        args["drop_bands"] = args.get("drop_bands", [])
+        args["outputdir"] = args.get("outputdir", os.path.join(os.getcwd()))
+        args["outfile_prefix"] = args.get("outfile_prefix", "output")
+        args["jobid"] = args.get("jobid", False)
+        pdp = args.get("private_data_path", [])
+        args["private_data_path"] = [pdp] if isinstance(pdp, str) else pdp
+        args["sim_prescale"] = args.get("sim_prescale", 1)
+        args["jobsplit"] = args.get("jobsplit")
+        args["save_fit_errors"] = args.get("save_fit_errors", False)
+        args["error_floor"] = args.get("error_floor", 0.0)
+        if args["jobsplit"] is not None:
+            args["snana"] = True
         else:
-            args['jobsplit'] = [1, 1]
-            args['snana'] = False
-        args['jobid'] = args['jobsplit'][0]
-        args['njobtot'] = args['jobsplit'][1] * args['sim_prescale']
+            args["jobsplit"] = [1, 1]
+            args["snana"] = False
+        args["jobid"] = args["jobsplit"][0]
+        args["njobtot"] = args["jobsplit"][1] * args["sim_prescale"]
 
         if not (args["mode"] == "fitting" and args["snana"]):
             try:
@@ -2964,84 +3002,122 @@ class SEDmodel(object):
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             muhat = self.data[-3, 0, :]
-            samples['mu'] = np.random.normal(
-                (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-                np.power(Ds_err, 2),
-                np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
-            samples['delM'] = samples['Ds'] - samples['mu']
+            samples["mu"] = np.random.normal(
+                (
+                    samples["Ds"] * np.power(muhat_err, 2)
+                    + muhat * np.power(self.sigma0, 2)
+                )
+                / np.power(Ds_err, 2),
+                np.sqrt(
+                    (np.power(self.sigma0, 2) * np.power(muhat_err, 2))
+                    / np.power(Ds_err, 2)
+                ),
+            )
+            samples["delM"] = samples["Ds"] - samples["mu"]
 
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
             bands = []
             for sn in self.sn_list:
-                bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
+                bands.append(
+                    list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique())
+                )
 
-            f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
-                                          num_samples=None,
-                                          mag=False, mean=not args['save_fit_errors'])
+            f = self.get_flux_from_chains(
+                t,
+                bands,
+                samples,
+                self.data[-5, 0, :],
+                self.data[-2, 0, :],
+                num_samples=None,
+                mag=False,
+                mean=not args["save_fit_errors"],
+            )
             f, ferr = f.mean(axis=1), f.std(axis=1)
 
-            self.lcplot_data['DATA_FLAG'] = 1
+            self.lcplot_data["DATA_FLAG"] = 1
             z_hel = self.data[-5, 0, :]
             for i, sn in enumerate(self.sn_list):
                 fit_df = pd.DataFrame()
-                fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
-                fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
-                fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
-                fit_df['FLT'] = np.tile(bands[i], len(t))
-                fit_df['CID'] = sn
-                fit_df['DATA_FLAG'] = 0
+                fit_df["MJD"] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(
+                    len(bands[i])
+                )
+                fit_df["FLUXCAL"] = f[i, : len(bands[i]), :].flatten(order="F")
+                fit_df["FLUXCALERR"] = ferr[i, : len(bands[i]), :].flatten(order="F")
+                fit_df["FLT"] = np.tile(bands[i], len(t))
+                fit_df["CID"] = sn
+                fit_df["DATA_FLAG"] = 0
                 self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
 
-            self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
-            self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
-                                    index=False)
+            self.lcplot_data = self.lcplot_data.sort_values(
+                by=["CID", "DATA_FLAG", "MJD"]
+            )
+            self.lcplot_data.to_csv(
+                os.path.join(args["outputdir"], f'{args["outfile_prefix"]}.LCPLOT'),
+                index=False,
+            )
 
             # Create FITRES file
             # if args['snana']:
             # fetch snana version that includes tag + commit;
             # e.g., v11_05-4-gd033611.
             # Use same git command as in Makefile for C code
-            SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
-            if SNANA_DIR != 'NULL':
-                cmd = f'cd {SNANA_DIR}; git describe --always --tags'
-                ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
-                snana_version = ret.stdout.replace('\n', '')
+            SNANA_DIR = os.environ.get("SNANA_DIR", "NULL")
+            if SNANA_DIR != "NULL":
+                cmd = f"cd {SNANA_DIR}; git describe --always --tags"
+                ret = subprocess.run(
+                    [cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True
+                )
+                snana_version = ret.stdout.replace("\n", "")
             else:
-                snana_version = 'NULL'
-            self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
-                                      '# VERSION_PHOTOMETRY:': args.get('version_photometry', args.get('data_table')),
-                                      '# TABLE NAME:': 'FITRES\n#'}
+                snana_version = "NULL"
+            self.fitres_table.meta = {
+                "#\n# SNANA_VERSION:": snana_version,
+                "# VERSION_PHOTOMETRY:": args.get(
+                    "version_photometry", args.get("data_table")
+                ),
+                "# TABLE NAME:": "FITRES\n#",
+            }
 
-            n_sn = samples['mu'].shape[-1]
-            drop_keys = ['diverging', '_auto_latent']
+            n_sn = samples["mu"].shape[-1]
+            drop_keys = ["diverging", "_auto_latent"]
             for key in drop_keys:
                 if key in samples.keys():
                     del samples[key]
             summary = arviz.summary(samples)
-            summary = summary[~summary.index.str.contains('tform')]
+            summary = summary[~summary.index.str.contains("tform")]
             rhat = summary.r_hat.values
             sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
 
-            self.fitres_table['MU_LCFIT'] = samples['mu'].mean(axis=(0, 1))
-            self.fitres_table['MUERR_LCFIT'] = samples['mu'].std(axis=(0, 1))
-            self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
-            self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
-            self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
-            self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
+            self.fitres_table["MU_LCFIT"] = samples["mu"].mean(axis=(0, 1))
+            self.fitres_table["MUERR_LCFIT"] = samples["mu"].std(axis=(0, 1))
+            self.fitres_table["THETA"] = samples["theta"].mean(axis=(0, 1))
+            self.fitres_table["THETAERR"] = samples["theta"].std(axis=(0, 1))
+            self.fitres_table["AV"] = samples["AV"].mean(axis=(0, 1))
+            self.fitres_table["AVERR"] = samples["AV"].std(axis=(0, 1))
             # if not args['fit_method'] == 'vi':
-            self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
-            self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
+            self.fitres_table["MEANRHAT"] = sn_rhat.mean(axis=1)
+            self.fitres_table["MAXRHAT"] = sn_rhat.max(axis=1)
             self.fitres_table.round(4)
 
-            drop_count = pd.isna(self.fitres_table['MU_LCFIT']).sum()
-            self.fitres_table = self.fitres_table[~pd.isna(self.fitres_table['MU_LCFIT'])]
+            drop_count = pd.isna(self.fitres_table["MU_LCFIT"]).sum()
+            self.fitres_table = self.fitres_table[
+                ~pd.isna(self.fitres_table["MU_LCFIT"])
+            ]
 
             # Reorder to put SIM columns last
-            new_cols = [col for col in self.fitres_table.columns if 'SIM' not in col] + \
-                       [col for col in self.fitres_table.columns if 'SIM' in col]
+            new_cols = [
+                col for col in self.fitres_table.columns if "SIM" not in col
+            ] + [col for col in self.fitres_table.columns if "SIM" in col]
             self.fitres_table = self.fitres_table[new_cols]
 
-            sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
+            sncosmo.write_lc(
+                self.fitres_table,
+                os.path.join(
+                    args["outputdir"], f'{args["outfile_prefix"]}.FITRES.TEXT'
+                ),
+                fmt="snana",
+                metachar="",
+            )
 
         if args["snana"]:
             self.end_time = time.time()
@@ -3208,7 +3284,7 @@ class SEDmodel(object):
                 # Check if sim or real data
                 self.sim = "SIM_REDSHIFT_HELIO" in sne_file[0].meta.keys()
                 if not self.sim:
-                    args['njobtot'] = args['jobsplit'][1]
+                    args["njobtot"] = args["jobsplit"][1]
                 for sn_file in tqdm(sn_list):
                     head_file = os.path.join(data_dir, f"{sn_file}")
                     if not os.path.exists(head_file):
@@ -3270,26 +3346,55 @@ class SEDmodel(object):
                                         f"Filter {f} not present in BayeSN, check your filter mapping"
                                     )
                         # ----------------------------------------------------------
-                        data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                        data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                        data['flux'] = data['FLUXCAL']
-                        data['flux_err'] = np.max(
-                            np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]),
-                            axis=0)
-                        data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
-                        data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
-                        data['redshift'] = zhel
-                        data['redshift_error'] = zhel_err
-                        data['MWEBV'] = meta.get('MWEBV', 0.)
-                        data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = self.cosmo.distmod(zhd)
-                        data['mask'] = 1
+                        data["band_indices"] = data.FLT.apply(
+                            lambda x: used_band_dict[self.band_dict[x]]
+                        )
+                        data["zp"] = data.FLT.apply(lambda x: self.zp_dict[x])
+                        data["flux"] = data["FLUXCAL"]
+                        data["flux_err"] = np.max(
+                            np.array(
+                                [
+                                    data["FLUXCALERR"],
+                                    args["error_floor"]
+                                    * (np.log(10) / 2.5)
+                                    * data["flux"],
+                                ]
+                            ),
+                            axis=0,
+                        )
+                        data["MAG"] = 27.5 - 2.5 * np.log10(data["flux"])
+                        data["MAGERR"] = (
+                            (2.5 / np.log(10)) * data["flux_err"] / data["flux"]
+                        )
+                        data["redshift"] = zhel
+                        data["redshift_error"] = zhel_err
+                        data["MWEBV"] = meta.get("MWEBV", 0.0)
+                        data["mass"] = meta.get("HOSTGAL_LOGMASS", -9.0)
+                        data["dist_mod"] = self.cosmo.distmod(zhd)
+                        data["mask"] = 1
                         lc = data[
-                            ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
-                             'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
-                        lc = lc.dropna(subset=['flux', 'flux_err'])
-                        lc = lc[(lc['t'] > -10) & (lc['t'] < 40)]
-                        if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
+                            [
+                                "t",
+                                "flux",
+                                "flux_err",
+                                "MAG",
+                                "MAGERR",
+                                "mass",
+                                "band_indices",
+                                "redshift",
+                                "redshift_error",
+                                "dist_mod",
+                                "MWEBV",
+                                "mask",
+                                "MJD",
+                                "FLT",
+                            ]
+                        ]
+                        lc = lc.dropna(subset=["flux", "flux_err"])
+                        lc = lc[(lc["t"] > -10) & (lc["t"] < 40)]
+                        if (
+                            lc.empty
+                        ):  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                             continue
                         t_ranges.append((lc["t"].min(), lc["t"].max()))
                         n_obs.append(lc.shape[0])
@@ -3357,7 +3462,7 @@ class SEDmodel(object):
                 self.sim = "SIM_REDSHIFT_HELIO" in meta.keys()
                 # If real data, ignore sim_prescale
                 if not self.sim:
-                    args['njobtot'] = args['jobsplit'][1]
+                    args["njobtot"] = args["jobsplit"][1]
                 for sn_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
                     if (sn_ind + 1 - args["jobid"]) % args["njobtot"] != 0:
                         continue
@@ -3408,24 +3513,53 @@ class SEDmodel(object):
                                     f"Filter {f} not present in BayeSN, check your filter mapping"
                                 )
                     # ----------------------------------------------------------
-                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['flux'] = data['FLUXCAL']
-                    data['flux_err'] = np.max(
-                        np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
-                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
-                    data['redshift'] = zhel
-                    data['redshift_error'] = zhel_err
-                    data['MWEBV'] = meta.get('MWEBV', 0.)
-                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                    data['dist_mod'] = self.cosmo.distmod(zhd)
-                    data['mask'] = 1
+                    data["band_indices"] = data.FLT.apply(
+                        lambda x: used_band_dict[self.band_dict[x]]
+                    )
+                    data["zp"] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data["flux"] = data["FLUXCAL"]
+                    data["flux_err"] = np.max(
+                        np.array(
+                            [
+                                data["FLUXCALERR"],
+                                args["error_floor"] * (np.log(10) / 2.5) * data["flux"],
+                            ]
+                        ),
+                        axis=0,
+                    )
+                    data["MAG"] = 27.5 - 2.5 * np.log10(data["flux"])
+                    data["MAGERR"] = (
+                        (2.5 / np.log(10)) * data["flux_err"] / data["flux"]
+                    )
+                    data["redshift"] = zhel
+                    data["redshift_error"] = zhel_err
+                    data["MWEBV"] = meta.get("MWEBV", 0.0)
+                    data["mass"] = meta.get("HOSTGAL_LOGMASS", -9.0)
+                    data["dist_mod"] = self.cosmo.distmod(zhd)
+                    data["mask"] = 1
                     lc = data[
-                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
-                         'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
-                    lc = lc.dropna(subset=['flux', 'flux_err'])
-                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                        [
+                            "t",
+                            "flux",
+                            "flux_err",
+                            "MAG",
+                            "MAGERR",
+                            "mass",
+                            "band_indices",
+                            "redshift",
+                            "redshift_error",
+                            "dist_mod",
+                            "MWEBV",
+                            "mask",
+                            "MJD",
+                            "FLT",
+                        ]
+                    ]
+                    lc = lc.dropna(subset=["flux", "flux_err"])
+                    lc = lc[
+                        (lc["t"] > self.tau_knots.min())
+                        & (lc["t"] < self.tau_knots.max())
+                    ]
                     sne.append(sn_name)
                     peak_mjds.append(peak_mjd)
                     t_ranges.append((lc["t"].min(), lc["t"].max()))
@@ -3484,17 +3618,17 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
-            print('Saving light curves to standard grid...')
+            print("Saving light curves to standard grid...")
             lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
-                save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
-                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
-                save_lc.insert(loc=0, column='CID', value=sne[i])
+                save_lc = lc[["MJD", "flux", "flux_err", "FLT"]].copy()
+                save_lc.columns = ["MJD", "FLUXCAL", "FLUXCALERR", "FLT"]
+                save_lc.insert(loc=0, column="CID", value=sne[i])
                 lcplot_data = pd.concat([lcplot_data, save_lc])
                 lc = lc.iloc[:, :-2]
-                all_data[i, :lc.shape[0], :] = lc.values
-                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+                all_data[i, : lc.shape[0], :] = lc.values
+                all_data[i, lc.shape[0] :, 2] = 1 / jnp.sqrt(2 * np.pi)
             all_data = all_data.T
             t = all_data[0, ...]
             keep_shape = t.shape
@@ -3717,23 +3851,53 @@ class SEDmodel(object):
                                     f"Filter {f} not present in BayeSN, check your filter mapping"
                                 )
                     # ----------------------------------------------------------
-                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
-                    data['flux'] = data['FLUXCAL']
-                    data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
-                    data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
-                    data['redshift'] = zhel
-                    data['redshift_error'] = row.REDSHIFT_CMB_ERR
-                    data['MWEBV'] = meta.get('MWEBV', 0.)
-                    data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                    data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
-                    data['mask'] = 1
+                    data["band_indices"] = data.FLT.apply(
+                        lambda x: used_band_dict[self.band_dict[x]]
+                    )
+                    data["zp"] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data["flux"] = data["FLUXCAL"]
+                    data["flux_err"] = np.max(
+                        np.array(
+                            [
+                                data["FLUXCALERR"],
+                                args["error_floor"] * (np.log(10) / 2.5) * data["flux"],
+                            ]
+                        ),
+                        axis=0,
+                    )
+                    data["MAG"] = 27.5 - 2.5 * np.log10(data["flux"])
+                    data["MAGERR"] = (
+                        (2.5 / np.log(10)) * data["flux_err"] / data["flux"]
+                    )
+                    data["redshift"] = zhel
+                    data["redshift_error"] = row.REDSHIFT_CMB_ERR
+                    data["MWEBV"] = meta.get("MWEBV", 0.0)
+                    data["mass"] = meta.get("HOSTGAL_LOGMASS", -9.0)
+                    data["dist_mod"] = self.cosmo.distmod(row.REDSHIFT_CMB)
+                    data["mask"] = 1
                     lc = data[
-                        ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
-                         'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
-                    lc = lc.dropna(subset=['flux', 'flux_err'])
-                    lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                        [
+                            "t",
+                            "flux",
+                            "flux_err",
+                            "MAG",
+                            "MAGERR",
+                            "mass",
+                            "band_indices",
+                            "redshift",
+                            "redshift_error",
+                            "dist_mod",
+                            "MWEBV",
+                            "mask",
+                            "MJD",
+                            "FLT",
+                        ]
+                    ]
+                    lc = lc.dropna(subset=["flux", "flux_err"])
+                    lc = lc[
+                        (lc["t"] > self.tau_knots.min())
+                        & (lc["t"] < self.tau_knots.max())
+                    ]
                     if sn_lc is None:
                         sn_lc = lc.copy()
                     else:
@@ -3785,17 +3949,17 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
-            print('Saving light curves to standard grid...')
+            print("Saving light curves to standard grid...")
             lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
-                save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
-                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
-                save_lc.insert(loc=0, column='CID', value=sne[i])
+                save_lc = lc[["MJD", "flux", "flux_err", "FLT"]].copy()
+                save_lc.columns = ["MJD", "FLUXCAL", "FLUXCALERR", "FLT"]
+                save_lc.insert(loc=0, column="CID", value=sne[i])
                 lcplot_data = pd.concat([lcplot_data, save_lc])
                 lc = lc.iloc[:, :-2]
-                all_data[i, :lc.shape[0], :] = lc.values
-                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+                all_data[i, : lc.shape[0], :] = lc.values
+                all_data[i, lc.shape[0] :, 2] = 1 / jnp.sqrt(2 * np.pi)
                 # all_data[i, lc.shape[0]:, 3] = 10  # Arbitrarily set all masked points to H-band
             all_data = all_data.T
             t = all_data[0, ...]
@@ -4069,9 +4233,11 @@ class SEDmodel(object):
         l_o = l_r[None, ...].repeat(N, axis=0) * (1 + z[:, None])
 
         self.model_wave = l_r
-        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind1 = (
+            self.model_wave < 2700
+        )  # Need to use separate UV term for F99 law below 2700AA
         self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
-        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_ind3 = (1e4 / self.model_wave[self.uv_ind1]) >= 5.9
         self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
@@ -4340,8 +4506,10 @@ class SEDmodel(object):
             t = t[:, None].repeat(num_bands, axis=1).flatten(order="F")
             for i, band in enumerate(bands):
                 if band not in self.band_dict.keys():
-                    raise ValueError(f'{band} is present in filters yaml file')
-                band_indices[i * num_per_band: (i + 1) * num_per_band] = self.used_band_dict[self.band_dict[band]]
+                    raise ValueError(f"{band} is present in filters yaml file")
+                band_indices[i * num_per_band : (i + 1) * num_per_band] = (
+                    self.used_band_dict[self.band_dict[band]]
+                )
             band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
         mask = np.ones_like(band_indices)
         if self.band_weights is None:
@@ -4532,7 +4700,9 @@ class SEDmodel(object):
         eps_full[:, 1:-1, :] = eps
         return eps_full
 
-    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None, mean=False):
+    def get_flux_from_chains(
+        self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None, mean=False
+    ):
         """
         Returns model photometry for posterior samples from BayeSN fits, which can be used to make light curve fit
         plots.
@@ -4598,11 +4768,11 @@ class SEDmodel(object):
                 fit_bands = bands[i]
             else:
                 fit_bands = bands
-            theta = chains['theta'][..., i].flatten(order='F')
-            AV = chains['AV'][..., i].flatten(order='F')
-            tmax = chains['tmax'][..., i].flatten(order='F')
-            if 'RV' in chains.keys():
-                RV = chains['RV'][..., i].flatten(order='F')
+            theta = chains["theta"][..., i].flatten(order="F")
+            AV = chains["AV"][..., i].flatten(order="F")
+            tmax = chains["tmax"][..., i].flatten(order="F")
+            if "RV" in chains.keys():
+                RV = chains["RV"][..., i].flatten(order="F")
             else:
                 RV = None
             mu = chains["mu"][..., i].flatten(order="F")
@@ -4618,20 +4788,47 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             del_M = chains["delM"][..., i].flatten(order="F")
 
-            theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
+            theta, AV, mu, eps, del_M, tmax = (
+                theta[:num_samples],
+                AV[:num_samples],
+                mu[:num_samples],
+                eps[:num_samples, ...],
+                del_M[:num_samples, ...],
+                tmax[:num_samples, ...],
+            )
 
             if mean:
-                theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+                theta, AV, mu, eps, del_M, tmax = (
+                    theta.mean()[None],
+                    AV.mean()[None],
+                    mu.mean()[None],
+                    eps.mean(axis=0)[None],
+                    del_M.mean()[None],
+                    tmax.mean()[None],
+                )
 
             if self.band_weights is not None:
-                self.band_weights = band_weights[i:i + 1, ...]
+                self.band_weights = band_weights[i : i + 1, ...]
 
-            lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
-                                                           del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
-                                                           ebv_mw=ebv_mws[i], yerr=0, mag=mag)
+            lc, lc_err, params = self.simulate_light_curve(
+                t,
+                theta.shape[0],
+                fit_bands,
+                theta=theta,
+                AV=AV,
+                mu=mu,
+                tmax=tmax,
+                del_M=del_M,
+                eps=eps,
+                RV=RV,
+                z=zs[i],
+                write_to_files=False,
+                ebv_mw=ebv_mws[i],
+                yerr=0,
+                mag=mag,
+            )
             lc = lc.T
             lc = lc.reshape(num_samples, len(fit_bands), len(t))
-            flux_grid = flux_grid.at[i, :, :len(fit_bands), :].set(lc)
+            flux_grid = flux_grid.at[i, :, : len(fit_bands), :].set(lc)
 
         return flux_grid

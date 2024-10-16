@@ -4,8 +4,7 @@ import numpy as np
 f19 = pd.read_csv("F19_tabulated.dat", delimiter='\s+')
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in f19['x'].values)}]\n")
-    f.write(f"NUM_KNOTS: {len(f19['x'])}\n")
-    f.write(f"KNOT_UNITS: inverse microns\n")
+    f.write(f"UNITS: inverse microns\n")
     f.write(f"MIN_ORDER: 0\n")
     f.write("RV_COEFFS:\n")
     for lin, const in zip(

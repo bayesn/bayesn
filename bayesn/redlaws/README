@@ -1,0 +1,74 @@
+Each reddening law is specified as A(x)/A(V) = a(x) + b(x)/RV where a(x)
+and b(x) are specified as functions: x**REGIME_EXP * (P(x) + R(x)/D(x))
+where P, R, and D are all standard polynomials.
+If L_KNOTS is provided in the yaml file, b(x) is instead defined as a natural
+cubic spline with knots at L_KNOTS and values defined by RV**MIN_ORDER times
+a polynomial function of RV with coefficients given by RV_COEFFS.
+
+The recognized YAML keywords and their descriptions are as follows:
+
+UNITS (str):
+    Default = "inverse microns"
+    Units for use with L_KNOTS, A/B_POLY_COEFFS, etc.
+    Checked for the sub-strings "inverse" or "micron" when converting
+    SEDmodel.model_wave, which is in Angstroms.
+L_KNOTS (list of floats):
+    No default value.
+    Locations of spline knots if used for calculating b(x).
+    If this keyword is present, the reddening law will calculate b(x) as
+    a spline and ignore any B_whatever_COEFFS that may be defined later.
+MIN_ORDER (int):
+    Default = 0.
+    Corrective factor applied to the RV_COEFFS polynomial, allowing for negative
+    RV exponents.
+    Example:
+        if a knot's RV_COEFFS list is [m, n, p] and MIN_ORDER is -1
+        the spline value at that knot is given by
+        m*RV**1 + n*RV**0 + p*RV**(-1)
+RV_COEFFS (list of lists of floats):
+    Default = [[1]]
+    The primary list must contain one list for each knot specified in L_KNOTS.
+    Each sublist contains the polynomial coefficients for calculating spline
+    knot values as a function of RV.
+REGIME_WLS (list of 2-tuples of floats):
+    Default = [[0, 10]]
+    Some reddening laws are piecewise functions of wavelength/wavenumber.
+    The length of the primary list defines the number of subdomains (N).
+    Each sublist list contains a pair denoting the start (inclusive) and
+    end (exclusive) values of the corresponding subdomain.
+REGIME_EXP (list of floats):
+    Default = jnp.zeros((N, 1))
+    A list containing a float for each subdomain.
+    The float is used to modify the polynomial function for that subdomain.
+    Example:
+        The CCM89 dust law for 0.3 <= x < 1.1 inverse microns is given as
+        A(x)/A(V) = a(x) + b(x) / RV = 0.574*x**1.61 - 0.527*x**1.61 / RV.
+        One can specify this with polynomial coefficients of [0.574, 0] for a(x),
+        [-0.527, 0] for b(x), and 0.61 for REGIME_EXP[0], or [0.574], [-0.527],
+        and 1.61 respectively.
+REGIME_OFFSET (list of floats):
+    Default = jnp.zeros((N, 1))
+    A list containing a float for each subdomain.
+    The float is used to shift the independent variable for the polynomials.
+    Example:
+        The O94 dust law for 1.1 <= x < 3.3 inverse microns is given as
+        A(x)/A(V) = a(mod_x) + b(mod_x) / RV
+        where a and b are polynomial functions, and mod_x = x - 1.82
+        REGIME_OFFSET's element for this subdomain is - 1.82
+    Note, this can be deprecated by just doing the polynomial math and providing
+    different coefficients.
+{A,B}_POLY_COEFFS (list of lists of floats):
+    Default = jnp.ones((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the P(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))
+{A,B}_REMAINDER_COEFFS (list of lists of floats):
+    Default = jnp.zeros((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the R(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))
+{A,B}_DIVISOR_COEFFS (list of lists of floats):
+    Default = jnp.zeros((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the D(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))

@@ -11,8 +11,8 @@ d22 = pd.read_csv(
     names=["wl", "slope", "std"],
 )
 wls = [[0.8, 4]]
-A_poly_coeffs = [[0.377, 0]]
-exps = [1.78]
+A_poly_coeffs = [[0.377]]
+exps = [-1.78]
 # with knots at d22['wl'] and values at d22['slope']
 # A(x)/A(V) = a + b(3.1-Rv)/3.1/Rv
 # where b is the spline interpolation.
@@ -21,8 +21,7 @@ exps = [1.78]
 with open("BAYESN.YAML", "w") as f:
     f.write("TYPE: SPLINE\n")
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in d22['wl'].values)}]\n")
-    f.write(f"NUM_KNOTS: {len(d22['wl'])}\n")
-    f.write(f"KNOT_UNITS: microns\n")
+    f.write(f"UNITS: microns\n")
     f.write(f"MIN_ORDER: 0\n")
     f.write(f"REGIME_EXP: [{', '.join([str(x) for x in exps])}]\n")
     f.write("RV_COEFFS:\n")

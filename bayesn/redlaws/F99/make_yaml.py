@@ -58,7 +58,7 @@ for i in (7, 8):
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in inv_micron_knot_locations)}]\n")
     f.write(f"NUM_KNOTS: {N}\n")
-    f.write(f"KNOT_UNITS: inverse microns\n")
+    f.write(f"UNITS: inverse microns\n")
     f.write(f"MIN_ORDER: -1\n")
     f.write("RV_COEFFS:\n")
     for coeffs in spline_val_coeffs:
