@@ -238,6 +238,7 @@ class SEDmodel(object):
             1
         ]
 
+        self.model_name = load_model
         if os.path.exists(load_model):
             print(f"Loading custom model at {load_model}")
             with open(load_model, "r") as file:
@@ -283,6 +284,8 @@ class SEDmodel(object):
         self.used_band_inds = None
         self.band_weights = None
         self._setup_band_weights()
+
+        self._load_redlaw(load_redlaw)
 
         self.J_t_map = jax.jit(
             jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
@@ -550,25 +553,25 @@ class SEDmodel(object):
         self.J_l_T = device_put(self.J_l_T)
         self.hsiao_flux = device_put(self.hsiao_flux)
         self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
-        self.xk = jnp.array(
-            [
-                0.0,
-                1e4 / 26500.0,
-                1e4 / 12200.0,
-                1e4 / 6000.0,
-                1e4 / 5470.0,
-                1e4 / 4670.0,
-                1e4 / 4110.0,
-                1e4 / 2700.0,
-                1e4 / 2600.0,
-            ]
-        )
-        KD_x = invKD_irr(self.xk)
-        self.M_fitz_block = device_put(
-            spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x)
-        )
+        # self.xk = jnp.array(
+        #     [
+        #         0.0,
+        #         1e4 / 26500.0,
+        #         1e4 / 12200.0,
+        #         1e4 / 6000.0,
+        #         1e4 / 5470.0,
+        #         1e4 / 4670.0,
+        #         1e4 / 4110.0,
+        #         1e4 / 2700.0,
+        #         1e4 / 2600.0,
+        #     ]
+        # )
+        # KD_x = invKD_irr(self.xk)
+        # self.M_fitz_block = device_put(
+        #     spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x)
+        # )
 
-    def _calculate_band_weights(self, redshifts, ebv, redlaw="F99"):
+    def _calculate_band_weights(self, redshifts, ebv):
         """
         Calculates the observer-frame band weights, including the effect of Milky Way extinction, for each SN
 
@@ -613,13 +616,23 @@ class SEDmodel(object):
 
         # Apply MW extinction
         av = self.RV_MW * ebv
-        all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
+        unique_redshifts, idx = jnp.unique(redshifts, return_inverse=True)
+        all_lam = np.array(self.model_wave[None, :] * (1 + unique_redshifts[:, None]))
         all_lam = all_lam.flatten(order="F")
-        dust_fn = getattr(dust_ext, redlaw)(float(self.RV_MW))
-        mw_ext = -2.5 * np.log10(dust_fn.extinguish(10000 / all_lam, Av=1))
-        mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order="F")
+        self._load_redlaw(self.redlaw_name, x=all_lam)
+        axav = self.get_axav(float(self.RV_MW)).reshape(
+            (len(unique_redshifts), weights.shape[1]), order="F"
+        )
+        mw_ext = jnp.empty((len(redshifts), weights.shape[1]))
+
+        def copy_unique_axav(i, mw_ext):
+            return mw_ext.at[i, :].set(axav[idx[i]])
+
+        mw_ext = fori_loop(0, len(redshifts), copy_unique_axav, mw_ext)
         mw_ext = mw_ext * av[:, None]
         mw_ext = jnp.power(10, -0.4 * mw_ext)
+        # reset back to just self.model_wave for get_axav calculations
+        self._load_redlaw(self.redlaw_name)
 
         weights = weights * mw_ext[..., None]
 
@@ -628,7 +641,7 @@ class SEDmodel(object):
 
         return weights
 
-    def _load_redlaw(self, redlaw):
+    def _load_redlaw(self, redlaw, x="default"):
         """
         Loads a reddening law from a yaml file.
 
@@ -653,6 +666,7 @@ class SEDmodel(object):
         Returns
         -------
         """
+        self.redlaw_name = redlaw
         built_in_redlaws = next(os.walk(os.path.join(self.__root_dir__, "redlaws")))[1]
         if os.path.exists(redlaw):
             print(f"Loading custom reddening law at {redlaw}")
@@ -682,8 +696,9 @@ class SEDmodel(object):
         redlaw = {}
         for var in "AB":
             redlaw[var] = jnp.zeros((len(self.model_wave), 1))
-        x = self.model_wave
         units = redlaw_params.get("UNITS", "inverse microns")
+        if x == "default":
+            x = self.model_wave
         if "micron" in units:
             x = x / 1e4
         if "inverse" in units:
@@ -722,6 +737,21 @@ class SEDmodel(object):
                 )
         self.redlaw_ax = device_put(redlaw["A"])
         self.redlaw_bx = device_put(redlaw["B"])
+
+    def get_axav(self, RV, num_batch=1):
+        yk = jnp.zeros((num_batch, self.redlaw_num_knots))
+        ones = jnp.ones((1, num_batch))
+
+        def get_knot_value(i, yk):
+            return yk.at[:, i].set(
+                jnp.polyval(self.redlaw_rv_coeffs[i], RV, unroll=16)
+                * RV**self.redlaw_min_order
+            )
+
+        yk = fori_loop(0, self.redlaw_num_knots, get_knot_value, yk)
+        ax = (self.redlaw_ax @ ones).T
+        bx = (self.redlaw_bx @ yk.T).T
+        return ax + bx / jnp.array(RV)[..., None]
 
     def get_spectra(self, theta, AV, W0, W1, eps, RV, J_t, hsiao_interp):
         """
@@ -771,22 +801,7 @@ class SEDmodel(object):
         ).transpose(2, 0, 1)
 
         model_spectra = H_grid * 10 ** (-0.4 * W_grid)
-
-        # Extinction----------------------------------------------------------
-        yk = jnp.zeros((num_batch, self.redlaw_num_knots))
-        ones = jnp.ones((1, num_batch))
-
-        def get_knot_value(i, yk):
-            return yk.at[:, i].set(
-                jnp.polyval(self.redlaw_rv_coeffs[i], RV, unroll=16)
-                * RV**self.redlaw_min_order
-            )
-
-        yk = fori_loop(0, self.redlaw_num_knots, get_knot_value, yk)
-
-        A = AV[..., None] * (
-            (self.redlaw_ax @ ones).T + (self.redlaw_bx @ yk.T).T / RV[..., None]
-        )  # RV[..., None]
+        A = AV[..., None] * self.get_axav(RV, num_batch)
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
@@ -2671,7 +2686,6 @@ class SEDmodel(object):
         mu_R=False,
         sigma_R=False,
         mag=False,
-        redlaw="F99",
     ):
         """
         Method to fit light curve data loaded into memory with BayeSN model
@@ -2795,7 +2809,8 @@ class SEDmodel(object):
         data = data.at[9, :, 0].set(np.ones_like(t))
 
         band_weights = self._calculate_band_weights(
-            data[-5, 0, :], data[-2, 0, :], redlaw=redlaw
+            data[-5, 0, :],
+            data[-2, 0, :],
         )
 
         # Update dust parameters if specified manually
@@ -3179,7 +3194,6 @@ class SEDmodel(object):
                 "If using data_table, please also pass data_root (which defines the location that the "
                 "paths in data_table are defined with respect to)"
             )
-        redlaw = args.get("redlaw", "F99")
         survey_dict = {}
         c = 299792.458
         if "version_photometry" in args.keys():  # If using all files in directory
@@ -3658,7 +3672,8 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(
-                self.data[-5, 0, :], self.data[-2, 0, :], redlaw=redlaw
+                self.data[-5, 0, :],
+                self.data[-2, 0, :],
             )
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
@@ -3991,7 +4006,8 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(
-                self.data[-5, 0, :], self.data[-2, 0, :], redlaw=redlaw
+                self.data[-5, 0, :],
+                self.data[-2, 0, :],
             )
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
@@ -4064,7 +4080,6 @@ class SEDmodel(object):
         AV=None,
         theta=None,
         eps=None,
-        redlaw="F99",
     ):
         """
         Simulates spectra for given parameter values in the observer-frame. If parameter values are not set, model
@@ -4241,10 +4256,6 @@ class SEDmodel(object):
         self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
-        redlaw_KD_x = invKD_irr(self.redlaw_xk)
-        self.M_fitz_block = device_put(
-            spline_coeffs_irr(1e4 / self.model_wave, self.redlaw_xk, redlaw_KD_x)
-        )
         self._load_hsiao_template()
 
         t = jnp.array(t)
@@ -4264,10 +4275,10 @@ class SEDmodel(object):
             theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp
         )
 
-        # Host extinction
+        # Host extinction (ADO: Is this not redundant with get_spectra?)
         host_ext = np.zeros((N, l_r.shape[0], 1))
         for i in range(N):
-            dust_fn = getattr(dust_ext, redlaw)(float(RV[i]))
+            dust_fn = getattr(dust_ext, self.redlaw_name)(float(RV[i]))
             host_ext[i, :, 0] = -2.5 * np.log10(
                 dust_fn.extinguish(10000 / l_r, Av=AV[i])
             )
@@ -4275,9 +4286,9 @@ class SEDmodel(object):
         # MW extinction
         mw_ext = np.zeros((N, l_o.shape[1], 1))
         for i in range(N):
-            dust_fn = getattr(dust_ext, redlaw)(3.1)
+            dust_fn = getattr(dust_ext, self.redlaw_name)(self.RV_MW)
             mw_ext[i, :, 0] = -2.5 * np.log10(
-                dust_fn.extinguish(10000 / l_o[i, ...], Av=3.1 * ebv_mw[i])
+                dust_fn.extinguish(10000 / l_o[i, ...], Av=self.RV_MW * ebv_mw[i])
             )
 
         return l_o, spectra, param_dict
