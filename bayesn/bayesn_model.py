@@ -2225,6 +2225,9 @@ class SEDmodel(object):
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
             bands = []
             for sn in self.sn_list:
+                sn_bands = list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique())
+                if len(sn_bands) == 0:
+                    sn_bands = ['g_PS1'] # Just add a placeholder band to avoid errors
                 bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
 
             f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
