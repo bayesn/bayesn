@@ -1838,6 +1838,7 @@ class SEDmodel(object):
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
                 samples = predictive(PRNGKey(123), data=None)
+                samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
                 return {**samples}
 
@@ -2129,6 +2130,8 @@ class SEDmodel(object):
         -------
 
         """
+        print(samples.keys())
+        raise ValueError('Nope')
         if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
