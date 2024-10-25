@@ -2130,8 +2130,6 @@ class SEDmodel(object):
         -------
 
         """
-        print(samples.keys())
-        raise ValueError('Nope')
         if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
