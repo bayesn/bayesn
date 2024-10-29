@@ -445,8 +445,8 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
-            int1 = simpson(lam * zp * R[:, 1], lam)
-            int2 = simpson(lam * R[:, 1], lam)
+            int1 = simpson(lam * zp * R[:, 1], x=lam)
+            int2 = simpson(lam * R[:, 1], x=lam)
             zp = 2.5 * np.log10(int1 / int2)
             self.band_dict[band] = band_ind
             self.band_lim_dict[band] = [band_low_lim, band_up_lim]
@@ -3047,6 +3047,10 @@ class SEDmodel(object):
         l_o = l_r[None, ...].repeat(N, axis=0) * (1 + z[:, None])
 
         self.model_wave = l_r
+        self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
+        self.uv_ind2 = (self.model_wave < 2700) & ((1e4 / self.model_wave) >= 5.9)
+        self.uv_ind3 = ((1e4 / self.model_wave[self.uv_ind1]) >= 5.9)
+        self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
         KD_x = invKD_irr(self.xk)
