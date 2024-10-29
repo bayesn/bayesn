@@ -1649,6 +1649,7 @@ class SEDmodel(object):
         else:
             args['SNID_keep_list'] = None
         args['error_floor'] = args.get('error_floor', 0.0)
+        args['num_lcplot'] = args.get('num_lcplot')
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2217,26 +2218,33 @@ class SEDmodel(object):
             for sn in self.sn_list:
                 bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
 
-            f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
-                                          num_samples=None,
-                                          mag=False, mean=not args['save_fit_errors'])
-            f, ferr = f.mean(axis=1), f.std(axis=1)
+            if args['num_lcplot'] is None:
+                num_lcplot = self.data.shape[-1]
+            else:
+                num_lcplot = args['num_lcplot']
+            self.lcplot_data = self.lcplot_data[self.lcplot_data.CID.isin(self.lcplot_data.CID.unique()[:num_lcplot])]
 
-            self.lcplot_data['DATA_FLAG'] = 1
-            z_hel = self.data[-5, 0, :]
-            for i, sn in enumerate(self.sn_list):
-                fit_df = pd.DataFrame()
-                fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
-                fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
-                fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
-                fit_df['FLT'] = np.tile(bands[i], len(t))
-                fit_df['CID'] = sn
-                fit_df['DATA_FLAG'] = 0
-                self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
+            if args['num_lcplot'] > 0:
+                f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
+                                              num_samples=None, num_sne=num_lcplot,
+                                              mag=False, mean=not args['save_fit_errors'])
+                f, ferr = f.mean(axis=1), f.std(axis=1)
 
-            self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
-            self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
-                                    index=False)
+                self.lcplot_data['DATA_FLAG'] = 1
+                z_hel = self.data[-5, 0, :]
+                for i, sn in enumerate(self.lcplot_data.CID.unique()):
+                    fit_df = pd.DataFrame()
+                    fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
+                    fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
+                    fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
+                    fit_df['FLT'] = np.tile(bands[i], len(t))
+                    fit_df['CID'] = sn
+                    fit_df['DATA_FLAG'] = 0
+                    self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
+
+                self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
+                self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
+                                        index=False)
 
             # Create FITRES file
             # if args['snana']:
@@ -3388,7 +3396,7 @@ class SEDmodel(object):
         eps_full[:, 1:-1, :] = eps
         return eps_full
 
-    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None, mean=False):
+    def get_flux_from_chains(self, t, bands, chains, zs, ebv_mws, mag=True, num_samples=None, num_sne=None, mean=False):
         """
         Returns model photometry for posterior samples from BayeSN fits, which can be used to make light curve fit
         plots.
@@ -3427,7 +3435,8 @@ class SEDmodel(object):
             with open(chains, 'rb') as file:
                 chains = pickle.load(file)
 
-        N_sne = chains['theta'].shape[2]
+        if num_sne is None:
+            num_sne = chains['theta'].shape[2]
         if num_samples is None:
             num_samples = chains['theta'].shape[0] * chains['theta'].shape[1]
 
@@ -3445,11 +3454,11 @@ class SEDmodel(object):
         else:
             max_bands = len(bands)
 
-        flux_grid = jnp.zeros((N_sne, num_samples, max_bands, len(t)))
+        flux_grid = jnp.zeros((num_sne, num_samples, max_bands, len(t)))
         band_weights = self.band_weights
 
         print('Getting best fit light curves from chains...')
-        for i in tqdm(np.arange(N_sne)):
+        for i in tqdm(np.arange(num_sne)):
             if band_list:
                 fit_bands = bands[i]
             else:
