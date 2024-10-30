@@ -720,10 +720,18 @@ class SEDmodel(object):
                 poly = jnp.array(redlaw_params.get(f"{var}_POLY_COEFFS", ones)[i])
                 rem = jnp.array(redlaw_params.get(f"{var}_REMAINDER_COEFFS", zeros)[i])
                 div = jnp.array(redlaw_params.get(f"{var}_DIVISOR_COEFFS", zeros)[i])
+                # Asymmetric Drude for G23
+                # Symmetric Drude profiles converted to polynomials
+                amp, center, fwhm, asym = jnp.array(
+                    redlaw_params.get(f"{var}_DRUDE_PARAMS", jnp.zeros((n_regimes, 4)))[
+                        i
+                    ]
+                )
+                gamma = 2 * fwhm / (1 + jnp.exp(asym * (1 / mod_x - center)))
                 redlaw[var] = (
                     redlaw[var]
                     .at[idx, 0]
-                    .set(
+                    .add(
                         mod_x ** redlaw_params.get("REGIME_EXP", zeros)[i]
                         * (
                             jnp.polyval(poly, mod_x)
@@ -732,6 +740,17 @@ class SEDmodel(object):
                                 posinf=0,
                                 neginf=0,
                             )
+                        )
+                        * jnp.nan_to_num(
+                            amp
+                            * (gamma / center) ** 2
+                            / (
+                                (1 / (mod_x * center) - mod_x * center) ** 2
+                                + (gamma / center) ** 2
+                            ),
+                            nan=1,
+                            posinf=0,
+                            neginf=0,
                         )
                     )
                 )
