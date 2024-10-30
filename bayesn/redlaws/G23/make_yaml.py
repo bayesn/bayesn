@@ -5,15 +5,15 @@ from scipy.special import comb
 from math import prod
 
 # A(lambda)/A(V) = a(x) + b(x)*(1/Rv - 1/3.1)
-N = 17
+N = 23
 wns = np.zeros((N, 2))
 exps = np.zeros(N)
 coeffs = {}
 for var in "AB":
     coeffs[var] = {}
     for component in ("poly", "rem", "div"):
-        coeffs[var][component] = [[0] for _ in range(N)]
-    coeffs[var]["drude"] = [[0] * 4 for _ in range(N)]
+        coeffs[var][component] = [P([0]) for _ in range(N)]
+    coeffs[var]["drude"] = [P([0] * 4) for _ in range(N)]
 
 
 ################################### Model Constants  ###################################
@@ -57,24 +57,19 @@ red_end = 32
 ################################### IR ###################################
 wns[0] = (1 / red_end, 1 / NIR)
 # b(x) = b_nir_scale * x ** b_nir_exp
-coeffs["B"]["poly"][0] = [b_nir_scale]
+coeffs["B"]["poly"][0] = P([b_nir_scale])
 exps[0] = b_nir_exp
 
-# Between 1/35 <= x <= 1/x_max
 wns[1] = (1 / red_end, 1 / IR)
 # a(x) = scale*x**alpha_2*swave**(alpha_2 - alpha_1)
-coeffs["A"]["poly"][1] = [scale * swave ** (alpha_2 - alpha_1)]
+coeffs["A"]["poly"][1] = P([scale * swave ** (alpha_2 - alpha_1)])
 exps[1] = alpha_2
+
 
 ################################### IR/NIR ###################################
 # a(x) = scale*x**alpha_1*(1-weights) + scale*x**alpha_2*swave**(alpha_2 - alpha_1)*weights
-# Need to do two sets of polynomials since the x**alpha_1 and x**alpha_2 terms can't be combined.
-wns[2] = wns[3] = (1 / IR, 1 / IR_NIR)
-
-
-# where weights is a piecewise function that's 1 when x < 1/IR, 0 when x > 1/IR_NIR and
-# when 1/IR <= x <= 1/IR_NIR there's a weight function to smoothly transition
-# This logic gets used in multiple places
+# weights is a piecewise function that's 1 when x < 1/IR, 0 when x > 1/IR_NIR and
+# smoothly transitions between the two. This logic gets used in multiple places
 def get_weights(x_min, x_max, N=3, complement=False):
     """given x_min and x_max in microns, returns the weight as a function of inverse microns.
     The N argument refers to how many polynomials are used to define the weight function.
@@ -108,6 +103,8 @@ def get_weights(x_min, x_max, N=3, complement=False):
         return P(w_poly_coef) * w_div + P(w_rem_coef), w_div
 
 
+# Need to do two sets of polynomials since the x**alpha_1 and x**alpha_2 terms can't be combined.
+wns[2] = wns[3] = (1 / IR, 1 / IR_NIR)
 # Regime 2 adds scale*x**alpha_1*(1-weights)
 # Regime 3 adds scale*x**alpha_2*swave**(alpha_2 - alpha_1)*weights
 for regime, s, exp, complement in zip(
@@ -117,16 +114,16 @@ for regime, s, exp, complement in zip(
     (True, False),
 ):
     w_poly, w_rem, w_div = get_weights(IR_NIR, IR, N=3, complement=complement)
-    coeffs["A"]["poly"][regime] = s * w_poly.coef[::-1]
-    coeffs["A"]["rem"][regime] = s * w_rem.coef[::-1]
-    coeffs["A"]["div"][regime] = w_div.coef[::-1]
+    coeffs["A"]["poly"][regime] = s * w_poly
+    coeffs["A"]["rem"][regime] = s * w_rem
+    coeffs["A"]["div"][regime] = w_div
     exps[regime] = exp
 
 ################################### NIR ###################################
 # Between 1/IR_NIR <= x < NIR
 wns[4] = (1 / IR_NIR, 1 / NIR)
 # a(x) = scale*x**alpha_1
-coeffs["A"]["poly"][4] = [scale]
+coeffs["A"]["poly"][4] = P([scale])
 exps[4] = alpha_1
 
 # actually, a(x) should also include two modified drude profiles for silicate features
@@ -147,7 +144,6 @@ coeffs["A"]["drude"][6] = ir_drude_b
 wns[7] = (1 / NIR_optical, 1 / optical)
 
 
-# Not assigning to coefs yet because there might be more
 # The Drude profiles are a special case of the modified version; asym=0
 # However, when asym is 0, the Drude profile is a rational function of x' (microns)
 # D(x') = amp * fwhm**2 * x'**2 / (x'**4 + (fwhm**2 - 2*center**2)* x'**2 + center**4)
@@ -182,9 +178,9 @@ for var, drude_params, optical_poly_coefs in zip(
         ).coef,
         prod(d_divs).coef,
     )
-    coeffs[var]["poly"][7] = (poly + P(d_poly_coef)).coef[::-1]
-    coeffs[var]["rem"][7] = P(d_final_rem_coef).coef[::-1]
-    coeffs[var]["div"][7] = prod(d_divs).coef[::-1]
+    coeffs[var]["poly"][7] = poly + P(d_poly_coef)
+    coeffs[var]["rem"][7] = P(d_final_rem_coef)
+    coeffs[var]["div"][7] = prod(d_divs)
 
 ################################### NIR/OPTICAL ###################################
 # Back to the NIR-optical overlap
@@ -195,20 +191,20 @@ for var, drude_params, optical_poly_coefs in zip(
 # need to do 5 passes, three for a(x)_NIR and its two modified Drudes
 # one for b(x)_NIR because of the distinct non-integer exponent
 # and one for {a,b}(x)_optical.
-for i in (8, 9, 10, 14, 15):
+for i in range(8, 13):
     wns[i] = (1 / NIR, 1 / NIR_optical)
 w_poly, w_rem, w_div = get_weights(NIR_optical, NIR, N=3)
 for var, regime, s, exp in zip(
     "AB", (8, 9), (scale, b_nir_scale), (alpha_1, b_nir_exp)
 ):
-    coeffs[var]["poly"][regime] = s * w_poly.coef[::-1]
-    coeffs[var]["rem"][regime] = s * w_rem.coef[::-1]
-    coeffs[var]["div"][regime] = w_div.coef[::-1]
+    coeffs[var]["poly"][regime] = s * w_poly
+    coeffs[var]["rem"][regime] = s * w_rem
+    coeffs[var]["div"][regime] = w_div
     exps[regime] = exp
-for i, drude_params in zip((14, 15), (ir_drude_a, ir_drude_b)):
-    coeffs["A"]["poly"][i] = w_poly.coef[::-1]
-    coeffs["A"]["rem"][i] = w_rem.coef[::-1]
-    coeffs["A"]["div"][i] = w_div.coef[::-1]
+for i, drude_params in zip((10, 11), (ir_drude_a, ir_drude_b)):
+    coeffs["A"]["poly"][i] = w_poly
+    coeffs["A"]["rem"][i] = w_rem
+    coeffs["A"]["div"][i] = w_div
     coeffs["A"]["drude"][i] = drude_params
 
 # The (1-weights) * {a,b}(x)_optical is messy
@@ -216,64 +212,141 @@ for i, drude_params in zip((14, 15), (ir_drude_a, ir_drude_b)):
 # denominator rather than a polynomial + remainder / divisor
 w_numerator, w_div = get_weights(NIR_optical, NIR, N=2, complement=True)
 for var in "AB":
-    opt_poly = P(coeffs[var]["poly"][7][::-1])
-    opt_rem = P(coeffs[var]["rem"][7][::-1])
-    opt_div = P(coeffs[var]["div"][7][::-1])
+    opt_poly = coeffs[var]["poly"][7]
+    opt_rem = coeffs[var]["rem"][7]
+    opt_div = coeffs[var]["div"][7]
     opt_numerator = opt_div * opt_poly + opt_rem
     quotient_coef, rem_coef = pdiv(
         (w_numerator * opt_numerator).coef, (w_div * opt_div).coef
     )
-    coeffs[var]["poly"][10] = quotient_coef[::-1]
-    coeffs[var]["rem"][10] = rem_coef[::-1]
-    coeffs[var]["div"][10] = (w_div * opt_div).coef[::-1]
+    coeffs[var]["poly"][12] = P(quotient_coef)
+    coeffs[var]["rem"][12] = P(rem_coef)
+    coeffs[var]["div"][12] = w_div * opt_div
 
 ################################### UV+FUV ###################################
 # Once again handling the UV region before the UV-optical overlap
-# Between 1 / 0.3 <= x < 1 / 0.09, based on Fitzpatrick 1990
-# However, the RV dependence is left to b(x)
-wns[11] = (1 / optical_UV, 1 / UV)
-wns[12] = (1 / UV, 1 / blue_end)
+# Based on Fitzpatrick 1990
 # {a,b}(x) = C1 + C2 * x + C3*(x**2 / ((x**2 - x_o**2)**2 + x**2 * gamma**2))
+wns[13] = (1 / optical_UV, 1 / UV)
+wns[14] = (1 / UV, 1 / blue_end)
 for var, params in zip("AB", (uv_F90_a, uv_F90_b)):
     C1, C2, C3, C4, xo, gamma = params
-    coeffs[var]["poly"][11] = [C2, C1]
-    coeffs[var]["rem"][11] = coeffs[var]["rem"][12] = [C3, 0, 0]
-    coeffs[var]["div"][11] = coeffs[var]["div"][12] = [
-        1,
-        0,
-        gamma**2 - 2 * xo**2,
-        0,
-        xo**4,
-    ]
+    coeffs[var]["poly"][13] = P([C1, C2])
+    coeffs[var]["rem"][13] = coeffs[var]["rem"][14] = P([0, 0, C3])
+    coeffs[var]["div"][13] = coeffs[var]["div"][14] = P(
+        [xo**4, 0, gamma**2 - 2 * xo**2, 0, 1]
+    )
     # if x >= 5.9 (wns[12])
     # exv/ebv += C4*(F90_quad*(x-5.9)**2 + F90_cubic*(x-5.9)**3)
     fuv = C4 * P([0, 0, F90_quad, F90_cubic])(P([-5.9, 1])) + P([C1, C2])
-    coeffs[var]["poly"][12] = fuv.coef[::-1]
+    coeffs[var]["poly"][14] = fuv
 
 ################################### optical/UV ###################################
 # {a,b}(x) = weights*{a,b}(x)_optical + (1-weights)*{a,b}(x)_UV
 # There are no non-integer exponents, so the polynomials can be combined
-wns[13] = (1 / optical, 1 / optical_UV)
-wns[16] = (1 / optical, 1 / optical_UV)
+# However, this magnifies floating point errors more than two regimes would
+wns[15] = wns[16] = (1 / optical, 1 / optical_UV)
 for var in "AB":
     w_numerator, w_div = get_weights(optical_UV, optical, N=2, complement=False)
-    w_numerator2 = w_div - w_numerator  # numerator for (1 - weights)
-
-    opt_poly = P(coeffs[var]["poly"][7][::-1])
-    opt_rem = P(coeffs[var]["rem"][7][::-1])
-    opt_div = P(coeffs[var]["div"][7][::-1])
+    opt_poly = coeffs[var]["poly"][7]
+    opt_rem = coeffs[var]["rem"][7]
+    opt_div = coeffs[var]["div"][7]
     opt_numerator = opt_div * opt_poly + opt_rem
 
-    coeffs[var]["rem"][13] = (w_numerator * opt_numerator).coef[::-1]
-    coeffs[var]["div"][13] = (w_div * opt_div).coef[::-1]
-
-    uv_poly = P(coeffs[var]["poly"][11][::-1])
-    uv_rem = P(coeffs[var]["rem"][11][::-1])
-    uv_div = P(coeffs[var]["div"][11][::-1])
+    w_numerator2 = w_div - w_numerator  # numerator for (1 - weights)
+    uv_poly = coeffs[var]["poly"][13]
+    uv_rem = coeffs[var]["rem"][13]
+    uv_div = coeffs[var]["div"][13]
     uv_numerator = uv_div * uv_poly + uv_rem
 
-    coeffs[var]["rem"][16] = (w_numerator2 * uv_numerator).coef[::-1]
-    coeffs[var]["div"][16] = (w_div * uv_div).coef[::-1]
+    quotient, rem = pdiv(
+        (
+            uv_div * opt_numerator * w_numerator
+            + opt_div * uv_numerator * w_numerator2
+        ).coef,
+        (uv_div * opt_div * w_div).coef,
+    )
+    coeffs[var]["poly"][15] = P(quotient)
+    coeffs[var]["rem"][15] = P(rem)
+    coeffs[var]["div"][15] = uv_div * opt_div * w_div
+
+# Was testing polynomial math
+# if method == 2:
+#     for var in "AB":
+#         w_numerator, w_div = get_weights(optical_UV, optical, N=2, complement=False)
+#         opt_poly = coeffs[var]["poly"][7]
+#         opt_rem = coeffs[var]["rem"][7]
+#         opt_div = coeffs[var]["div"][7]
+#         opt_numerator = opt_div * opt_poly + opt_rem
+# 
+#         w_numerator2 = w_div - w_numerator  # numerator for (1 - weights)
+#         uv_poly = coeffs[var]["poly"][13]
+#         uv_rem = coeffs[var]["rem"][13]
+#         uv_div = coeffs[var]["div"][13]
+#         uv_numerator = uv_div * uv_poly + uv_rem
+# 
+#         coeffs[var]["rem"][15] = (
+#             uv_div * opt_numerator * w_numerator + opt_div * uv_numerator * w_numerator2
+#         )
+#         coeffs[var]["div"][15] = uv_div * opt_div * w_div
+# 
+# if method == 3:
+#     for var in "AB":
+#         w_numerator, w_div = get_weights(optical_UV, optical, N=2, complement=False)
+#         opt_poly = coeffs[var]["poly"][7]
+#         opt_rem = coeffs[var]["rem"][7]
+#         opt_div = coeffs[var]["div"][7]
+#         opt_numerator = opt_div * opt_poly + opt_rem
+#         coeffs[var]["rem"][15] = w_numerator * opt_numerator
+#         coeffs[var]["div"][15] = w_div * opt_div
+# 
+#         w_numerator2 = w_div - w_numerator  # numerator for (1 - weights)
+#         uv_poly = coeffs[var]["poly"][13]
+#         uv_rem = coeffs[var]["rem"][13]
+#         uv_div = coeffs[var]["div"][13]
+#         uv_numerator = uv_div * uv_poly + uv_rem
+#         coeffs[var]["rem"][16] = w_numerator2 * uv_numerator
+#         coeffs[var]["div"][16] = w_div * uv_div
+# 
+# if method == 4:
+#     for var in "AB":
+#         w_numerator, w_div = get_weights(optical_UV, optical, N=2, complement=False)
+#         opt_poly = coeffs[var]["poly"][7]
+#         opt_rem = coeffs[var]["rem"][7]
+#         opt_div = coeffs[var]["div"][7]
+#         opt_numerator = opt_div * opt_poly + opt_rem
+#         opt_quotient_coef, opt_rem_coef = pdiv(
+#             (w_numerator * opt_numerator).coef, (w_div * opt_div).coef
+#         )
+#         coeffs[var]["poly"][15] = P(opt_quotient_coef)
+#         coeffs[var]["rem"][15] = P(opt_rem_coef)
+#         coeffs[var]["div"][15] = w_div * opt_div
+# 
+#         w_numerator2 = w_div - w_numerator  # numerator for (1 - weights)
+#         uv_poly = coeffs[var]["poly"][13]
+#         uv_rem = coeffs[var]["rem"][13]
+#         uv_div = coeffs[var]["div"][13]
+#         uv_numerator = uv_div * uv_poly + uv_rem
+#         uv_quotient_coef, uv_rem_coef = pdiv(
+#             (w_numerator2 * uv_numerator).coef, (w_div * uv_div).coef
+#         )
+#         coeffs[var]["poly"][16] = P(uv_quotient_coef)
+#         coeffs[var]["rem"][16] = P(uv_rem_coef)
+#         coeffs[var]["div"][16] = w_div * uv_div
+
+# G23 is parametrized as A(x)/A(V) = a(x) + b(x)*(1/RV - 1/3.1)
+# but BayeSN want a(x) + b(x)/Rv.
+# Thus, a(x) should be decreased by b(x)/3.1 in each regime
+# If b(x) is defined in a regime where a(x) is not, the empty a(x) can be set to -b(x)/3.1.
+# If a(x) is already populated, it's easier to make a new regime than to combine rational fns.
+for a_regime, b_regime in zip(
+    (0, 17, 9, 18, 19, 20, 21, 22), (0, 7, 9, 12, 13, 14, 15, 16)
+):
+    coeffs["A"]["poly"][a_regime] = -coeffs["B"]["poly"][b_regime] / 3.1
+    coeffs["A"]["rem"][a_regime] = -coeffs["B"]["rem"][b_regime] / 3.1
+    coeffs["A"]["div"][a_regime] = coeffs["B"]["div"][b_regime]
+    wns[a_regime] = wns[b_regime]
+    exps[a_regime] = exps[b_regime]
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
@@ -304,4 +377,6 @@ with open("BAYESN.YAML", "w") as f:
     ):
         f.write(f"{name}:\n")
         for coeffs in arr:
+            if isinstance(coeffs, P):
+                coeffs = coeffs.coef[::-1]
             f.write(f"- [{', '.join(str(x) for x in coeffs)}]\n")
