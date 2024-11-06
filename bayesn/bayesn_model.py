@@ -690,12 +690,9 @@ class SEDmodel(object):
         )
         self.redlaw_num_knots = len(redlaw_params.get("L_KNOTS", [1]))
         self.redlaw_min_order = redlaw_params.get("MIN_ORDER", 0)
-        n_regimes = len(redlaw_params.get("REGIME_WLS", [1]))
+        n_regimes = len(redlaw_params.get("REGIMES", [1]))
         ones = jnp.ones((n_regimes, 1))
         zeros = jnp.zeros((n_regimes, 1))
-        redlaw = {}
-        for var in "AB":
-            redlaw[var] = jnp.zeros((len(self.model_wave), 1))
         units = redlaw_params.get("UNITS", "inverse microns")
         if x == "default":
             x = self.model_wave
@@ -703,13 +700,16 @@ class SEDmodel(object):
             x = x / 1e4
         if "inverse" in units:
             x = 1 / x
+        redlaw = {}
+        for var in "AB":
+            redlaw[var] = jnp.zeros((len(x), 1))
         if "L_KNOTS" in redlaw_params:
             self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
             redlaw["B"] = spline_coeffs_irr(
                 x, self.redlaw_xk, invKD_irr(self.redlaw_xk)
             )
         for i in range(n_regimes):
-            wl_range = redlaw_params.get("REGIME_WLS", [[0, 10]])[i]
+            wl_range = redlaw_params.get("REGIMES", [[0, 10]])[i]
             idx = jnp.where((wl_range[0] <= x) & (x < wl_range[1]))
             if not idx[0].shape[0]:
                 continue

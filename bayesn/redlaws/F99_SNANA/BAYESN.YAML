@@ -1,6 +1,6 @@
 UNITS: inverse microns
 REGIME_EXP: [-8.39, -10.0, -10.0, -10.0]
-REGIME_WLS:
+REGIMES:
 - [0.3, 1.1]
 - [1.1, 3.3]
 - [3.3, 5.9]

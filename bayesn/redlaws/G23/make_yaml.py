@@ -1,7 +1,6 @@
 import numpy as np
 from numpy.polynomial import Polynomial as P
 from numpy.polynomial.polynomial import polydiv as pdiv
-from scipy.special import comb
 from math import prod
 
 # A(lambda)/A(V) = a(x) + b(x)*(1/Rv - 1/3.1)
@@ -323,7 +322,7 @@ for regimes in (
     (7, 18),  # b(x)_optical from 0.33 to 0.9 microns
     (13, 19),  # b(x)_UV from 0.17 to 0.3 microns
     (14, 20),  # b(x)_FUV from 0.09 to 0.17 microns
-    (15, 21),  # weights*b(x)_optical + (1-weights)*b(x)_UV from 0.3 to 0.33 microns
+    (15, 21),  # weights*b(x)_optical from 0.3 to 0.33 microns
     (16, 22),  # (1-weights)*b(x)_UV from 0.3 to 0.33 microns
 ):
     b_regime, a_regime = regimes
@@ -349,7 +348,7 @@ with open("BAYESN.YAML", "w") as f:
             coeffs["B"]["drude"],
         ),
         (
-            "REGIME_WLS",
+            "REGIMES",
             "A_POLY_COEFFS",
             "B_POLY_COEFFS",
             "A_REMAINDER_COEFFS",

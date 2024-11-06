@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.polynomial import Polynomial as P
 
 angstrom_knot_locations = np.array(
     [np.inf, 26500, 12200, 6000, 5470, 4670, 4110, 2700, 2600]
@@ -7,7 +8,7 @@ xk = inv_micron_knot_locations = 1e4 / angstrom_knot_locations
 N = len(xk)
 
 # Rational function coefficients (Rv^4 ... Rv^-1) for calculating spline values
-spline_val_coeffs = np.zeros((N, 6))
+spline_val_coeffs = [P([0]) for _ in range(N)]
 # constant terms from Fitzpatrick 1999PASP..111...63F
 C1_1 = 2.030
 C1_2 = -3.007
@@ -18,25 +19,25 @@ C4 = 0.41
 C5 = 5.9
 xo = 4.596
 gamma = 0.99
-
-
+FM90_quad = 0.5392
+FM90_cubic = 0.05644
 # values from https://universe.gsfc.nasa.gov/archive/idlastro/ftp/pro/astro/fm_unred.pro
 # A(lambda=inf) = 0
 # yk[0] = -Rv
-spline_val_coeffs[0, 3] = -1
+spline_val_coeffs[0] = P([0, -1])
 # NIR
 # yk[1] = 0.26469 * RV / 3.1 - RV
-spline_val_coeffs[1, 3] = 0.26469 / 3.1 - 1
+spline_val_coeffs[1] = P([0, 0.26469 / 3.1 - 1])
 # yk[2] = 0.82925 * RV / 3.1 - RV
-spline_val_coeffs[2, 3] = 0.82925 / 3.1 - 1
+spline_val_coeffs[2] = P([0, 0.82925 / 3.1 - 1])
 # yk[3] = -0.422809 + 1.00270 * RV + 2.13572e-4 * RV**2 - RV
-spline_val_coeffs[3] = [0, 0, 2.13572e-4, 1.00270 - 1, -0.422809, 0]
+spline_val_coeffs[3] = P([0, -0.422809, 1.00270 - 1, 2.13572e-4])
 # yk[4] = -5.13540e-2 + 1.00216 * RV - 7.35778e-5 * RV**2 - RV
-spline_val_coeffs[4] = [0, 0, -7.35778e-5, 1.00216 - 1, -5.13540e-2, 0]
+spline_val_coeffs[4] = P([0, -5.13540e-2, 1.00216-1, -7.35778e-5])
 # yk[5] = 0.700127 + 1.00184 * RV - 3.32598e-5 * RV**2 - RV
-spline_val_coeffs[5] = [0, 0, -3.32598e-5, 1.00184 - 1, 0.700127, 0]
+spline_val_coeffs[5] = P([0, 0.700127, 1.00184-1, -3.32598e-5])
 # yk[6] = 1.19456 + 1.01707 * RV - 5.46959e-3 * RV**2 + 7.97809e-4 * RV**3 - 4.45636e-5 * RV**4 - RV
-spline_val_coeffs[6] = [-4.45636e-5, 7.97809e-4, -5.46959e-3, 1.01707 - 1, 1.19456, 0]
+spline_val_coeffs[6] = P([0, 1.19456, 1.01707 - 1, -5.46959e-3, 7.97809e-4, -4.45636e-5])
 
 # UV
 # yk[7 or 8] = C1 + C2 * xk[7 or 8] + C3 * D where
@@ -48,12 +49,9 @@ for i in (7, 8):
     D = xk[i] ** 2 / (
         (xk[i] ** 2 - xo**2) ** 2 + (gamma * xk[i]) ** 2
     )  # RV independent
-    spline_val_coeffs[i, -2] = C1_1 + C1_2 * C2_1 + C2_1 * xk[i] + C3 * D
-    spline_val_coeffs[i, -1] = C2_2 * (C1_2 + xk[i])
+    spline_val_coeffs[i] = P([C2_2 * (C1_2 + xk[i]), C1_1 + C1_2 * C2_1 + C2_1 * xk[i] + C3 * D])
     if xk[i] >= C5:
-        spline_val_coeffs[i, -2] += C4 * (
-            0.5392 * (xk[i] - C5) ** 2 + 0.05644 * (xk[i] - C5) ** 3
-        )
+        spline_val_coeffs[i] += P([0, C4 * (FM90_quad * (xk[i] - C5) ** 2 + FM90_cubic * (xk[i] - C5) ** 3)])
 
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in inv_micron_knot_locations)}]\n")
@@ -62,4 +60,6 @@ with open("BAYESN.YAML", "w") as f:
     f.write(f"MIN_ORDER: -1\n")
     f.write("RV_COEFFS:\n")
     for coeffs in spline_val_coeffs:
+        if isinstance(coeffs, P):
+            coeffs = coeffs.coef[::-1]
         f.write(f"- [{', '.join(str(x) for x in coeffs)}]\n")

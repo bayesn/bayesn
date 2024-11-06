@@ -19,7 +19,6 @@ exps = [-1.78]
 # Instead, knots values should be at (3.1 - Rv)/3.1 * d22['slope']
 # which preserves A(x)/A(V) = a + b/Rv
 with open("BAYESN.YAML", "w") as f:
-    f.write("TYPE: SPLINE\n")
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in d22['wl'].values)}]\n")
     f.write(f"UNITS: microns\n")
     f.write(f"MIN_ORDER: 0\n")
@@ -32,7 +31,7 @@ with open("BAYESN.YAML", "w") as f:
         f.write(f"- [{lin}, {const}]\n")
     for arr, name in zip(
         (wls, A_poly_coeffs),
-        ("REGIME_WLS", "A_POLY_COEFFS"),
+        ("REGIMES", "A_POLY_COEFFS"),
     ):
         f.write(f"{name}:\n")
         for coeffs in arr:
