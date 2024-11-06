@@ -1711,6 +1711,7 @@ class SEDmodel(object):
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
 
         print(f'Preprocessing time: {time.time() - self.start_time}')
+        sys.exit('Quitting after preprocessing, just testing I/O')
         print(f'Current mode: {args["mode"]}')
         print('Running...')
 
