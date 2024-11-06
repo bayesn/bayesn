@@ -2690,7 +2690,8 @@ class SEDmodel(object):
                                 sim_pkmjds, sim_thetas, sim_AVs, sim_RVs],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
-                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SIM_GENTYPE', 'SIM_TEMPLATE_INDEX',
+                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX',
+                                      'SIM_GENTYPE', 'SIM_TEMPLATE_INDEX',
                                       'SIM_LIBID', 'SIM_ZCMB', 'SIM_VPEC', 'SIM_DLMAG', 'SIM_PEAKMJD',
                                       'SIM_THETA', 'SIM_AV', 'SIM_RV'])
             else:
