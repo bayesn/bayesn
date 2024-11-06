@@ -1710,6 +1710,7 @@ class SEDmodel(object):
         else:
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
 
+        print(f'Preprocessing time: {time.time() - self.start_time}')
         print(f'Current mode: {args["mode"]}')
         print('Running...')
 
@@ -2294,6 +2295,7 @@ class SEDmodel(object):
             self.fitres_table = self.fitres_table[new_cols]
 
             sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
+            sncosmo.write_lc(self.all_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCSUMMARY.TEXT'), fmt="snana", metachar="")
 
             summary = arviz.summary(samples)
             summary.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.SUMMARY.TEXT'))
@@ -2400,6 +2402,7 @@ class SEDmodel(object):
             idsurvey, sn_type, field, cutflag_snana, z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], [], [], [], [], []
             snrmax1s, snrmax2s, snrmax3s = [], [], []
             vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
+            nepoch = []
             sim_gentypes, sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags, sim_pkmjds, sim_thetas, \
             sim_AVs, sim_RVs = [], [], [], [], [], [], [], [], [], []
             # --------
@@ -2508,6 +2511,7 @@ class SEDmodel(object):
                         mwebvs.append(meta.get('MWEBV', 0.))
                         host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                         host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
+                        nepoch.append(lc.shape[0])
                         if self.sim:
                             sim_gentypes.append(meta['SIM_GENTYPE'])
                             sim_template_ids.append(meta['SIM_TEMPLATE_INDEX'])
@@ -2625,6 +2629,7 @@ class SEDmodel(object):
                     mwebvs.append(meta.get('MWEBV', 0.))
                     host_logmasses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                     host_logmass_errs.append(meta.get('HOSTGAL_LOGMASS_ERR', -9.))
+                    nepoch.append(lc.shape[0])
                     if self.sim:
                         sim_gentypes.append(meta['SIM_GENTYPE'])
                         sim_template_ids.append(meta['SIM_TEMPLATE_INDEX'])
@@ -2673,6 +2678,53 @@ class SEDmodel(object):
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
             all_data = all_data.T
+            # Prep FITRES table
+            varlist = ["SN:"] * len(sne)
+            idsurvey = [self.survey_id] * len(sne)
+            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
+            t_ranges = np.array(t_ranges)
+            if self.sim:
+                table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
+                                snrmax3s, sim_gentypes, sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags,
+                                sim_pkmjds, sim_thetas, sim_AVs, sim_RVs],
+                               names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
+                                      'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
+                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SIM_GENTYPE', 'SIM_TEMPLATE_INDEX',
+                                      'SIM_LIBID', 'SIM_ZCMB', 'SIM_VPEC', 'SIM_DLMAG', 'SIM_PEAKMJD',
+                                      'SIM_THETA', 'SIM_AV', 'SIM_RV'])
+            else:
+                table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
+                                snrmax3s, peak_mjds,
+                                nepoch, t_ranges[:, 0], t_ranges[:, 1]],
+                               names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
+                                      'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
+                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX'])
+            cut_dict = {}
+            full_table = table.copy().to_pandas()
+            full_table['DROP'] = ''
+            param_convert_dict = {'REDSHIFT': 'zHD', 'SNRMAX': 'SNRMAX1'}
+            for param_cut, cuts in args['lc_cuts'].items():
+                param = param_cut[7:].upper()
+                param = param_convert_dict.get(param, param)
+                low_cut, up_cut = cuts.split(' ')
+                low_cut, up_cut = float(low_cut), float(up_cut)
+                if param == 'NFILT_SNRMAX':
+                    param = f'SNRMAX{int(low_cut)}'
+                    if low_cut > 3:
+                        raise NotImplementedError('Only SNRMAX1, SNRMAX2 and SNRMAX3 are stored, currently only '
+                                                  'lower cut values of 1, 2 or 3 are possible')
+                keep = (table[param] > low_cut) & (table[param] < up_cut)
+                drop = (1 - keep).sum()
+                full_table.loc[full_table['CID'].isin(table[~keep]['CID']), 'DROP'] = param_cut
+                all_data = all_data[..., keep]
+                table = table[keep]
+                cut_dict[param_cut] = drop
+            print(cut_dict)
+            print(full_table[['SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX', 'DROP']])
+            self.fitres_table = table
+            self.all_table = full_table
             t = all_data[0, ...]
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -2698,29 +2750,8 @@ class SEDmodel(object):
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
-            self.peak_mjds = np.array(peak_mjds)
+            self.peak_mjds = self.fitres_table['SEARCH_PEAKMJD']
             self.lcplot_data = lcplot_data
-            # Prep FITRES table
-            varlist = ["SN:"] * len(sne)
-            idsurvey = [self.survey_id] * len(sne)
-            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
-            if self.sim:
-                table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
-                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
-                                snrmax3s, sim_gentypes, sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags,
-                                sim_pkmjds, sim_thetas, sim_AVs, sim_RVs],
-                               names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
-                                      'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
-                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SIM_GENTYPE', 'SIM_TEMPLATE_INDEX',
-                                      'SIM_LIBID', 'SIM_ZCMB', 'SIM_VPEC', 'SIM_DLMAG', 'SIM_PEAKMJD',
-                                      'SIM_THETA', 'SIM_AV', 'SIM_RV'])
-            else:
-                table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
-                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
-                               names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
-                                      'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
-                                      'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
-            self.fitres_table = table
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
             sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
