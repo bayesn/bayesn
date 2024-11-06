@@ -2686,7 +2686,8 @@ class SEDmodel(object):
             if self.sim:
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                                 vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
-                                snrmax3s, sim_gentypes, sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags,
+                                snrmax3s, peak_mjds, nepoch, t_ranges[:, 0], t_ranges[:, 1], sim_gentypes,
+                                sim_template_ids, sim_libids, sim_zcmbs, sim_vpecs, sim_dlmags,
                                 sim_pkmjds, sim_thetas, sim_AVs, sim_RVs],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
@@ -2697,8 +2698,7 @@ class SEDmodel(object):
             else:
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                                 vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
-                                snrmax3s, peak_mjds,
-                                nepoch, t_ranges[:, 0], t_ranges[:, 1]],
+                                snrmax3s, peak_mjds, nepoch, t_ranges[:, 0], t_ranges[:, 1]],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX'])
