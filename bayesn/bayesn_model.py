@@ -700,6 +700,8 @@ class SEDmodel(object):
             x = x / 1e4
         if "inverse" in units:
             x = 1 / x
+        self.redlaw_range = redlaw_params.get("WAVE_RANGE", (min(x), max(x)))
+        self.redlaw_RV_range = redlaw_params.get("RV_RANGE", (2, 6))
         redlaw = {}
         for var in "AB":
             redlaw[var] = jnp.zeros((len(x), 1))
@@ -707,6 +709,16 @@ class SEDmodel(object):
             self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
             redlaw["B"] = spline_coeffs_irr(
                 x, self.redlaw_xk, invKD_irr(self.redlaw_xk)
+            )
+        undefined_intervals = []
+        if min(x) < self.redlaw_range[0]:
+            undefined_intervals.append(str((min(x), self.redlaw_range[0])))
+        if max(x) > self.redlaw_range[1]:
+            undefined_intervals.append(str((self.redlaw_range[1], max(x))))
+        if undefined_intervals != []:
+            print(
+                f"WARNING: The {self.redlaw_name} redeing law is only valid from {self.redlaw_range[0]} to {self.redlaw_range[1]} {units}. "
+                f"There will be no extinction applied in {' and '.join(undefined_intervals)} {units}"
             )
         for i in range(n_regimes):
             wl_range = redlaw_params.get("REGIMES", [[0, 10]])[i]
@@ -758,6 +770,10 @@ class SEDmodel(object):
         self.redlaw_bx = device_put(redlaw["B"])
 
     def get_axav(self, RV, num_batch=1):
+        if RV < self.redlaw_RV_range[0] or RV > self.redlaw_RV_range[1]:
+            print(
+                f"WARNING: The {self.redlaw_name} reddening law is only valid with RV in the interval {self.redlaw_RV_range}. RV={RV} will require extrapolation beyond the data used to define the model."
+            )
         yk = jnp.zeros((num_batch, self.redlaw_num_knots))
         ones = jnp.ones((1, num_batch))
 
