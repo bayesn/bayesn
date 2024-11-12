@@ -1,3 +1,19 @@
+""" From Fitzpatrick & Massa 2007ApJ...663..320F
+https://iopscience.iop.org/article/10.1086/518158
+IR-through-UV extinction of normal, near main-sequence Galactic OB stars.
+RV range = [2.33 (HD220057 (NGC 7654)), 6.42 (HD37022 (NGC 1977))]
+
+The only RV sensitive knots are the first 5, which are >= 1 um.
+For field stars without IR photometry, the authors assumed an RV of 3.1 and a
+scale parameter k_IR of 1.11 based on k_IR = 0.63RV - 0.84 from F04.
+This closely matches the 0.63RV - 0.83 found in this sample.
+For cluster stars without IR photometry, the authors assumes the cluster averages.
+
+Implementation based on extinction
+https://extinction.readthedocs.io/en/latest/api/extinction.fm07.html
+Constants from extinction
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 
@@ -38,6 +54,8 @@ for i in range(8, 10):
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in inv_micron_knot_locations)}]\n")
     f.write(f"UNITS: inverse microns\n")
+    f.write(f"WAVE_RANGE: [0.167, 10.989]\n")
+    f.write(f"RV_RANGE: [2.33, 6.42]\n")
     f.write(f"MIN_ORDER: 0\n")
     f.write("RV_COEFFS:\n")
     for coeffs in spline_val_coeffs:

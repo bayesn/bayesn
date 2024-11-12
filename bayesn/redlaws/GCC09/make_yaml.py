@@ -1,3 +1,11 @@
+""" From Gordon, Cartledge, & Clayton 2009ApJ...705.1320G
+https://iopscience.iop.org/article/10.1088/0004-637X/705/2/1320
+Average of 75 extinction curves with FUV and UV spectra.
+
+Implementation based on dust_extinction
+https://dust-extinction.readthedocs.io/en/stable/api/dust_extinction.parameter_averages.GCC09.html#dust_extinction.parameter_averages.GCC09
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 
@@ -36,6 +44,8 @@ coeffs["B"]["poly"][1] += b(shift)
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write("WAVE_RANGE: [3.3, 11]\n")
+    f.write("RV_RANGE: [2.0, 6.0]\n")  # from dust_extinction. Sample in paper [2.5, 5.5]
     for arr, name in zip(
         (
             wls,

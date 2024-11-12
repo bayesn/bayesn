@@ -1,3 +1,15 @@
+""" From Valencic, Clayton, Gordon 2004ApJ...616..912V
+https://iopscience.iop.org/article/10.1086/424922
+
+Average of 417 UV extinction curves using IUE spectra
+combined with 2MASS NIR photometry.
+
+RV range [2.01 +/- 0.33 (HD 96042), 6.33 +/- 0.60 (HD 37020)]
+
+Implementation based on dust_extinction
+https://dust-extinction.readthedocs.io/en/stable/api/dust_extinction.parameter_averages.VCG04.html#dust_extinction.parameter_averages.VCG04
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 
@@ -34,6 +46,10 @@ coeffs["B"]["poly"][1] += b(shift)
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write("WAVE_RANGE: [3.3, 8.0]\n")
+    f.write(
+        "RV_RANGE: [2.0, 6.0]\n"
+    )  # from dust_extinction. Sample in paper [2.01, 6.33]
     for arr, name in zip(
         (
             wns,

@@ -8,7 +8,7 @@ Uses FM90 sample - Orion nebula stars + HD210121 (RV=1/0.45 ~ 2.22 +/- 0.14)
 
 Values taken from FMRCURVE.pro as seen on Nov 2024 at
 https://universe.gsfc.nasa.gov/archive/idlastro/ftp/pro/astro/fm_unred.pro
-With AVGLMC and LMC2 both unset.
+With AVGLMC set and LMC2 unset.
 
 The program states:
 Parameterization is valid from the IR to the far-UV (3.5 microns to 0.1
@@ -26,15 +26,16 @@ N = len(xk)
 
 # Rational function coefficients (Rv^4 ... Rv^-1) for calculating spline values
 spline_val_coeffs = [P([0]) for _ in range(N)]
-C1_1 = 2.030
-C1_2 = -3.007
-C2_1 = -0.824
-C2_2 = 4.717
-C3 = 3.23
-C4 = 0.41
+# constant terms from Fitzpatrick 1999PASP..111...63F
+C1_1 = -1.28
+C1_2 = 0
+C2_1 = 1.11
+C2_2 = 0
+C3 = 2.73
+C4 = 0.64
 C5 = 5.9
 xo = 4.596
-gamma = 0.99
+gamma = 0.91
 FM90_quad = 0.5392
 FM90_cubic = 0.05644
 # A(lambda=inf) = 0

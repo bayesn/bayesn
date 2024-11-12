@@ -1,3 +1,8 @@
+""" From Decleir et al. 2022ApJ...930...15D
+https://iopscience.iop.org/article/10.3847/1538-4357/ac5dbe
+Compares NIR (0.8 - 5.5 um) spectra of 15 comparison and 25 reddened MW OB stars.
+"""
+
 import pandas as pd
 import numpy as np
 from scipy import interpolate
@@ -21,6 +26,10 @@ exps = [-1.78]
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in d22['wl'].values)}]\n")
     f.write(f"UNITS: microns\n")
+    f.write(f"WAVE_RANGE: [0.8, 5.0]\n")
+    f.write(
+        "RV_RANGE: [2.5, 5.5]\n"
+    )  # from dust_extinction. Sample in paper [2.43, 5.33]
     f.write(f"MIN_ORDER: 0\n")
     f.write(f"REGIME_EXP: [{', '.join([str(x) for x in exps])}]\n")
     f.write("RV_COEFFS:\n")

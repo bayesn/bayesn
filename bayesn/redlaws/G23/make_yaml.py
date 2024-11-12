@@ -1,3 +1,12 @@
+""" From Gordon et al. 2023ApJ...950...86G
+https://iopscience.iop.org/article/10.3847/1538-4357/accb59
+Combines data from four samples (GCC09, F19, G21, D22).
+Smoothly varies between functionally distinct IR, optical, UV.
+
+Implementation based on dust_extinction.
+https://dust-extinction.readthedocs.io/en/stable/api/dust_extinction.parameter_averages.G23.html#dust_extinction.parameter_averages.G23
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 from numpy.polynomial.polynomial import polydiv as pdiv
@@ -334,6 +343,8 @@ for regimes in (
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write("WAVE_RANGE: [0.0313, 10.964]\n")
+    f.write("RV_RANGE: [2.3, 5.6]\n")
     f.write(f"REGIME_EXP: [{', '.join(str(x) for x in exps)}]\n")
     for arr, name in zip(
         (

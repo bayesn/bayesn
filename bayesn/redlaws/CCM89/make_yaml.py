@@ -1,3 +1,9 @@
+""" From Cardelli, Clayton, and Mathis 1989ApJ...345..245C
+https://ui.adsabs.harvard.edu/abs/1989ApJ...345..245C/abstract
+Fits parameterized extinction data from Fitzpatrick (1986) and Massa (1988) as a function
+of one-parameter:$RV = A(V)/E(B-V).
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 
@@ -65,6 +71,10 @@ coeffs["B"]["poly"][4] = b_FFUV(shift)
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write("WAVE_RANGE: [0.3, 10.0]\n")
+    f.write(
+        "RV_RANGE: [2.0, 6.0]\n"
+    )  # from dust_extinction. Sample in paper [2.85, 5.6]
     f.write(f"REGIME_EXP: [{', '.join(str(x) for x in exps)}]\n")
     for arr, name in zip(
         (

@@ -1,3 +1,8 @@
+""" From SNANA issue 1422 https://github.com/RickKessler/SNANA/issues/1422
+
+F99 was being approximated as the product of O94 and a polynomial.
+This provided a reasonable fit for R_V=3.1, but became discrepant with other values.
+"""
 import numpy as np
 from numpy.polynomial import Polynomial as P
 from numpy.polynomial.polynomial import polydiv as pdiv
@@ -89,6 +94,11 @@ for var, quad, cubic in zip("AB", (-0.04473, 0.2130), (-0.009779, 0.1207)):
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write(f"WAVE_RANGE: [0.286, 10.964]\n")
+    f.write(
+        f"RV_RANGE: [2.0, 6.0]\n"
+    )  # F99 range from dust_extinction. Sample in paper [2.22, 5.83]
+    # only replicates F99 at RV=3.1
     f.write(f"REGIME_EXP: [{', '.join(str(x) for x in exps)}]\n")
     for arr, name in zip(
         (

@@ -1,3 +1,18 @@
+""" From O'Donnell 1994ApJ...422..158O
+https://ui.adsabs.harvard.edu/abs/1994ApJ...422..158O/abstract
+Rederived CCM89 with uvby observations of 22 stars and Johnson filters,
+IUE, and ANS extinction measurements.
+Uses new coefficients the optical.
+
+RV
+min = 2.85, HD 14250
+max = 5.6, HD 36982
+
+
+Implementation based on extinction
+https://extinction.readthedocs.io/en/latest/api/extinction.odonnell94.html
+"""
+
 import numpy as np
 from numpy.polynomial import Polynomial as P
 
@@ -56,6 +71,8 @@ coeffs["B"]["div"][3] = coeffs["B"]["div"][2]
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
+    f.write("WAVE_RANGE: [0.3, 8.0]\n")
+    f.write("RV_RANGE: [2.0, 6.0]\n")  # from dust_extinction. Sample in paper [2.85, 5.6]
     f.write(f"REGIME_EXP: [{', '.join(str(x) for x in exps)}]\n")
     for arr, name in zip(
         (

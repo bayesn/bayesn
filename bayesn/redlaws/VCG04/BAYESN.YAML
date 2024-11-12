@@ -1,4 +1,6 @@
 UNITS: inverse microns
+WAVE_RANGE: [3.3, 8.0]
+RV_RANGE: [2.0, 6.0]
 REGIMES:
 - [3.3, 5.9]
 - [5.9, 8.0]
