@@ -3503,8 +3503,8 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             del_M = chains['delM'][..., i].flatten(order='F')
 
-            theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
+            theta, AV, mu, eps, del_M, tmax, RV = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
+                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...], RV[:num_samples, ...]
 
             if mean:
                 theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
