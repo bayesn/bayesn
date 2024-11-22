@@ -619,7 +619,7 @@ class SEDmodel(object):
         unique_redshifts, idx = jnp.unique(redshifts, return_inverse=True)
         all_lam = np.array(self.model_wave[None, :] * (1 + unique_redshifts[:, None]))
         all_lam = all_lam.flatten(order="F")
-        self._load_redlaw(self.redlaw_name, x=all_lam)
+        self._load_redlaw(self.redlaw_name, x=all_lam, verbose=False)
         axav = self.get_axav(float(self.RV_MW)).reshape(
             (len(unique_redshifts), weights.shape[1]), order="F"
         )
@@ -632,7 +632,7 @@ class SEDmodel(object):
         mw_ext = mw_ext * av[:, None]
         mw_ext = jnp.power(10, -0.4 * mw_ext)
         # reset back to just self.model_wave for get_axav calculations
-        self._load_redlaw(self.redlaw_name)
+        self._load_redlaw(self.redlaw_name, verbose=False)
 
         weights = weights * mw_ext[..., None]
 
@@ -641,7 +641,7 @@ class SEDmodel(object):
 
         return weights
 
-    def _load_redlaw(self, redlaw, x="default"):
+    def _load_redlaw(self, redlaw, x="default", verbose=True):
         """
         Loads a reddening law from a yaml file.
 
@@ -669,11 +669,13 @@ class SEDmodel(object):
         self.redlaw_name = redlaw
         built_in_redlaws = next(os.walk(os.path.join(self.__root_dir__, "redlaws")))[1]
         if os.path.exists(redlaw):
-            print(f"Loading custom reddening law at {redlaw}")
+            if verbose:
+                print(f"Loading custom reddening law at {redlaw}")
             with open(load_model, "r") as file:
                 redlaw_params = yaml.load(file)
         elif redlaw in built_in_redlaws:
-            print(f"Loading built-in reddening law {redlaw}")
+            if verbose:
+                print(f"Loading built-in reddening law {redlaw}")
             with open(
                 os.path.join(self.__root_dir__, "redlaws", redlaw, "BAYESN.YAML"),
                 "r",
@@ -716,10 +718,11 @@ class SEDmodel(object):
         if max(x) > self.redlaw_range[1]:
             undefined_intervals.append(str((self.redlaw_range[1], max(x))))
         if undefined_intervals != []:
-            print(
-                f"WARNING: The {self.redlaw_name} redeing law is only valid from {self.redlaw_range[0]} to {self.redlaw_range[1]} {units}. "
-                f"There will be no extinction applied in {' and '.join(undefined_intervals)} {units}"
-            )
+            if verbose:
+                print(
+                    f"WARNING: The {self.redlaw_name} reddening law is only valid from {self.redlaw_range[0]} to {self.redlaw_range[1]} {units}. "
+                    f"There will be no extinction applied in {' and '.join(undefined_intervals)} {units}"
+                )
         for i in range(n_regimes):
             wl_range = redlaw_params.get("REGIMES", [[0, 10]])[i]
             idx = jnp.where((wl_range[0] <= x) & (x < wl_range[1]))
@@ -770,10 +773,10 @@ class SEDmodel(object):
         self.redlaw_bx = device_put(redlaw["B"])
 
     def get_axav(self, RV, num_batch=1):
-        if RV < self.redlaw_RV_range[0] or RV > self.redlaw_RV_range[1]:
-            print(
-                f"WARNING: The {self.redlaw_name} reddening law is only valid with RV in the interval {self.redlaw_RV_range}. RV={RV} will require extrapolation beyond the data used to define the model."
-            )
+        # if RV < self.redlaw_RV_range[0] or RV > self.redlaw_RV_range[1]:
+        #     print(
+        #         f"WARNING: The {self.redlaw_name} reddening law is only valid with RV in the interval {self.redlaw_RV_range}. RV={RV} will require extrapolation beyond the data used to define the model."
+        #     )
         yk = jnp.zeros((num_batch, self.redlaw_num_knots))
         ones = jnp.ones((1, num_batch))
 
