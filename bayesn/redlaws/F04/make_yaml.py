@@ -15,6 +15,7 @@ angstrom_knot_locations = np.array(
 )
 xk = inv_micron_knot_locations = 1e4 / angstrom_knot_locations
 N = len(xk)
+max_RV_coeff_len = 0
 
 # Rational function coefficients (Rv^2 ... Rv^-1) for calculating spline values
 spline_val_coeffs = [P([0]) for _ in range(N)]
@@ -53,6 +54,9 @@ for i in (8, 9):
             [0, C4 * (FM90_quad * (xk[i] - C5) ** 2 + FM90_cubic * (xk[i] - C5) ** 3)]
         )
 
+for i in range(len(spline_val_coeffs)):
+    max_RV_coeff_len = max(max_RV_coeff_len, len(spline_val_coeffs[i].coef))
+
 with open("BAYESN.YAML", "w") as f:
     f.write(f"L_KNOTS: [{', '.join(str(x) for x in inv_micron_knot_locations)}]\n")
     f.write(f"NUM_KNOTS: {N}\n")
@@ -64,4 +68,6 @@ with open("BAYESN.YAML", "w") as f:
     for coeffs in spline_val_coeffs:
         if isinstance(coeffs, P):
             coeffs = coeffs.coef[::-1]
+        diff = max_RV_coeff_len - len(coeffs)
+        coeffs = np.append([0] * diff, coeffs)
         f.write(f"- [{', '.join(str(x) for x in coeffs)}]\n")
