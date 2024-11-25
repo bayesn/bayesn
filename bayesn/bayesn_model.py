@@ -1341,12 +1341,9 @@ class SEDmodel(object):
             AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample("tmax", dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
-            RV_tform = numpyro.sample("RV_tform", dist.Uniform(0, 1))
-            RV = numpyro.deterministic(
-                "Rv",
-                self.mu_R
-                + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)),
-            )
+            RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+            RV = numpyro.deterministic('RV',
+                                       self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array(
@@ -4885,9 +4882,10 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             del_M = chains["delM"][..., i].flatten(order="F")
 
-            theta, AV, mu, eps, del_M, tmax, RV = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...], RV[:num_samples, ...]
-
+            theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
+                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
+            if 'RV' in chains.keys():
+                RV = RV[:num_samples, ...]
             if mean:
                 theta, AV, mu, eps, del_M, tmax = (
                     theta.mean()[None],
