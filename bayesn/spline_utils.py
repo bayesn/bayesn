@@ -65,7 +65,7 @@ def cartesian_prod(x, y):
 	n_y = len(y)
 	return np.array([np.repeat(x,n_y),np.tile(y,n_x)]).T
 
-def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
+def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True, hermite=False, x_extreme="gap"):
 	"""
 	Compute a matrix of spline coefficients.
 
@@ -85,8 +85,22 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 		from the output of ``invKD_irr``.
 	allow_extrap : bool
 		Flag permitting extrapolation. If True, the returned matrix will be
-		configured to extrapolate linearly beyond the outer knots. If False,
+		configured to extrapolate linearly beyond the outer knots.
+		Or to use a cubic Hermite spline if `hermite` is True. If False,
 		values which fall out of bounds will raise ValueError.
+	hermite : bool
+		If True uses cubic Hermite spline interpolation to 
+		fall back towards zero outside the knot range. If False
+		uses linear extrapolation.
+	x_extreme : "hsiao_t", "hsiao_l", "gap", or two-tuple
+		Method for setting the outer knots if doing hermite
+		extrapolation. The surface will go to zero at these points.
+		If "hsiao_*" uses the limits of the Hsiao template.
+		If "hsiao_l": [1000, 25000]. If "hsiao_t": [-15, 85].
+		If "gap" extends beyond the existing knots by one step of
+		size equal to the adjacent inter-knot space.
+		If a two-tuple, uses the custom limits provided.
+		Deafult is "gap"
 	
 	Returns
 	-------
@@ -98,6 +112,18 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 	n_x = len(x)
 	X = np.zeros((n_x_int,n_x))
 
+	if hermite is True:
+		if x_extreme == "hsiao_l":
+			x_extreme = np.array([1000, 25000])
+		elif x_extreme == "hsiao_t":
+			x_extreme = np.array([-19, 85])
+		elif x_extreme == "gap":
+			x_extreme = np.array([2*x[0] - x[1], 2*x[-1] - x[-2]])
+		elif isinstance(x_extreme, str):
+			raise ValueError("x_extreme not recognised! " +
+				"Found {}.".format(x_extreme) +
+				"\nArgument must be 'gap', 'hsiao_t', 'hsiao_l' or a two-tuple.")
+
 	if not allow_extrap and ((max(x_int) > max(x)) or (min(x_int) < min(x))):
 		raise ValueError("Interpolation point out of bounds! " + 
 			"Ensure all points are within bounds, or set allow_extrap=True.")
@@ -105,23 +131,53 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 	for i in range(n_x_int):
 		x_now = x_int[i]
 		if x_now > max(x):
-			h = x[-1] - x[-2]
-			a = (x[-1] - x_now)/h
-			b = 1 - a
-			f = (x_now - x[-1])*h/6.0
+			if not hermite:
+				h = x[-1] - x[-2]
+				a = (x[-1] - x_now)/h
+				b = 1 - a
+				f = (x_now - x[-1])*h/6.0
 
-			X[i,-2] = a
-			X[i,-1] = b
-			X[i,:] = X[i,:] + f*invkd[-2,:]
+				X[i,-2] = a
+				X[i,-1] = b
+				X[i,:] = X[i,:] + f*invkd[-2,:]
+			elif x_now < x_extreme[1]:
+				# hermite rule
+				t = (x_now - x[-1])/(x_extreme[1] - x[-1])
+				r = (x_extreme[1] - x[-1])/(x[-1] - x[-2])
+				h00 = 2*t**3 - 3*t**2 + 1
+				h10 = t**3 - 2*t**2 + t
+
+				X[i,-1] = h00 + h10*r
+				X[i,-2] = -h10*r
+				X[i,:] = X[i,:] + h10*invkd[-2,:]*(x_extreme[1] - x[-1])*(x[-1] - x[-2])/6.0
+			else:
+				# if x is beyond the outer anchor,
+				# leave the row as all zeros
+				pass
 		elif x_now < min(x):
-			h = x[1] - x[0]
-			b = (x_now - x[0])/h
-			a = 1 - b
-			f = (x_now - x[0])*h/6.0
+			if not hermite:
+				h = x[1] - x[0]
+				b = (x_now - x[0])/h
+				a = 1 - b
+				f = (x_now - x[0])*h/6.0
 
-			X[i,0] = a
-			X[i,1] = b
-			X[i,:] = X[i,:] - f*invkd[1,:]
+				X[i,0] = a
+				X[i,1] = b
+				X[i,:] = X[i,:] - f*invkd[1,:]
+			elif x_now > x_extreme[0]:
+				# hermite rule
+				t = (x_now - x_extreme[0])/(x[0] - x_extreme[0])
+				r = (x[0] - x_extreme[0])/(x[1] - x[0])
+				h01 = -2*t**3 + 3*t**2
+				h11 = t**3 - t**2
+
+				X[i,0] = h01 - h11*r
+				X[i,1] = h11*r
+				X[i,:] = X[i,:] - h11*invkd[1,:]*(x[1] - x[0])*(x[0] - x_extreme[0])/6.0
+			else:
+				# if x is beyond the outer anchor,
+				# leave the row as all zeros
+				pass
 		else:
 			q = np.where(x[0:-1] <= x_now)[0][-1]
 			h = x[q+1] - x[q]
