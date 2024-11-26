@@ -41,12 +41,12 @@ FM90_quad = 0.5392
 FM90_cubic = 0.05644
 # A(lambda=inf) = 0
 # yk[0] = -Rv
-spline_val_coeffs[0] = P([0, -1])
+spline_val_coeffs[0] = P([0, 0, -1])
 # NIR
 # yk[1] = 0.26469 * RV / 3.1 - RV
-spline_val_coeffs[1] = P([0, 0.26469 / 3.1 - 1])
+spline_val_coeffs[1] = P([0, 0, 0.26469 / 3.1 - 1])
 # yk[2] = 0.82925 * RV / 3.1 - RV
-spline_val_coeffs[2] = P([0, 0.82925 / 3.1 - 1])
+spline_val_coeffs[2] = P([0, 0, 0.82925 / 3.1 - 1])
 # yk[3] = -0.422809 + 1.00270 * RV + 2.13572e-4 * RV**2 - RV
 spline_val_coeffs[3] = P([0, -0.422809, 1.00270 - 1, 2.13572e-4])
 # yk[4] = -5.13540e-2 + 1.00216 * RV - 7.35778e-5 * RV**2 - RV
