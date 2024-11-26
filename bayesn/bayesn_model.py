@@ -632,7 +632,7 @@ class SEDmodel(object):
         mw_ext = mw_ext * av[:, None]
         mw_ext = jnp.power(10, -0.4 * mw_ext)
         # reset back to just self.model_wave for get_axav calculations
-        self._load_redlaw(self.redlaw_name, verbose=False)
+        self._load_redlaw(self.redlaw_name, x=self.model_wave, verbose=False)
 
         weights = weights * mw_ext[..., None]
 
@@ -686,7 +686,6 @@ class SEDmodel(object):
                 f"Specified reddening law {redlaw} does not exist and does not correspond to one "
                 f"of the built-in model {built_in_redlaws}"
             )
-
         self.redlaw_rv_coeffs = device_put(
             jnp.array(redlaw_params.get("RV_COEFFS", [[1]]))
         )
@@ -696,7 +695,7 @@ class SEDmodel(object):
         ones = jnp.ones((n_regimes, 1))
         zeros = jnp.zeros((n_regimes, 1))
         units = redlaw_params.get("UNITS", "inverse microns")
-        if x == "default":
+        if isinstance(x, str) and x == "default":
             x = self.model_wave
         if "micron" in units:
             x = x / 1e4
@@ -2678,6 +2677,7 @@ class SEDmodel(object):
         mu_R=False,
         sigma_R=False,
         mag=False,
+        redlaw=None
     ):
         """
         Method to fit light curve contained in SNANA-format text file using BayeSN model
@@ -2756,6 +2756,7 @@ class SEDmodel(object):
             mu_R=mu_R,
             sigma_R=sigma_R,
             mag=mag,
+            redlaw=redlaw
         )
 
         return samples, sn_props
@@ -2780,6 +2781,7 @@ class SEDmodel(object):
         mu_R=False,
         sigma_R=False,
         mag=False,
+        redlaw=None
     ):
         """
         Method to fit light curve data loaded into memory with BayeSN model
@@ -2845,6 +2847,8 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in memory when making plots
 
         """
+        if redlaw is not None:
+            self._load_redlaw(redlaw)
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = (
