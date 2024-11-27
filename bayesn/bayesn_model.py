@@ -281,6 +281,10 @@ class SEDmodel(object):
 
         self.trunc_val = 1.2
 
+        self.cubic_spline_interp_map = jax.jit(
+            jax.vmap(self.spline_coeffs_irr_interp_step, in_axes=(0, None, None))
+        )
+
         self.used_band_inds = None
         self.band_weights = None
         self._setup_band_weights()
@@ -290,7 +294,6 @@ class SEDmodel(object):
         self.J_t_map = jax.jit(
             jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
         )
-
     def _load_hsiao_template(self):
         """
         Loads the Hsiao template from the internal HDF5 file.
@@ -708,9 +711,11 @@ class SEDmodel(object):
             redlaw[var] = jnp.zeros((len(x), 1))
         if "L_KNOTS" in redlaw_params:
             self.redlaw_xk = jnp.array(redlaw_params["L_KNOTS"])
-            redlaw["B"] = spline_coeffs_irr(
-                x, self.redlaw_xk, invKD_irr(self.redlaw_xk)
-            )
+            inv = device_put(invKD_irr(self.redlaw_xk))
+            redlaw["B"] = self.cubic_spline_interp_map(x, self.redlaw_xk, inv)
+            # redlaw["B"] = spline_coeffs_irr(
+            #     x, self.redlaw_xk, invKD_irr(self.redlaw_xk)
+            # )
         undefined_intervals = []
         if min(x) < self.redlaw_range[0]:
             undefined_intervals.append(str((min(x), self.redlaw_range[0])))
@@ -1055,6 +1060,45 @@ class SEDmodel(object):
         b = 1 - a
         c = ((a**3 - a) / 6) * h**2
         d = ((b**3 - b) / 6) * h**2
+
+        X = X.at[q].set(X[q] + a * interp)
+        X = X.at[q + 1].set(X[q + 1] + b * interp)
+        X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
+
+        return X
+
+    @staticmethod
+    def spline_coeffs_irr_interp_step(x_now, x, invkd):
+        """
+        Vectorized version of cubic spline coefficient calculator found in spline_utils
+
+        Parameters
+        ----------
+        x_now: array-like
+            Current x location to calculate spline knots for
+        x: array-like
+            Numpy array containing the locations of the spline knots.
+        invkd: array-like
+            Precomputed matrix for generating second derivatives. Can be obtained
+            from the output of ``spline_utils.invKD_irr``.
+
+        Returns
+        -------
+
+        X: Set of spline coefficients for each x knot
+
+        """
+        X = jnp.zeros_like(x)
+        up_extrap = x_now > x[-1]
+        down_extrap = x_now < x[0]
+        interp = 1 - up_extrap - down_extrap
+
+        q = jnp.argmax(x_now < x) - 1
+        h = x[q + 1] - x[q]
+        a = (x[q + 1] - x_now) / h
+        b = 1 - a
+        c = ((a ** 3 - a) / 6) * h ** 2
+        d = ((b ** 3 - b) / 6) * h ** 2
 
         X = X.at[q].set(X[q] + a * interp)
         X = X.at[q + 1].set(X[q + 1] + b * interp)
