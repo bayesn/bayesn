@@ -36,6 +36,7 @@ include bayesn/model_files/README.md
 include bayesn/redlaws/*
 include bayesn/redlaws/C00/*
 include bayesn/redlaws/C94/*
+include bayesn/redlaws/CCM89/*
 include bayesn/redlaws/D22/*
 include bayesn/redlaws/F04/*
 include bayesn/redlaws/F19/*
@@ -46,5 +47,5 @@ include bayesn/redlaws/F99_SNANA/*
 include bayesn/redlaws/FM07/*
 include bayesn/redlaws/G23/*
 include bayesn/redlaws/GCC09/*
-include bayesn/redlaws/094/*
+include bayesn/redlaws/O94/*
 include bayesn/redlaws/VCG04/*
