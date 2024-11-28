@@ -37,6 +37,7 @@ parser.add_argument('--peakmjd_key', type=str, required=False)
 parser.add_argument('--keep_list', type=str, required=False)
 parser.add_argument('--error_floor', type=float, required=False)
 parser.add_argument('--num_lcplot', type=float, required=False)
+parser.add_argument('--save_summary', type=float, required=False)
 
 cmd_args = parser.parse_args()
 

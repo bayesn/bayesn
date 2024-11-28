@@ -1109,6 +1109,7 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
@@ -1635,6 +1636,8 @@ class SEDmodel(object):
         args['peakmjd_key'] = args.get('peakmjd_key', 'PEAKMJD')
         args['jobsplit'] = args.get('jobsplit')
         args['save_fit_errors'] = args.get('save_fit_errors', False)
+        args['lc_cuts'] = args.get('lc_cuts', {})
+        args['save_summary'] = args.get('save_summary', False)
         args['keep_list'] = args.get('keep_list')
         if args['keep_list'] is not None:
             keep_list = pd.read_csv(args['keep_list'], comment='#', delim_whitespace=True)
@@ -1649,7 +1652,7 @@ class SEDmodel(object):
         else:
             args['SNID_keep_list'] = None
         args['error_floor'] = args.get('error_floor', 0.0)
-        args['num_lcplot'] = args.get('num_lcplot')
+        args['num_lcplot'] = args.get('num_lcplot', 0)
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2116,6 +2119,7 @@ class SEDmodel(object):
 
         return samples, sn_props
 
+    @profile
     def postprocess(self, samples, args):
         """
         Function to postprocess BayeSN output. Applies transformations to some parameters e.g. ensuring consistency for
@@ -2133,6 +2137,7 @@ class SEDmodel(object):
         -------
 
         """
+        start = time.time()
         if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
@@ -2269,11 +2274,14 @@ class SEDmodel(object):
             for key in drop_keys:
                 if key in samples.keys():
                     del samples[key]
-            summary = arviz.summary(samples)
-            summary = summary[~summary.index.str.contains('tform')]
-            rhat = summary.r_hat.values
-            sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
-
+            if args['save_summary']:
+                summary = arviz.summary(samples)
+                summary.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.SUMMARY.TEXT'))
+                summary_subset = summary[~summary.index.str.contains('tform')]
+                rhat = summary_subset.r_hat.values
+                sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
+                self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
+                self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
             self.fitres_table['MU_LCFIT'] = samples['mu'].mean(axis=(0, 1))
             self.fitres_table['MUERR_LCFIT'] = samples['mu'].std(axis=(0, 1))
             self.fitres_table['THETA'] = samples['theta'].mean(axis=(0, 1))
@@ -2283,8 +2291,6 @@ class SEDmodel(object):
             self.fitres_table['PEAKMJD'] = samples['peak_MJD'].mean(axis=(0, 1))
             self.fitres_table['PEAKMJDERR'] = samples['peak_MJD'].std(axis=(0, 1))
             # if not args['fit_method'] == 'vi':
-            self.fitres_table['MEANRHAT'] = sn_rhat.mean(axis=1)
-            self.fitres_table['MAXRHAT'] = sn_rhat.max(axis=1)
             self.fitres_table.round(4)
 
             drop_count = pd.isna(self.fitres_table['MU_LCFIT']).sum()
@@ -2298,8 +2304,6 @@ class SEDmodel(object):
             sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
             sncosmo.write_lc(self.all_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCSUMMARY.TEXT'), fmt="snana", metachar="")
 
-            summary = arviz.summary(samples)
-            summary.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.SUMMARY.TEXT'))
 
         if args['snana']:
             self.end_time = time.time()
@@ -2327,8 +2331,11 @@ class SEDmodel(object):
 
             with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
                 yaml.dump(args, file)
+        end = time.time()
+        print(f'Postprocess time: {end - start:.2f} seconds')
         return
 
+    @profile
     def process_dataset(self, args):
         """
         Processes a data set to be used by the numpyro model.
