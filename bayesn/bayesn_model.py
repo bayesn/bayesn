@@ -2119,7 +2119,6 @@ class SEDmodel(object):
 
         return samples, sn_props
 
-    @profile
     def postprocess(self, samples, args):
         """
         Function to postprocess BayeSN output. Applies transformations to some parameters e.g. ensuring consistency for
@@ -2335,7 +2334,6 @@ class SEDmodel(object):
         print(f'Postprocess time: {end - start:.2f} seconds')
         return
 
-    @profile
     def process_dataset(self, args):
         """
         Processes a data set to be used by the numpyro model.
