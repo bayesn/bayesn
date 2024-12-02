@@ -13,6 +13,7 @@ parser.add_argument('input', type=str)
 parser.add_argument('--filters', type=str, required=False)
 parser.add_argument('--outputdir', type=str, required=False)
 parser.add_argument('--load_model', type=str, required=False)
+parser.add_argument('--load_redlaw', type=str, required=False)
 parser.add_argument('--mode', type=str, required=False)
 parser.add_argument('--num_chains', type=int, required=False)
 parser.add_argument('--fit_method', type=str, required=False)
@@ -46,9 +47,15 @@ with open(cmd_args.input, 'r') as file:
 if 'load_model' not in args.keys() and cmd_args.load_model is None:
     args['load_model'] = 'T21_model'
 
+# Set default/override reddening law
+if 'load_redlaw' not in args.keys() and cmd_args.load_redlaw is None:
+    args['load_redlaw'] = 'F99'
+elif cmd_args.load_redlaw is not None:
+    args['load_redlaw'] = cmd_args.load_redlaw
+
 # If no default filters.yaml is specified in input.yaml, use argparse value (including default of None)
 if 'filters' not in args.keys():
     args['filters'] = cmd_args.filters
 
-model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'])
+model = SEDmodel(load_model=args['load_model'], load_redlaw=args['load_redlaw'], filter_yaml=args['filters'])
 model.run(args, cmd_args)
