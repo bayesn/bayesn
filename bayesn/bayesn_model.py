@@ -31,9 +31,9 @@ from jax.scipy.stats import norm
 from jax.scipy.special import ndtri, ndtr
 from jax.random import PRNGKey, split
 from astropy.cosmology import FlatLambdaCDM
-import astropy.table as at
+from astropy.table import Table
 import astropy.constants as const
-from astropy.io import ascii
+from astropy.io import ascii, fits
 import matplotlib as mpl
 from matplotlib import rc
 import arviz
@@ -45,6 +45,8 @@ import time
 from tqdm import tqdm
 from astropy.table import QTable
 from .zltn_utils import *
+
+from collections import OrderedDict as odict
 
 yaml = YAML(typ='safe')
 yaml.default_flow_style = False
@@ -1714,7 +1716,8 @@ class SEDmodel(object):
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
 
         print(f'Preprocessing time: {time.time() - self.start_time}')
-        # sys.exit('Quitting after preprocessing, just testing I/O')
+        print(self.data.shape)
+        sys.exit('Quitting after preprocessing, just testing I/O')
         print(f'Current mode: {args["mode"]}')
         print('Running...')
 
@@ -2416,16 +2419,7 @@ class SEDmodel(object):
             print('Reading light curves...')
             if file_format.lower() == 'fits':  # If FITS format
                 ntot = 0
-                head_file = os.path.join(data_dir, f'{sn_list[0]}')
-                if not os.path.exists(head_file):
-                    head_file = os.path.join(data_dir, f'{sn_list[0]}.gz')  # Look for .fits.gz if .fits not found
-                phot_file = head_file.replace("HEAD", "PHOT")
-                sne_file = sncosmo.read_snana_fits(head_file, phot_file)
-                # Check if sim or real data
-                self.sim = 'SIM_REDSHIFT_HELIO' in sne_file[0].meta.keys()
-                if not self.sim:
-                    args['njobtot'] = args['jobsplit'][1]
-                for sn_file in tqdm(sn_list):
+                for sn_file_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
                     head_file = os.path.join(data_dir, f'{sn_file}')
                     if not os.path.exists(head_file):
                         head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
@@ -2433,13 +2427,33 @@ class SEDmodel(object):
                         self.survey = hdu[0].header.get('SURVEY', 'NULL')
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
-                    sne_file = sncosmo.read_snana_fits(head_file, phot_file)
-                    for sn_ind in range(len(sne_file)):
-                        ntot += 1
-                        if (ntot - args['jobid']) % args['njobtot'] != 0:
-                            continue
-                        sn = sne_file[sn_ind]
-                        meta, data = sn.meta, sn.to_pandas()
+                    # sne_file = read_snana_fits(head_file, phot_file)
+                    head_data = fits.getdata(head_file, 1, view=np.ndarray)
+                    phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
+                    if sn_file_ind == 0:
+                        # Check if sim or real data
+                        self.sim = 'SIM_REDSHIFT_HELIO' in head_data.dtype.names
+                        if not self.sim:
+                            args['njobtot'] = args['jobsplit'][1]
+                    SNID = np.char.strip(head_data['SNID'])
+                    n_sne = SNID.shape[0]
+                    # head_data['SNID'][:] = np.char.strip(head_data['SNID'])
+                    use_in_run = (np.arange(1, n_sne + 1) - args['jobid']) % args['njobtot'] == 0
+                    idx = np.where(use_in_run)[0]
+                    for sn_ind in idx:
+                        # ntot += 1
+                        # if (ntot - args['jobid']) % args['njobtot'] != 0:
+                        #     continue
+                        meta = odict(zip(head_data.dtype.names, head_data[sn_ind]))
+                        j0 = head_data['PTROBS_MIN'][sn_ind] - 1
+                        j1 = head_data['PTROBS_MAX'][sn_ind]
+                        data = phot_data[j0:j1]
+                        if 'FLT' in data.dtype.names:
+                            data['FLT'][:] = np.char.strip(data['FLT'])
+                        data = data.byteswap().newbyteorder()
+                        data = pd.DataFrame(data, columns=data.dtype.names)
+                        # sn = sne_file[sn_ind]
+                        # meta, data = sn.meta, sn.to_pandas()
                         sn_name = meta['SNID']
                         if isinstance(sn_name, bytes):
                             sn_name = sn_name.decode('utf-8')
