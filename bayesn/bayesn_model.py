@@ -2231,7 +2231,6 @@ class SEDmodel(object):
                 num_lcplot = self.data.shape[-1]
             else:
                 num_lcplot = args['num_lcplot']
-            self.lcplot_data = self.lcplot_data[self.lcplot_data.CID.isin(self.lcplot_data.CID.unique()[:num_lcplot])]
 
             if args['num_lcplot'] > 0:
                 f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
@@ -2337,6 +2336,7 @@ class SEDmodel(object):
         print(f'Postprocess time: {end - start:.2f} seconds')
         return
 
+    @profile
     def process_dataset(self, args):
         """
         Processes a data set to be used by the numpyro model.
@@ -2687,13 +2687,18 @@ class SEDmodel(object):
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
             print('Saving light curves to standard grid...')
+            if args['num_lcplot'] is None:
+                num_lcplot = len(all_lcs)
+            else:
+                num_lcplot = args['num_lcplot']
             lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
-                save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
-                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
-                save_lc.insert(loc=0, column='CID', value=sne[i])
-                lcplot_data = pd.concat([lcplot_data, save_lc])
+                if i < num_lcplot:
+                    save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
+                    save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
+                    save_lc.insert(loc=0, column='CID', value=sne[i])
+                    lcplot_data = pd.concat([lcplot_data, save_lc])
                 lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
@@ -2753,14 +2758,14 @@ class SEDmodel(object):
                                                                      order='F').transpose(1, 2, 0)
             flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
-            # Mask out negative fluxes, only for mag data--------------------------
-            for i in range(len(all_lcs)):
-                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
-                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
-                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
-                mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
-            # ---------------------------------------------------------------------
             if 'training' in args['mode'].lower():
+                # Mask out negative fluxes, only for mag data--------------------------
+                for i in range(len(all_lcs)):
+                    mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+                    mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+                    mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
+                    mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
+                # ---------------------------------------------------------------------
                 self.data = device_put(mag_data)
             else:
                 self.data = device_put(flux_data)
