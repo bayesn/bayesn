@@ -2336,7 +2336,6 @@ class SEDmodel(object):
         print(f'Postprocess time: {end - start:.2f} seconds')
         return
 
-    @profile
     def process_dataset(self, args):
         """
         Processes a data set to be used by the numpyro model.
