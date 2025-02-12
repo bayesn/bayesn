@@ -392,7 +392,7 @@ class SEDmodel(object):
             return f
 
         # Load filters------------------------------
-        band_weights, zps, offsets = [], [], []
+        band_weights, orig_band_weights, zps, offsets = [], [], [], []
         self.band_dict, self.zp_dict, self.band_lim_dict = {}, {}, {}
 
         # Prepare NULL band. This is a fake band with a very wide wavelength range used only for padded data points to
@@ -402,6 +402,7 @@ class SEDmodel(object):
         self.zp_dict['NULL_BAND'] = 10  # Arbitrary number
         self.band_lim_dict['NULL_BAND'] = band_wave[0], band_wave[-1]
         band_weights.append(np.ones_like(band_wave))
+        orig_band_weights.append(np.ones_like(band_wave))
         zps.append(10)
         offsets.append(0)
 
@@ -434,8 +435,30 @@ class SEDmodel(object):
             num = band_wave * band_conv_transmission * dlamba
             denom = jnp.sum(num)
             band_weight = num / denom
+            if band == 'g_PS1':
+                plt.plot(band_wave, band_weight)
 
-            band_weights.append(band_weight)
+            orig_band_weights.append(band_weight)
+            band_weights.append(band_conv_transmission)
+
+
+            # # Testing
+            # lam_shifts = np.arange(0, 100, 10)
+            # zps = []
+            # for lam_shift in lam_shifts:
+            #     lam = R[:, 0] - lam_shift
+            #     if magsys == 'ab':
+            #         zp = ab_standard_flam(lam)
+            #     else:
+            #         standard = filter_dict['standards'][magsys]
+            #         zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
+            #
+            #     int1 = simpson(lam * zp * R[:, 1], x=lam)
+            #     int2 = simpson(lam * R[:, 1], x=lam)
+            #     zp = 2.5 * np.log10(int1 / int2)
+            #     zps.append(zp)
+            # print(band, zps, np.diff(zps))
+
 
             # Get zero points
             lam = R[:, 0]
@@ -472,7 +495,9 @@ class SEDmodel(object):
         self.band_interpolate_locations = device_put(band_interpolate_locations)
         self.band_interpolate_spacing = band_spacing
         self.band_interpolate_weights = jnp.array(band_weights)
+        self.orig_band_interpolate_weights = jnp.array(orig_band_weights)
         self.model_wave = 10 ** model_log_wave
+        self.dlambda = jnp.diff(self.model_wave)
         self.used_band_dict = {val: val for val in self.band_dict.values()}
 
         self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
@@ -493,8 +518,8 @@ class SEDmodel(object):
         self.xk = jnp.array(
             [0.0, 1e4 / 26500., 1e4 / 12200., 1e4 / 6000., 1e4 / 5470., 1e4 / 4670., 1e4 / 4110., 1e4 / 2700.,
              1e4 / 2600.])
-        KD_x = invKD_irr(self.xk)
-        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
+        self.KD_x = device_put(invKD_irr(self.xk))
+        self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, self.KD_x))
 
     def _calculate_band_weights(self, redshifts, ebv):
         """
@@ -534,8 +559,8 @@ class SEDmodel(object):
         flat_result = remainders * end + (1 - remainders) * start
         weights = flat_result.reshape((-1,) + locs.shape).transpose(1, 2, 0)
         # Normalise so max transmission = 1
-        sum = jnp.sum(weights, axis=1)
-        weights /= sum[:, None, :]
+        # sum = jnp.sum(weights, axis=1)
+        # weights /= sum[:, None, :]
 
         # Apply MW extinction
         av = self.RV_MW * ebv
@@ -546,10 +571,75 @@ class SEDmodel(object):
         mw_ext = mw_ext * av[:, None]
         mw_ext = jnp.power(10, -0.4 * mw_ext)
 
-        weights = weights * mw_ext[..., None]
+        # Testing extras
+        # self.orig_band_interpolate_weights = self.orig_band_interpolate_weights[self.used_band_inds, ...]
+        #
+        # start = self.orig_band_interpolate_weights[..., int_locs]
+        # end = self.orig_band_interpolate_weights[..., int_locs + 1]
+        #
+        # flat_result = remainders * end + (1 - remainders) * start
+        # weights2 = flat_result.reshape((-1,) + locs.shape).transpose(1, 2, 0)
+        # # Normalise so max transmission = 1
+        # sum = jnp.sum(weights2, axis=1)
+        # weights2 /= sum[:, None, :]
+        #
+        # # Apply MW extinction
+        # av = self.RV_MW * ebv
+        # all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
+        # all_lam = all_lam.flatten(order='F')
+        # mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
+        # mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order='F')
+        # mw_ext = mw_ext * av[:, None]
+        # mw_ext = jnp.power(10, -0.4 * mw_ext)
+        #
+        # weights2 = weights2 * mw_ext[..., None]
+        #
+        # # We need an extra term of 1 + z from the filter contraction.
+        # weights2 /= (1 + redshifts)[:, None, None]
+        #
+        # self.test_weights = weights2
 
-        # We need an extra term of 1 + z from the filter contraction.
-        weights /= (1 + redshifts)[:, None, None]
+        # Extinction----------------------------------------------------------
+        RV = self.RV_MW
+        f99_x0 = 4.596
+        f99_gamma = 0.99
+        f99_c2 = -0.824 + 4.717 / RV
+        f99_c1 = 2.030 - 3.007 * f99_c2
+        f99_c3 = 3.23
+        f99_c4 = 0.41
+        f99_c5 = 5.9
+        f99_d1 = self.xk[7] ** 2 / ((self.xk[7] ** 2 - f99_x0 ** 2) ** 2 + (f99_gamma * self.xk[7]) ** 2)
+        f99_d2 = self.xk[8] ** 2 / ((self.xk[8] ** 2 - f99_x0 ** 2) ** 2 + (f99_gamma * self.xk[8]) ** 2)
+        yk = jnp.zeros((1, 9))
+        yk = yk.at[:, 0].set(-RV)
+        yk = yk.at[:, 1].set(0.26469 * RV / 3.1 - RV)
+        yk = yk.at[:, 2].set(0.82925 * RV / 3.1 - RV)
+        yk = yk.at[:, 3].set(-0.422809 + 1.00270 * RV + 2.13572e-4 * RV ** 2 - RV)
+        yk = yk.at[:, 4].set(-5.13540e-2 + 1.00216 * RV - 7.35778e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 5].set(0.700127 + 1.00184 * RV - 3.32598e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 6].set(
+            1.19456 + 1.01707 * RV - 5.46959e-3 * RV ** 2 + 7.97809e-4 * RV ** 3 - 4.45636e-5 * RV ** 4 - RV)
+        yk = yk.at[:, 7].set(f99_c1 + f99_c2 * self.xk[7] + f99_c3 * f99_d1)
+        self.yk = yk.at[:, 8].set(f99_c1 + f99_c2 * self.xk[8] + f99_c3 * f99_d2)
+
+        # A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])
+
+        c2 = -0.824 + 4.717 / RV
+        c1 = 2.030 - 3.007 * c2
+        x2 = self.uv_x * self.uv_x
+        y = x2 - f99_x0 * f99_x0
+        d = x2 / (y * y + x2 * f99_gamma * f99_gamma)
+        k = c1 + c2 * self.uv_x + f99_c3 * d
+        k = 1 + k / RV
+        self.k1 = k
+
+        y = self.uv_x - f99_c5
+        y2 = y * y
+        k += f99_c4 * (0.5392 * y2 + 0.05644 * y2 * y)
+        self.k2 = 1 + k / RV
+
+        # A = A.at[:, self.uv_ind1].set(AV[..., None] * (1. + k / RV[..., None]))
+        # A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[..., self.uv_ind3] / RV[..., None]))
 
         return weights
 
@@ -642,7 +732,7 @@ class SEDmodel(object):
 
         return model_spectra
 
-    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights):
         """
         Calculates observer-frame fluxes for given parameter values
 
@@ -693,13 +783,73 @@ class SEDmodel(object):
             jnp.arange(num_batch)
             .repeat(num_observations)
         ).astype(int)
+
+        lam_shifts = jnp.array([0, 0, 0, 0, 0])
+        # z = jnp.zeros(self.band_weights.shape[0])
+
+        def linterp(x, xp, fp):
+            return jnp.interp(x, xp, fp, left=0)
+
+        lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
+
+        new_model_wave = self.model_wave[None, :, None] - lam_shifts[None, None, :] * (1 + z[:, None, None])
+        new_model_wave = new_model_wave.transpose(0, 2, 1)
+        new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
+                                                 new_model_wave.shape[2]), order='F')
+        new_weights = weights.transpose(0, 2, 1)
+        new_weights = new_weights.reshape((new_weights.shape[0] * new_weights.shape[1], new_weights.shape[2]), order='F')
+        new_weights = lmap(self.model_wave, new_model_wave, new_weights)
+        new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
+
+        num = self.model_wave[None, :, None] * new_weights
+        denom = jnp.sum(0.5 * (num[:, :-1, :] + num[:, 1:, :]) * self.dlambda[None, :, None], axis=1)
+        weights = num / denom[:, None, :]
+        # weights /= weights.sum(axis=1)[:, None, :]
+
+        new_model_wave_obs = (self.model_wave[None, :, None] * (1 + z[:, None, None]) - lam_shifts[None, None, :]).transpose(1, 0, 2)
+        new_model_wave_obs_flat = new_model_wave_obs.reshape((new_model_wave_obs.shape[0] * new_model_wave_obs.shape[1] * new_model_wave_obs.shape[2]), order='F')
+
+        M_fitz_block = self.J_t_map(1e4 / new_model_wave_obs_flat, self.xk, self.KD_x)
+        M_fitz_block = M_fitz_block.reshape((*new_model_wave_obs.shape, M_fitz_block.shape[1]), order='F').transpose(1, 0, 2, 3)
+        A_MW = av_mw[:, None, None] * (1 + (M_fitz_block @ self.yk.T[None, None, ...]) / self.RV_MW)[..., 0]
+
+        weights *= 10 ** (-0.4 * A_MW)
+        weights /= (1 + z)[:, None, None]
+
+        # do UV Extension
+
+        # print(denom[0, 1])
+        # plt.plot(self.model_wave, weights[0, :, 1])
+        # # plt.plot(self.model_wave, self.test_weights[0, :, 1])
+        # plt.show()
+        # raise ValueError('Nope')
+
+        # plt.plot(self.model_wave, denom[])
+
+        # plt.plot(self.model_wave, weights[0, :, 1])
+        # plt.plot(self.model_wave, self.test_weights[0, :, 1])
+        # plt.show()
+        # raise ValueError('Nope')
+
+        # test_obs_band_weights = (
+        #     self.test_weights[batch_indices, :, band_indices.T.flatten()]
+        #     .reshape((num_batch, num_observations, -1))
+        #     .transpose(0, 2, 1)
+        # )
+        # test_model_flux = jnp.sum(model_spectra * test_obs_band_weights, axis=1).T
+
         obs_band_weights = (
             weights[batch_indices, :, band_indices.T.flatten()]
             .reshape((num_batch, num_observations, -1))
             .transpose(0, 2, 1)
         )
 
-        model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
+        wspec = model_spectra * obs_band_weights
+        model_flux = jnp.sum(0.5 * (wspec[:, :-1, :] + wspec[:, 1:, :]) * self.dlambda[None, :, None], axis=1).T
+        # print(model_flux[:, 0])
+        # print(test_model_flux[:, 0] / model_flux[:, 0])
+        # raise ValueError('Nope')
+        # model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
         model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds))
         zps = self.zps[band_indices]
         offsets = self.offsets[band_indices]
@@ -708,7 +858,7 @@ class SEDmodel(object):
         model_flux *= mask
         return model_flux
 
-    def get_mag_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+    def get_mag_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights):
         """
         Calculates observer-frame magnitudes for given parameter values
 
@@ -749,7 +899,7 @@ class SEDmodel(object):
         model_mag: array-like
             Matrix containing model magnitudes for all SNe at all time-steps
         """
-        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights)
+        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights)
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
@@ -1169,13 +1319,14 @@ class SEDmodel(object):
             redshift = obs[-5, 0, sn_index]
             redshift_error = obs[-4, 0, sn_index]
             muhat = obs[-3, 0, sn_index]
+            av_mw = obs[-2, 0, sn_index] * self.RV_MW
 
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights)
 
             with numpyro.handlers.mask(mask=mask):
