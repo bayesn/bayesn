@@ -732,7 +732,7 @@ class SEDmodel(object):
 
         return model_spectra
 
-    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift):
+    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift, mag_shift):
         """
         Calculates observer-frame fluxes for given parameter values
 
@@ -850,6 +850,8 @@ class SEDmodel(object):
         # raise ValueError('Nope')
         # model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
         model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds))
+        mag_shift = mag_shift[band_indices]
+        model_flux = model_flux * 10 ** (-0.4 * mag_shift)
         zps = self.zps[band_indices]
         offsets = self.offsets[band_indices]
         zp_flux = 10 ** (zps / 2.5)
@@ -857,7 +859,7 @@ class SEDmodel(object):
         model_flux *= mask
         return model_flux
 
-    def get_mag_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift):
+    def get_mag_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift, mag_shift):
         """
         Calculates observer-frame magnitudes for given parameter values
 
@@ -898,7 +900,7 @@ class SEDmodel(object):
         model_mag: array-like
             Matrix containing model magnitudes for all SNe at all time-steps
         """
-        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift)
+        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift, mag_shift)
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
@@ -1300,6 +1302,7 @@ class SEDmodel(object):
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, jnp.ones(self.band_weights.shape[-1]) * 5))
+        mag_shift = numpyro.sample('mag_shift', dist.Normal(0, jnp.ones(self.band_weights.shape[-1]) * 0.03))
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
@@ -1328,7 +1331,7 @@ class SEDmodel(object):
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
-                                      weights, lam_shift)
+                                      weights, lam_shift, mag_shift)
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1802,6 +1805,9 @@ class SEDmodel(object):
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+
+        param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1])
+        param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1]) + 0.02
 
         return param_init
 
