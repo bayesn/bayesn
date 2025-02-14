@@ -392,7 +392,7 @@ class SEDmodel(object):
             return f
 
         # Load filters------------------------------
-        band_weights, orig_band_weights, zps, offsets = [], [], [], []
+        band_weights, orig_band_weights, zps, offsets, wave_sigmas = [], [], [], [], []
         self.band_dict, self.zp_dict, self.band_lim_dict = {}, {}, {}
 
         # Prepare NULL band. This is a fake band with a very wide wavelength range used only for padded data points to
@@ -405,10 +405,12 @@ class SEDmodel(object):
         orig_band_weights.append(np.ones_like(band_wave))
         zps.append(10)
         offsets.append(0)
+        wave_sigmas.append(10)
 
         band_ind = 1
         for key, val in filter_dict['filters'].items():
             band, magsys, offset = key, val['magsys'], val['magzero']
+            wave_sigma = val.get('wave_sigma', 10)
             try:
                 R = np.loadtxt(val['path'])
             except:
@@ -476,6 +478,7 @@ class SEDmodel(object):
             self.zp_dict[band] = zp
             zps.append(zp)
             offsets.append(offset)
+            wave_sigmas.append(wave_sigma)
             band_ind += 1
 
         self.used_band_inds = np.array(list(self.band_dict.values()))
@@ -520,6 +523,12 @@ class SEDmodel(object):
              1e4 / 2600.])
         self.KD_x = device_put(invKD_irr(self.xk))
         self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, self.KD_x))
+
+        calib_cov = np.load(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_COV_V6.0.npz'))
+        # print(self.calib_cov)
+        self.calib_cov = calib_cov['cov']
+        self.calib_labels = np.loadtxt(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_CHCOV_labels.txt'), dtype=str)
+        self.wave_sigma = jnp.array(wave_sigmas)
 
     def _calculate_band_weights(self, redshifts, ebv):
         """
@@ -1301,8 +1310,10 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
-        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, jnp.ones(self.band_weights.shape[-1]) * 5))
-        mag_shift = numpyro.sample('mag_shift', dist.Normal(0, jnp.ones(self.band_weights.shape[-1]) * 0.03))
+        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+        mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
+
+        mag_shift = jnp.r_[0, mag_shift]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
@@ -3059,10 +3070,17 @@ class SEDmodel(object):
             else:
                 self.data = device_put(flux_data)
             self.J_t = device_put(J_t)
+            calib_inds = []
+            for band in used_bands[1:]:
+                calib_inds.append(np.where(self.calib_labels == band)[0][0])
+            calib_inds = jnp.array(calib_inds)
+            calib_cov = self.calib_cov[jnp.ix_(calib_inds, calib_inds)]
+            self.calib_chcov = jnp.linalg.cholesky(calib_cov)
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
+            self.wave_sigma = self.wave_sigma[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data

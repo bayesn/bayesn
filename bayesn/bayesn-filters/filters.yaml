@@ -253,6 +253,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/g_filt_revised.txt
+    wave_sigma: 7
   g_prime:
     magsys: bd17
     magzero: 9.64
@@ -278,6 +279,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/i_filt_tonry.txt
+    wave_sigma: 7
   i_prime:
     magsys: bd17
     magzero: 9.25
@@ -323,6 +325,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/r_filt_tonry.txt
+    wave_sigma: 7
   r_prime:
     magsys: bd17
     magzero: 9.35
@@ -361,6 +364,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/y_filt_tonry.txt
+    wave_sigma: 7
   z_DES:
     magsys: ab
     magzero: 0.0
@@ -374,6 +378,7 @@ filters:
     magsys: ab
     magzero: 0.0
     path: filters/PS1/z_filt_tonry.txt
+    wave_sigma: 7
   z_prime:
     magsys: bd17
     magzero: 9.23
