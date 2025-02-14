@@ -1818,7 +1818,7 @@ class SEDmodel(object):
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
         param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1])
-        param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1]) + 0.02
+        param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1] - 1) + 0.005
 
         return param_init
 
