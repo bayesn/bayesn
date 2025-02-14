@@ -2404,7 +2404,7 @@ class SEDmodel(object):
                 'L_SIGMA_EPSILON': L_Sigma.tolist()
             }
 
-            if 'singlerv' in args['mode'].lower():
+            if 'globalrv' in args['mode'].lower():
                 yaml_data['RV'] = float(np.mean(samples['RV']))
             elif 'poprv' in args['mode'].lower():
                 yaml_data['MUR'] = float(np.mean(samples['mu_R']))
