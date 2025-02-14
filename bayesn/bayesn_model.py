@@ -411,6 +411,7 @@ class SEDmodel(object):
         for key, val in filter_dict['filters'].items():
             band, magsys, offset = key, val['magsys'], val['magzero']
             wave_sigma = val.get('wave_sigma', 10)
+            mag_update = val.get('magupdate', 0)
             try:
                 R = np.loadtxt(val['path'])
             except:
@@ -469,6 +470,8 @@ class SEDmodel(object):
             else:
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
+
+            offset = offset + mag_update
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
