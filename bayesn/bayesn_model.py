@@ -881,6 +881,62 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
+    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+        """
+        Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
+        as theta, epsilon, AV and distance modulus.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
+
+        Returns
+        -------
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
     def fit_model_globalRV_vi(self, obs, weights):
         """
         Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
@@ -1644,7 +1700,7 @@ class SEDmodel(object):
         if args['keep_list'] is not None:
             keep_list = pd.read_csv(args['keep_list'], comment='#', delim_whitespace=True)
             if keep_list.shape[1] == 1:
-                keep_list = np.loadtxt(args['keep_list'])
+                keep_list = pd.read_csv(args['keep_list'], header=None)[0].astype(str).values
             else:
                 if 'CID' in keep_list.columns:
                     keep_list = keep_list.CID.values
@@ -1826,7 +1882,7 @@ class SEDmodel(object):
 
                 """
                 optimizer = Adam(0.01)
-                model = self.fit_model_globalRV
+                model = self.fit_model_globalRV_noeps
                 sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
                 # First start with the Laplace Approximation
                 laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
@@ -1838,6 +1894,7 @@ class SEDmodel(object):
 
                 # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
+                new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
                 model = self.fit_model_globalRV_vi
                 zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
 
@@ -2436,7 +2493,7 @@ class SEDmodel(object):
                             args['njobtot'] = args['jobsplit'][1]
                     SNID = np.char.strip(head_data['SNID'])
                     n_sne = SNID.shape[0]
-                    # head_data['SNID'][:] = np.char.strip(head_data['SNID'])
+                    head_data['SNID'][:] = np.char.strip(head_data['SNID'])
                     use_in_run = (np.arange(1, n_sne + 1) - args['jobid']) % args['njobtot'] == 0
                     idx = np.where(use_in_run)[0]
                     for sn_ind in idx:
