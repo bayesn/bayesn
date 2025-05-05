@@ -2966,7 +2966,7 @@ class SEDmodel(object):
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
-                    sn, peak_mjd, file = row.values
+                    sn, peak_mjd, file, mass = row.values
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(args['data_root'], file)
                     with open(path, 'r') as file:
@@ -3028,7 +3028,9 @@ class SEDmodel(object):
                     data['redshift'] = zhel
                     data['redshift_error'] = 5e-4
                     data['MWEBV'] = mwebv
-                    data['mass'] = -99
+                    data['mass'] = mass
+                    if args['mode'] in ['training_mass_step', 'training_mass_split'] and mass < -10:
+                        continue
                     data['dist_mod'] = self.cosmo.distmod(zhel)
                     data['mask'] = 1
                     lc = data[
