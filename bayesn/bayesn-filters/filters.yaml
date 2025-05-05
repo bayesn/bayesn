@@ -407,10 +407,6 @@ filters:
     magsys: vega
     magzero: 0.00047
     path: filters/CTIO/ANDICAM/Kandicam.dat
-  K_CMO:
-    magsys: vega
-    magzero: 0.0
-    path: filters/CMO/2.5-m/F051KSMK.dat
   K_NIRI:
     magsys: vega
     magzero: 0.0
@@ -448,6 +444,10 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/standard/2MASS_PAIRITEL/2MASS_PAIRITEL_Ks.dat
+  Ks_CMO:
+    magsys: vega
+    magzero: 0.0
+    path: filters/CMO/2.5-m/F051KSMK.dat
   Ks_CSP:
     magsys: vega
     magzero: 0.0

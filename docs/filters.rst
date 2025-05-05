@@ -68,7 +68,7 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
     - 2.5m *JHK* filters
 
-        - Names: `J_CMO`, `H_CMO`, `K_CMO`
+        - Names: `J_CMO`, `H_CMO`, `Ks_CMO`
         - Source: Tomas Muller-Bravo
 
 - Cerro Tololo Inter-American Observatory (CTIO)
