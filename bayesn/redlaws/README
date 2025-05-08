@@ -1,0 +1,101 @@
+Each reddening law is specified as A(x)/A(V) = a(x) + b(x)/RV where a(x)
+and b(x) are specified as linear combinations of the following function:
+x**REGIME_EXP * (P(x) + R(x)/D(x)) * (modified_Drude(x, amp, center, fwhm, asym))
+where P, R, and D are all standard polynomials and modified_Drude is defined as:
+amp*((gamma/center)**2 / ((1/(x*center) - x*center)**2 + (gamma/center)**2)
+where
+gamma = 2*fwhm / (1 + exp(asym * (1/x - center)))
+where x is in wavenumber.
+If Drude parameters are not declared, the function is set to 1.
+
+If L_KNOTS is provided in the yaml file, b(x) is instead defined as a natural
+cubic spline with knots at L_KNOTS and values defined by RV**MIN_ORDER times
+a polynomial function of RV with coefficients given by RV_COEFFS.
+
+The recognized YAML keywords and their descriptions are as follows:
+
+UNITS: str
+    Default = "inverse microns"
+    Units for use with L_KNOTS, A/B_POLY_COEFFS, etc.
+    Checked for the sub-strings "inverse" or "micron" when converting
+    SEDmodel.model_wave, which is in Angstroms.
+L_KNOTS: list of floats
+    No default value.
+    Locations of spline knots if used for calculating b(x).
+    If this keyword is present, the reddening law will calculate b(x) as
+    a spline and ignore any B_whatever_COEFFS that may be defined later.
+MIN_ORDER: int
+    Default = 0.
+    Corrective factor applied to the RV_COEFFS polynomial, allowing for negative
+    RV exponents.
+    Example:
+        if a knot's RV_COEFFS list is [m, n, p] and MIN_ORDER is -1
+        the spline value at that knot is given by
+        m*RV**1 + n*RV**0 + p*RV**(-1)
+RV_COEFFS: list of lists of floats
+    Default = [[1]]
+    The primary list must contain one list for each knot specified in L_KNOTS.
+    Each sublist contains the polynomial coefficients for calculating spline
+    knot values as a function of RV.
+REGIMES: list of 2-tuples of floats
+    Default = [[0, 10]]
+    Some reddening laws are piecewise functions of wavenumber/wavelength.
+    The length of the primary list defines the number of subdomains (N).
+    Each sublist list contains a pair denoting the start (inclusive) and
+    end (exclusive) values of the corresponding subdomain.
+REGIME_EXP: list of floats
+    Default = jnp.zeros((N, 1))
+    A list containing a float for each subdomain.
+    The float is used to modify the polynomial function for that subdomain.
+    Example:
+        The CCM89 dust law for 0.3 <= x < 1.1 inverse microns is given as
+        A(x)/A(V) = a(x) + b(x) / RV = 0.574*x**1.61 - 0.527*x**1.61 / RV.
+        One can specify this with polynomial coefficients of [0.574, 0] for a(x),
+        [-0.527, 0] for b(x), and 0.61 for REGIME_EXP[0], or [0.574], [-0.527],
+        and 1.61 respectively.
+{A,B}_POLY_COEFFS: list of lists of floats
+    Default = jnp.ones((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the P(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))
+{A,B}_REMAINDER_COEFFS: list of lists of floats
+    Default = jnp.zeros((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the R(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))
+{A,B}_DIVISOR_COEFFS: list of lists of floats
+    Default = jnp.zeros((N, 1))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains polynomial coefficients for the D(x) part of the definition
+    {a,b}(x) = x**REGIME_EXP * (P(x) + R(x)/D(x))
+{A,B}_DRUDE_PARAMS: list of lists of floats
+    Default = jnp.zeros((N, 4))
+    The primary list contains a list for each subdomain specified by REGIME_WLS.
+    Each sublist contains the modified Drude parameters amp, center, fwhm, asym.
+    Example:
+        The G23 dust law for 1/6.69747 <= x < 1/1.91409 is given as
+        A(x)/A(V) = a(x) + b(x)*(1/Rv + 1/3.1) where
+        a(x) = 0.38526*x**1.68467 * (1 - weights)
+               + 0.38526 * 4.30578**0.89676 * x**0.78791 * weights
+               + modified_drude(0.06652, 9.8434, 2.21205, -0.24703)
+               + modified_drude(0.0267 , 19.58294, 17., -0.27)
+        where weights(x) = 0.60851852 + (-2 + 25.83468*x - 76.91736211*x**2)/(109.44719864*x**3)
+        a(x) is split across regimes 2, 3, 5, and 6 with
+
+        REGIME_EXPS[2] = 1.68467
+        A_POLY_COEFFS[2] = [0.15082215364048682]
+        A_REMAINDER_COEFFS[2] = [29.6331829279626, -9.953068816800002, 0.77052]
+        A_DIVISOR_COEFFS[2] = [109.44719864051054, 0.0, 0.0, 0.0]
+
+        REGIME_EXPS[3] = 0.78791
+        A_POLY_COEFFS[3] = [0.0633046188837922]
+        A_REMAINDER_COEFFS[3] = [-8.001768403432733, 2.6876003083796163, -0.20806143589776344]
+        A_DIVISOR_COEFFS[3] = [109.44719864051054, 0.0, 0.0, 0.0]
+
+        REGIME_EXPS[5] = 0
+        A_POLY_COEFFS[5] = [1]
+        A_DRUDE_PARAMS[5] = [0.06652, 9.8434, 2.21205, -0.24703]
+
+        REGIME_EXPS[6] = 0
+        A_POLY_COEFFS[6] = [1]
+        A_DRUDE_PARAMS[6] = [0.0267, 19.58294, 17.0, -0.27]

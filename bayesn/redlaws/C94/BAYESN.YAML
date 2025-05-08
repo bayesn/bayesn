@@ -1,0 +1,8 @@
+UNITS: inverse microns
+WAVE_RANGE: [1.25, 8]
+REGIMES:
+- [1.25, 8.0]
+A_POLY_COEFFS:
+- [0.011, -0.198, 1.509, -2.156]
+B_REMAINDER_COEFFS:
+- [1.16]
