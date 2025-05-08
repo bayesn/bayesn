@@ -841,7 +841,15 @@ filters:
   g_ZTF:
     magsys: ab
     magzero: 0.0
-    path: filters/Palomar/P48/ZTF/P48_g.dat
+    path: filters/Palomar/P48/ZTF/g_average.dat
+  g_ZTF_single:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/g_single.dat
+  g_ZTF_multi:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/g_multi.dat
   g_prime:
     magsys: bd17
     magzero: 9.64
@@ -906,7 +914,15 @@ filters:
   i_ZTF:
     magsys: ab
     magzero: 0.0
-    path: filters/Palomar/P48/ZTF/P48_i.dat
+    path: filters/Palomar/P48/ZTF/i_average.dat
+  i_ZTF_single:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/i_single.dat
+  i_ZTF_multi:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/i_multi.dat
   i_prime:
     magsys: bd17
     magzero: 9.25
@@ -983,7 +999,15 @@ filters:
   r_ZTF:
     magsys: ab
     magzero: 0.0
-    path: filters/Palomar/P48/ZTF/P48_r.dat
+    path: filters/Palomar/P48/ZTF/r_average.dat
+  r_ZTF_single:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/r_single.dat
+  r_ZTF_multi:
+    magsys: ab
+    magzero: 0.0
+    path: filters/Palomar/P48/ZTF/r_multi.dat
   r_prime:
     magsys: bd17
     magzero: 9.35
