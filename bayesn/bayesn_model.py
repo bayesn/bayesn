@@ -3011,8 +3011,6 @@ class SEDmodel(object):
                         if f not in used_bands:
                             used_bands.append(f)
                             used_band_dict[self.band_dict[f]] = len(used_bands) - 1
-                    if data.empty:
-                        continue
                     # zps = data.FLT.apply(lambda x: self.zp_dict[x])
                     # zp_flux = 10 ** (zps / 2.5)
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
@@ -3038,6 +3036,8 @@ class SEDmodel(object):
                          'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                    if lc.empty:
+                        continue
                     all_lcs.append(lc)
                     n_obs.append(lc.shape[0])
                     sne.append(sn)
@@ -3050,6 +3050,8 @@ class SEDmodel(object):
             lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
+                if lc.empty:
+                    print(sne[i])
                 save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
                 save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
                 save_lc.insert(loc=0, column='CID', value=sne[i])
@@ -3057,6 +3059,7 @@ class SEDmodel(object):
                 lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+            raise ValueError('Nope')
             all_data = all_data.T
             t = all_data[0, ...]
             keep_shape = t.shape
