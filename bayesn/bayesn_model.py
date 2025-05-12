@@ -3050,8 +3050,6 @@ class SEDmodel(object):
             lcplot_data = pd.DataFrame()
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
-                if lc.empty:
-                    print(sne[i])
                 save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
                 save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
                 save_lc.insert(loc=0, column='CID', value=sne[i])
@@ -3059,7 +3057,6 @@ class SEDmodel(object):
                 lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
-            raise ValueError('Nope')
             all_data = all_data.T
             t = all_data[0, ...]
             keep_shape = t.shape
