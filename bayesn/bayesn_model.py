@@ -2876,7 +2876,7 @@ class SEDmodel(object):
         -------
 
         """
-        if 'W0' in samples.keys() and 'sigmaepsilon' in samples.keys():  # If training
+        if 'W0' in samples.keys() and 'sigmaepsilon' in samples.keys() and 'sigma0_HM' not in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
             # Sign flipping-----------------
