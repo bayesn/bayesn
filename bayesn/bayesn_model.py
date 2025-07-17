@@ -53,6 +53,7 @@ jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
+
 # jax.config.update('jax_platform_name', 'cpu')  # Forces CPU
 
 
@@ -749,7 +750,8 @@ class SEDmodel(object):
         model_mag: array-like
             Matrix containing model magnitudes for all SNe at all time-steps
         """
-        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights)
+        model_flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp,
+                                         weights)
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
@@ -847,7 +849,8 @@ class SEDmodel(object):
 
         return model_spectra
 
-    def get_flux_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+    def get_flux_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp,
+                            weights):
         """
         Calculates observer-frame fluxes for given parameter values
 
@@ -912,7 +915,9 @@ class SEDmodel(object):
         model_flux = (model_flux / zp_flux) * 10 ** (0.4 * (27.5 - offsets))  # Convert to FLUXCAL
         model_flux *= mask
         return model_flux
-    def get_mag_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+
+    def get_mag_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp,
+                           weights):
         """
         Calculates observer-frame magnitudes for given parameter values
 
@@ -953,7 +958,8 @@ class SEDmodel(object):
         model_mag: array-like
             Matrix containing model magnitudes for all SNe at all time-steps
         """
-        model_flux = self.get_flux_batch_cint(M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights)
+        model_flux = self.get_flux_batch_cint(M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t,
+                                              hsiao_interp, weights)
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
@@ -1379,7 +1385,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
                                       weights)
 
             with numpyro.handlers.mask(mask=mask):
@@ -1413,7 +1420,7 @@ class SEDmodel(object):
         W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
         Wc = numpyro.deterministic('Wc', jnp.reshape(Wc, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F'))
 
-        mu_cint = 0 # numpyro.sample('mu_cint', dist.Uniform(-0.3, 0.3))
+        mu_cint = 0  # numpyro.sample('mu_cint', dist.Uniform(-0.3, 0.3))
         sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
         # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
@@ -1533,7 +1540,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+                                      self.hsiao_interp,
                                       weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1593,7 +1601,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1661,7 +1670,8 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(self.M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1718,7 +1728,8 @@ class SEDmodel(object):
             Av = numpyro.deterministic('AV', HM_flag * Av_HM + (1 - HM_flag) * Av_LM)
 
             Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
-            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
+            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(
+                phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
             Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
             Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
                 phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
@@ -1748,7 +1759,8 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(M0, theta, Av, self.W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
                                        weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1814,7 +1826,8 @@ class SEDmodel(object):
             Av = numpyro.deterministic('AV', HM_flag * Av_HM + (1 - HM_flag) * Av_LM)
 
             Rv_tform_HM = numpyro.sample('Rv_tform_HM', dist.Uniform(0, 1))
-            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
+            Rv_HM = numpyro.deterministic('Rv_HM', mu_R_HM + sigma_R_HM * ndtri(
+                phi_alpha_R_HM + Rv_tform_HM * (1 - phi_alpha_R_HM)))
             Rv_tform_LM = numpyro.sample('Rv_tform_LM', dist.Uniform(0, 1))
             Rv_LM = numpyro.deterministic('Rv_LM', mu_R_LM + sigma_R_LM * ndtri(
                 phi_alpha_R_LM + Rv_tform_LM * (1 - phi_alpha_R_LM)))
@@ -1844,8 +1857,9 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t, self.hsiao_interp,
-                                      weights)
+            flux = self.get_flux_batch(self.M0, theta, Av, W0, self.W1, eps, Ds, Rv, band_indices, mask, self.J_t,
+                                       self.hsiao_interp,
+                                       weights)
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1936,10 +1950,18 @@ class SEDmodel(object):
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
-        param_init['Wc_red'] = jnp.array(np.random.normal(size=self.l_knots.shape[0] * self.tau_knots.shape[0] - 1))
         param_init['mu_cint'] = jnp.array(0.)
         param_init['sigma_cint'] = jnp.array(0.1)
         param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
+
+        # Vaguely sensible starting point
+        param_init['Wc_red'] = jnp.array([-0.11419167, 0.54104733, 0.19320635, 0.34390596, 0.8283132,
+                                          -0.07884289, -1.4435745, 1.1694543, 0.10569326, -0.05316356,
+                                          -0.81321615, 0.78416634, 0.5783348, -0.2910077, -0.90266454,
+                                          -0.81026316, 0.2159231, 0.60019666, 1.0834885, -0.9720504,
+                                          -1.8057108, -1.1563765, 0.57188845, -0.2542837, 1.1017582,
+                                          -0.3566391, -1.2445877, -1.5888847, 0.01582221, -0.02114596,
+                                          0.7664986, -0.37107772, -0.5672312, -0.82566935, -0.08742975])
 
         return param_init
 
@@ -2101,7 +2123,8 @@ class SEDmodel(object):
 
         # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
-        if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
+        if args['mode'].lower() == 'fitting' and args[
+            'fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
             def fit_vmap_mcmc(data, weights):
                 """
                 Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
@@ -2206,8 +2229,8 @@ class SEDmodel(object):
             end = timeit.default_timer()
         else:
             mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
-                    num_chains=args['num_chains'],
-                    chain_method=args['chain_method'])
+                        num_chains=args['num_chains'],
+                        chain_method=args['chain_method'])
             rng = PRNGKey(0)
             start = timeit.default_timer()
 
@@ -2443,7 +2466,8 @@ class SEDmodel(object):
         muhat_err = 5
         Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
         samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-            np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+                                         np.power(Ds_err, 2), np.sqrt(
+            (np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
         samples['delM'] = samples['Ds'] - samples['mu']
         if fix_tmax:
             samples['tmax'] = jnp.zeros_like(samples['tmax'])
@@ -2549,7 +2573,7 @@ class SEDmodel(object):
             samples['delM'] = samples['Ds'] - samples['mu']
             if 'tmax' in samples.keys():  # Convert tmax samples into peak_MJD samples
                 samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
-                            1 + z_HEL[None, None, :])
+                        1 + z_HEL[None, None, :])
 
             # Create lcplot file
             muhat_err = 5
@@ -2632,7 +2656,9 @@ class SEDmodel(object):
                        [col for col in self.fitres_table.columns if 'SIM' in col]
             self.fitres_table = self.fitres_table[new_cols]
 
-            sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
+            sncosmo.write_lc(self.fitres_table,
+                             os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana",
+                             metachar="")
 
         if args['snana']:
             self.end_time = time.time()
@@ -2697,7 +2723,8 @@ class SEDmodel(object):
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
                 # Look in standard public repositories for real data/simulations
                 dir_list = ['SNDATA_ROOT/lcmerge', 'SNDATA_ROOT/SIM']
-                sim_list = np.loadtxt(os.path.join(os.environ.get('SNDATA_ROOT'), 'SIM', 'PATH_SNDATA_SIM.LIST'), dtype=str)
+                sim_list = np.loadtxt(os.path.join(os.environ.get('SNDATA_ROOT'), 'SIM', 'PATH_SNDATA_SIM.LIST'),
+                                      dtype=str)
                 dir_list = dir_list + list([sim_dir[1:] for sim_dir in sim_list])
                 pdp = [path[1:] if path[0] == '$' else path for path in args['private_data_path']]
                 dir_list = dir_list + pdp  # Add any private data directories
@@ -2972,7 +2999,7 @@ class SEDmodel(object):
                     else:
                         snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
                         lc_snr3 = lc_snr2[lc_snr2.band_indices !=
-                                      lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                                          lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
                         if lc_snr3.shape[0] == 0:
                             snrmax3 = -99
                         else:
@@ -3041,7 +3068,8 @@ class SEDmodel(object):
                                       'SIM_THETA', 'SIM_AV', 'SIM_RV'])
             else:
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
-                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                                vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s,
+                                snrmax3s],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
@@ -3075,7 +3103,7 @@ class SEDmodel(object):
                     else:
                         peak_mjd = meta['SEARCH_PEAKMJD']
                     if 'BAND' in data.columns:  # This column can have different names which can be confusing, let's
-                                                # just rename it so it's always the same
+                        # just rename it so it's always the same
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
                     zhel = meta['REDSHIFT_HELIO']
@@ -3104,7 +3132,8 @@ class SEDmodel(object):
                     data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
                     data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
                     data['flux'] = data['FLUXCAL']
-                    data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
+                    data['flux_err'] = np.max(
+                        np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
                     data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
                     data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
@@ -3380,7 +3409,9 @@ class SEDmodel(object):
         keep_shape = t.shape
         t = t.flatten(order='F')
         map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
-        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,2,0)
+        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,
+                                                                                                                     2,
+                                                                                                                     0)
         spectra = self.get_spectra(theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp)
 
         # Host extinction
@@ -3396,7 +3427,8 @@ class SEDmodel(object):
         return l_o, spectra, param_dict
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
-                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
+                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True,
+                             write_to_files=False,
                              output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
@@ -3599,10 +3631,12 @@ class SEDmodel(object):
                                                                                                                      0)
         t = t.reshape(keep_shape, order='F')
         if mag:
-            data = self.get_mag_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
+            data = self.get_mag_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask,
+                                      J_t,
                                       hsiao_interp, band_weights)
         else:
-            data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask, J_t,
+            data = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices, mask,
+                                       J_t,
                                        hsiao_interp, band_weights)
         # Apply error if specified
         yerr = jnp.array(yerr)
@@ -3799,16 +3833,18 @@ class SEDmodel(object):
             del_M = chains['delM'][..., i].flatten(order='F')
 
             theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
+                                              eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
             if 'RV' in chains.keys():
                 RV = RV[:num_samples, ...]
             if mean:
-                theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+                theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], \
+                                                  eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
 
             if self.band_weights is not None:
                 self.band_weights = band_weights[i:i + 1, ...]
 
-            lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu, tmax=tmax,
+            lc, lc_err, params = self.simulate_light_curve(t, theta.shape[0], fit_bands, theta=theta, AV=AV, mu=mu,
+                                                           tmax=tmax,
                                                            del_M=del_M, eps=eps, RV=RV, z=zs[i], write_to_files=False,
                                                            ebv_mw=ebv_mws[i], yerr=0, mag=mag)
             lc = lc.T
