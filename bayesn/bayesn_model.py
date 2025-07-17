@@ -798,6 +798,15 @@ class SEDmodel(object):
 
         W = W0 + theta[..., None, None] * W1 + cint[..., None, None] * Wc + eps
 
+        # print(Wc.shape, self.J_l_T.shape, jnp.matmul(self.J_l_T, Wc).shape)
+        # plt.plot(self.model_wave, jnp.matmul(self.J_l_T, Wc)[:, 1])
+        # plt.vlines([4900, 6200], -1.5, 1.3, ls='--')
+        # print(self.model_wave[100], self.model_wave[171])
+        # print(jnp.matmul(self.J_l_T, Wc)[100, 1], jnp.matmul(self.J_l_T, Wc)[171, 1])
+        # print(jnp.matmul(self.J_l_T, Wc)[100, 1] - jnp.matmul(self.J_l_T, Wc)[171, 1])
+        # plt.show()
+        # raise ValueError('Nope')
+
         WJt = jnp.matmul(W, J_t)
         W_grid = jnp.matmul(self.J_l_T, WJt)
 
@@ -1424,11 +1433,11 @@ class SEDmodel(object):
         sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
         # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
-        sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
-                                            dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
-        sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
-        L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
-        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+        # sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
+        #                                     dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
+        # sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
+        # L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        # L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
@@ -1448,14 +1457,14 @@ class SEDmodel(object):
 
             eps_mu = jnp.zeros(N_knots_sig)
             # eps = numpyro.sample('eps', dist.MultivariateNormal(eps_mu, scale_tril=L_Sigma))
-            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
-            eps_tform = eps_tform.T
-            eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
-            eps = eps.T
-            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
-            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            eps = eps_full.at[:, 1:-1, :].set(eps)
-            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            # eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            # eps_tform = eps_tform.T
+            # eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
+            # eps = eps.T
+            # eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            # eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            # eps = eps_full.at[:, 1:-1, :].set(eps)
+            eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
 
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
@@ -2534,8 +2543,11 @@ class SEDmodel(object):
             W1 = np.mean(samples['W1'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
                                                              order='F')
 
-            L_Sigma = np.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
-                                np.mean(samples['L_Omega'], axis=[0, 1]))
+            if 'sigmaepsilon' in samples.keys():
+                L_Sigma = np.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
+                                    np.mean(samples['L_Omega'], axis=[0, 1]))
+            else:
+                L_Sigma = np.array([0])
             sigma0 = np.mean(samples['sigma0'])
 
             tauA = np.mean(samples['tauA'])
@@ -3673,6 +3685,279 @@ class SEDmodel(object):
             raise ValueError('If writing to SNANA files, please generate mags')
         return data, yerr, param_dict
 
+    def simulate_light_curve_cint(self, t, N, bands, model_path, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
+                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, cint=None, mag=True,
+                             write_to_files=False, output_dir=None):
+        """
+        Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
+        files if requested
+
+        Parameters
+        ----------
+        t: array-like
+            Set of t values to simulate spectra at. If len(t) == len(bands), will assume that the t values
+            correspond to the bands. Otherwise, will simulate photometry at each value of t for each band.
+        N: int
+            Number of separate objects to simulate spectra for
+        bands: array-like
+            List of bands in which to simulate photometry. If len(t) == len(bands), will assume that the t values
+            correspond to the bands. Otherwise, will simulate photometry at each value of t for each band.
+        yerr: float or array-like, optional
+            Uncertainties for each data point, simulated light curves will be randomised assuming a Gaussian uncertainty
+            around the true values. Can be either a float, meaning that the same value will be used for each data point,
+            a 1d array of length equal to each light curve, meaning that these values will be used for each simulated
+            light curve, or a 2d array of shape (N, light curve length) allowing you to specify each individual error.
+            Defaults to 0, meaning that exact model photometry will be returned.
+        err_type: str
+            Specifies which type of error you are passing, either 'mag' or 'flux'. Defaults to 'mag', meaning that this
+            is in mag units. If you want to simulate fluxes and pass a mag error, it will be converted to a flux error.
+        z: float or array-like, optional
+            Redshift to simulate spectra at, affecting observer-frame wavelengths and reducing spectra by factor of
+            (1+z). Defaults to 0. If passing an array-like object, there must be a corresponding value for each of the N
+            simulated objects. If a float is passed, the same redshift will be used for all objects.
+        zerr: float, optional
+            Error on spectroscopic redshifts, only needed when saving to SNANA-format light curve files
+        mu: float, array-like or str, optional
+            Distance modulus to simulate spectra at. Defaults to 0. If passing an array-like object, there must be a
+            corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects. If set to 'z', distance moduli corresponding to the redshift values passed in the default
+            model cosmology will be used. Technically these are heliocentric redshifts rather than Hubble diagram
+            redshifts so won't be perfect, but can be useful sometimes.
+        ebv_mw: float or array-like, optional
+            Milky Way E(B-V) values for simulated spectra. Defaults to 0. If passing an array-like object, there must be
+            a corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects.
+        RV: float or array-like, optional
+            RV values for host extinction curves for simulated spectra. If passing an array-like object, there must be a
+            corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects. Defaults to None, in which case the global RV value for the BayeSN model loaded when
+            initialising SEDmodel will be used.
+        logM: float or array-like, optional
+            Currently unused, will be implemented when split models are included
+        tmax: float or array-like, optional
+            Time of maximum in rest-frame days, useful for plotting light curve fits with free tmax. Defaults to 0, i.e.
+            the simulated time of maximum will be at 0 days. If a float is passed, the same value will be used
+            for all objects.
+        del_M: float or array-like, optional
+            Grey offset del_M value to be used for each SN. If passing an array-like object, there must be a
+            corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects. Defaults to None, in which case the prior distribution will be sampled for each object.
+        AV: float or array-like, optional
+            Host extinction RV value to be used for each SN. If passing an array-like object, there must be a
+            corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects. Defaults to None, in which case the prior distribution will be sampled for each object.
+        theta: float or array-like, optional
+            Theta value to be used for each SN. If passing an array-like object, there must be a
+            corresponding value for each of the N simulated objects. If a float is passed, the same value will be used
+            for all objects. Defaults to None, in which case the prior distribution will be sampled for each object.
+        eps: array-like or int, optional
+            Epsilon values to be used for each SN. If passing a 2d array, this must be of shape (l_knots, tau_knots)
+            and will be used for each SN generated. If passing a 3d array, this must be of shape (N, l_knots, tau_knots)
+            and provide an epsilon value for each generated SN. You can also pass 0, in which case an array of zeros of
+            shape (N, l_knots, tau_knots) will be used and epsilon is effectively turned off. Defaults to None, in which
+            case the prior distribution will be sampled for each object.
+        mag: Bool, optional
+            Determines whether returned values are mags or fluxes
+        write_to_files: Bool, optional
+            Determines whether to save simulated light curves to SNANA-format light curve files, defaults to False
+        output_dir: str, optional
+            Path to output directory to save simulated SNANA-format files, onl required if write_to_files=True
+
+        Returns
+        -------
+        data: array-like
+            Array containing simulated flux or mag values
+        yerr: array-like
+            Aray containing corresponding errors for each data point
+        param_dict: dict
+            Dictionary of corresponding parameter values for each simulated object
+
+        """
+
+        with open(model_path, 'rb') as file:
+            samples = pickle.load(file)
+
+        W0 = jnp.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                                         order='F')
+        W1 = jnp.mean(samples['W1'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                                         order='F')
+        Wc = jnp.mean(samples['Wc'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                                         order='F')
+
+        L_Sigma = jnp.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
+                            np.mean(samples['L_Omega'], axis=[0, 1]))
+        self.L_Sigma = L_Sigma
+        sigma0 = jnp.mean(samples['sigma0'])
+        sigma_cint = jnp.mean(samples['sigma_cint'])
+
+        tauA = jnp.mean(samples['tauA'])
+
+        if del_M is None:
+            del_M = self.sample_del_M(N)
+        else:
+            del_M = np.array(del_M)
+            if len(del_M.shape) == 0:
+                del_M = del_M.repeat(N)
+            elif del_M.shape[0] != N:
+                raise ValueError('If not providing a scalar del_M value, array must be of same length as the number of '
+                                 'objects to simulate, N')
+        if cint is None:
+            cint = np.random.normal(0, sigma_cint, N)
+        else:
+            cint = np.array(cint)
+            if len(cint.shape) == 0:
+                cint = cint.repeat(N)
+            elif cint.shape[0] != N:
+                raise ValueError('If not providing a scalar cint value, array must be of same length as the number of '
+                                 'objects to simulate, N')
+        if AV is None:
+            AV = self.sample_AV(N)
+        else:
+            AV = np.array(AV)
+            if len(AV.shape) == 0:
+                AV = AV.repeat(N)
+            elif AV.shape[0] != N:
+                raise ValueError('If not providing a scalar AV value, array must be of same length as the number of '
+                                 'objects to simulate, N')
+        if theta is None:
+            theta = self.sample_theta(N)
+        else:
+            theta = np.array(theta)
+            if len(theta.shape) == 0:
+                theta = theta.repeat(N)
+            elif theta.shape[0] != N:
+                raise ValueError('If not providing a scalar theta value, array must be of same length as the number of '
+                                 'objects to simulate, N')
+        if eps is None:
+            eps = self.sample_epsilon(N)
+        elif len(np.array(eps).shape) == 0:
+            eps = np.array(eps)
+            if eps == 0:
+                eps = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            else:
+                raise ValueError(
+                    'For epsilon, please pass an array-like object of shape (N, l_knots, tau_knots). The only scalar '
+                    'value accepted is 0, which will effectively remove the effect of epsilon')
+        elif len(eps.shape) != 3 or eps.shape[0] != N or eps.shape[1] != self.l_knots.shape[0] or eps.shape[2] != \
+                self.tau_knots.shape[0]:
+            raise ValueError('For epsilon, please pass an array-like object of shape (N, l_knots, tau_knots)')
+        ebv_mw = np.array(ebv_mw)
+        if len(ebv_mw.shape) == 0:
+            ebv_mw = ebv_mw.repeat(N)
+        elif ebv_mw.shape[0] != N:
+            raise ValueError(
+                'For ebv_mw, either pass a single scalar value or an array of values for each of the N simulated objects')
+        tmax = np.array(tmax)
+        if len(tmax.shape) == 0:
+            tmax = tmax.repeat(N)
+        elif tmax.shape[0] != N:
+            raise ValueError('If not providing a scalar tmax value, array must be of same length as the number of '
+                             'objects to simulate, N')
+        if RV is None:
+            RV = self.RV
+        RV = np.array(RV)
+        if len(RV.shape) == 0:
+            RV = RV.repeat(N)
+        elif RV.shape[0] != N:
+            raise ValueError(
+                'For RV, either pass a single scalar value or an array of values for each of the N simulated objects')
+        z = np.array(z)
+        if len(z.shape) == 0:
+            z = z.repeat(N)
+        elif z.shape[0] != N:
+            raise ValueError(
+                'For z, either pass a single scalar value or an array of values for each of the N simulated objects')
+        if type(mu) == str and mu == 'z':
+            mu = self.cosmo.distmod(z).value
+        else:
+            mu = np.array(mu)
+            if len(mu.shape) == 0:
+                mu = mu.repeat(N)
+            elif mu.shape[0] != N:
+                raise ValueError(
+                    'For mu, either pass a single scalar value or an array of values for each of the N simulated objects')
+        param_dict = {
+            'del_M': del_M,
+            'AV': AV,
+            'theta': theta,
+            'eps': eps,
+            'z': z,
+            'mu': mu,
+            'ebv_mw': ebv_mw,
+            'RV': RV
+        }
+
+        if t.shape[0] == np.array(bands).shape[0]:
+            band_indices = np.array([self.band_dict[band] for band in bands])
+            band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
+        else:
+            t = jnp.array(t)
+            num_per_band = t.shape[0]
+            num_bands = len(bands)
+            band_indices = np.zeros(num_bands * num_per_band)
+            t = t[:, None].repeat(num_bands, axis=1).flatten(order='F')
+            for i, band in enumerate(bands):
+                if band not in self.band_dict.keys():
+                    raise ValueError(f'{band} is present in filters yaml file')
+                band_indices[i * num_per_band: (i + 1) * num_per_band] = self.used_band_dict[self.band_dict[band]]
+            band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
+        mask = np.ones_like(band_indices)
+        if self.band_weights is None:
+            band_weights = self._calculate_band_weights(z, ebv_mw)
+        else:
+            band_weights = self.band_weights
+        t = jnp.repeat(t[..., None], N, axis=1)
+        t = t - tmax[None, :]
+        hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+        keep_shape = t.shape
+        t = t.flatten(order='F')
+        map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,
+                                                                                                                     2,
+                                                                                                                     0)
+        t = t.reshape(keep_shape, order='F')
+        if mag:
+            data = self.get_mag_batch_cint(self.M0, theta, AV, cint, W0, W1, Wc, eps, mu + del_M, RV, band_indices, mask,
+                                      J_t, hsiao_interp, band_weights)
+        else:
+            data = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, mu + del_M, RV, band_indices, mask,
+                                       J_t,
+                                       hsiao_interp, band_weights)
+        # Apply error if specified
+        yerr = jnp.array(yerr)
+        if err_type == 'mag' and not mag:
+            yerr = yerr * (np.log(10) / 2.5) * data
+        if len(yerr.shape) == 0:  # Single error for all data points
+            yerr = np.ones_like(data) * yerr
+        elif len(yerr.shape) == 1:
+            assert data.shape[0] == yerr.shape[0], f'If passing a 1d array, shape of yerr must match number of ' \
+                                                   f'simulated data points per objects, {data.shape[0]}'
+            yerr = np.repeat(yerr[..., None], N, axis=1)
+        else:
+            assert data.shape == yerr.shape, f'If passing a 2d array, shape of yerr must match generated data shape' \
+                                             f' of {data.shape}'
+        data = np.random.normal(data, yerr)
+
+        if write_to_files and mag:
+            if output_dir is None:
+                raise ValueError('If writing to SNANA files, please provide an output directory')
+            if not os.path.exists(output_dir):
+                os.mkdir(output_dir)
+            sn_names, sn_files = [], []
+            for i in range(N):
+                sn_name = f'{i}'
+                sn_t, sn_mag, sn_mag_err, sn_z, sn_ebv_mw = t[:, i], data[:, i], yerr[:, i], z[i], ebv_mw[i]
+                sn_t = sn_t * (1 + sn_z)
+                sn_tmax = 0
+                sn_flt = [self.inv_band_dict[f] for f in band_indices[:, i]]
+                sn_file = write_snana_lcfile(output_dir, sn_name, sn_t, sn_flt, sn_mag, sn_mag_err, sn_tmax, sn_z, sn_z,
+                                             zerr, sn_ebv_mw)
+                sn_names.append(sn_name)
+                sn_files.append(sn_file)
+        elif write_to_files:
+            raise ValueError('If writing to SNANA files, please generate mags')
+        return data, yerr, param_dict
+
     def sample_del_M(self, N):
         """
         Samples grey offset del_M from model prior
@@ -3746,6 +4031,7 @@ class SEDmodel(object):
         eps_tform = np.random.multivariate_normal(eps_mu, np.eye(N_knots_sig), N)
         eps_tform = eps_tform.T
         eps = np.matmul(self.L_Sigma, eps_tform)
+        eps = eps.T
         eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
         eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full[:, 1:-1, :] = eps
