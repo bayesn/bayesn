@@ -758,6 +758,210 @@ class SEDmodel(object):
 
         return model_mag
 
+    def get_spectra_cint(self, theta, AV, cint, W0, W1, Wc, eps, RV, J_t, hsiao_interp):
+        """
+        Calculates rest-frame spectra for given parameter values
+
+        Parameters
+        ----------
+        theta: array-like
+            Set of theta values for each SN
+        AV: array-like
+            Set of host extinction values for each SN
+        W0: array-like
+            Global W0 matrix
+        W1: array-like
+            Global W1 matrix
+        eps: array-like
+            Set of epsilon values for each SN, describing residual colour variation
+        RV: float
+            Global R_V value for host extinction (need to allow this to be variable in future)
+        J_t: array-like
+            Matrix for cubic spline interpolation in time axis for each SN
+        hsiao_interp: array-like
+            Array containing Hsiao template spectra for each t value, comprising model for previous day, next day and
+            t % 1 to allow for linear interpolation
+
+
+        Returns
+        -------
+
+        model_spectra: array-like
+            Matrix containing model spectra for all SNe at all time-steps
+
+        """
+        num_batch = theta.shape[0]
+        # W0 = jnp.repeat(W0[None, ...], num_batch, axis=0)
+        # W1 = jnp.repeat(W1[None, ...], num_batch, axis=0)
+
+        W = W0 + theta[..., None, None] * W1 + cint[..., None, None] * Wc + eps
+
+        WJt = jnp.matmul(W, J_t)
+        W_grid = jnp.matmul(self.J_l_T, WJt)
+
+        low_hsiao = self.hsiao_flux[:, hsiao_interp[0, ...].astype(int)]
+        up_hsiao = self.hsiao_flux[:, hsiao_interp[1, ...].astype(int)]
+        H_grid = ((1 - hsiao_interp[2, :]) * low_hsiao + hsiao_interp[2, :] * up_hsiao).transpose(2, 0, 1)
+
+        model_spectra = H_grid * 10 ** (-0.4 * W_grid)
+
+        # Extinction----------------------------------------------------------
+        f99_x0 = 4.596
+        f99_gamma = 0.99
+        f99_c2 = -0.824 + 4.717 / RV
+        f99_c1 = 2.030 - 3.007 * f99_c2
+        f99_c3 = 3.23
+        f99_c4 = 0.41
+        f99_c5 = 5.9
+        f99_d1 = self.xk[7] ** 2 / ((self.xk[7] ** 2 - f99_x0 ** 2) ** 2 + (f99_gamma * self.xk[7]) ** 2)
+        f99_d2 = self.xk[8] ** 2 / ((self.xk[8] ** 2 - f99_x0 ** 2) ** 2 + (f99_gamma * self.xk[8]) ** 2)
+        yk = jnp.zeros((num_batch, 9))
+        yk = yk.at[:, 0].set(-RV)
+        yk = yk.at[:, 1].set(0.26469 * RV / 3.1 - RV)
+        yk = yk.at[:, 2].set(0.82925 * RV / 3.1 - RV)
+        yk = yk.at[:, 3].set(-0.422809 + 1.00270 * RV + 2.13572e-4 * RV ** 2 - RV)
+        yk = yk.at[:, 4].set(-5.13540e-2 + 1.00216 * RV - 7.35778e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 5].set(0.700127 + 1.00184 * RV - 3.32598e-5 * RV ** 2 - RV)
+        yk = yk.at[:, 6].set(
+            1.19456 + 1.01707 * RV - 5.46959e-3 * RV ** 2 + 7.97809e-4 * RV ** 3 - 4.45636e-5 * RV ** 4 - RV)
+        yk = yk.at[:, 7].set(f99_c1 + f99_c2 * self.xk[7] + f99_c3 * f99_d1)
+        yk = yk.at[:, 8].set(f99_c1 + f99_c2 * self.xk[8] + f99_c3 * f99_d2)
+
+        A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])
+
+        c2 = -0.824 + 4.717 / RV[..., None]
+        c1 = 2.030 - 3.007 * c2
+        x2 = self.uv_x * self.uv_x
+        y = x2 - f99_x0 * f99_x0
+        d = x2 / (y * y + x2 * f99_gamma * f99_gamma)
+        k = c1 + c2 * self.uv_x + f99_c3 * d
+
+        A = A.at[:, self.uv_ind1].set(AV[..., None] * (1. + k / RV[..., None]))
+        y = self.uv_x - f99_c5
+        y2 = y * y
+        k += f99_c4 * (0.5392 * y2 + 0.05644 * y2 * y)
+        A = A.at[:, self.uv_ind2].set(AV[..., None] * (1. + k[..., self.uv_ind3] / RV[..., None]))
+
+        f_A = 10 ** (-0.4 * A)
+        model_spectra = model_spectra * f_A[..., None]
+
+        return model_spectra
+
+    def get_flux_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+        """
+        Calculates observer-frame fluxes for given parameter values
+
+        Parameters
+        ----------
+        M0: float or array-like
+            Normalising constant to scale Hsiao template to correct order of magnitude. Typically fixed to -19.5
+            although can be inferred separately for different bins in a mass split analysis
+        theta: array-like
+            Set of theta values for each SN
+        AV: array-like
+            Set of host extinction values for each SN
+        W0: array-like
+            Global W0 matrix
+        W1: array-like
+            Global W1 matrix
+        eps: array-like
+            Set of epsilon values for each SN, describing residual colour variation
+        Ds: array-like
+            Set of distance moduli for each SN
+        RV: float
+            Global R_V value for host extinction (need to allow this to be variable in future)
+        band_indices: array-like
+            Array containing indices describing which filter each observation is in
+        mask: array-like
+            Array containing mask describing whether observations should contribute to the posterior
+        J_t: array-like
+            Matrix for cubic spline interpolation in time axis for each SN
+        hsiao_interp: array-like
+            Array containing Hsiao template spectra for each t value, comprising model for previous day, next day and
+            t % 1 to allow for linear interpolation
+        weights: array_like
+            Array containing band weights to use for photometry
+
+        Returns
+        -------
+
+        model_flux: array-like
+            Matrix containing model fluxes for all SNe at all time-steps
+
+        """
+        num_batch = theta.shape[0]
+        num_observations = band_indices.shape[0]
+
+        model_spectra = self.get_spectra_cint(theta, AV, cint, W0, W1, Wc, eps, RV, J_t, hsiao_interp)
+
+        batch_indices = (
+            jnp.arange(num_batch)
+            .repeat(num_observations)
+        ).astype(int)
+        obs_band_weights = (
+            weights[batch_indices, :, band_indices.T.flatten()]
+            .reshape((num_batch, num_observations, -1))
+            .transpose(0, 2, 1)
+        )
+
+        model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
+        model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds))
+        zps = self.zps[band_indices]
+        offsets = self.offsets[band_indices]
+        zp_flux = 10 ** (zps / 2.5)
+        model_flux = (model_flux / zp_flux) * 10 ** (0.4 * (27.5 - offsets))  # Convert to FLUXCAL
+        model_flux *= mask
+        return model_flux
+    def get_mag_batch_cint(self, M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+        """
+        Calculates observer-frame magnitudes for given parameter values
+
+        Parameters
+        ----------
+        M0: float or array-like
+            Normalising constant to scale Hsiao template to correct order of magnitude. Typically fixed to -19.5
+            although can be inferred separately for different bins in a mass split analysis
+        theta: array-like
+            Set of theta values for each SN
+        AV: array-like
+            Set of host extinction values for each SN
+        W0: array-like
+            Global W0 matrix
+        W1: array-like
+            Global W1 matrix
+        eps: array-like
+            Set of epsilon values for each SN, describing residual colour variation
+        Ds: array-like
+            Set of distance moduli for each SN
+        RV: float
+            Global R_V value for host extinction (need to allow this to be variable in future)
+        band_indices: array-like
+            Array containing indices describing which filter each observation is in
+        mask: array-like
+            Array containing mask describing whether observations should contribute to the posterior
+        J_t: array-like
+            Matrix for cubic spline interpolation in time axis for each SN
+        hsiao_interp: array-like
+            Array containing Hsiao template spectra for each t value, comprising model for previous day, next day and
+            t % 1 to allow for linear interpolation
+        weights: array_like
+            Array containing band weights to use for photometry
+
+        Returns
+        -------
+
+        model_mag: array-like
+            Matrix containing model magnitudes for all SNe at all time-steps
+        """
+        model_flux = self.get_flux_batch_cint(M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights)
+        model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
+        # to avoid nans when logging
+
+        model_mag = - 2.5 * jnp.log10(model_flux) + 27.5
+        model_mag *= mask  # Re-apply mask
+
+        return model_mag
+
     @staticmethod
     def spline_coeffs_irr_step(x_now, x, invkd):
         """
@@ -1177,6 +1381,87 @@ class SEDmodel(object):
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
+
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+
+    def train_model_cint_globalRV(self, obs, weights):
+        """
+        Numpyro model used for training to learn global parameters, assuming a single global RV
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band weights based on filter responses and MW extinction curves for numerical flux integrals
+
+        """
+        sample_size = self.data.shape[-1]
+        N_l_knots = self.l_knots.shape[0]
+        N_knots = N_l_knots * self.tau_knots.shape[0]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        W_mu = jnp.zeros(N_knots)
+        W_mu2 = jnp.zeros(N_knots - 1)
+        W0 = numpyro.sample('W0', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
+        Wc = numpyro.sample('Wc_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
+        Wc = jnp.insert(Wc, N_l_knots + 2, Wc[N_l_knots + 1] - 1)
+
+        # print(self.l_knots.shape[0], self.tau_knots.shape[0])
+        W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
+        Wc = numpyro.deterministic('Wc', jnp.reshape(Wc, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F'))
+
+        mu_cint = numpyro.sample('mu_cint', dist.Uniform(-0.3, 0.3))
+        sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 1.0))
+
+        # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
+        sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
+                                            dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
+        sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
+        L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
+        sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
+        sigma0 = numpyro.deterministic('sigma0', 0.1 * jnp.tan(sigma0_tform))
+
+        RV = numpyro.sample('RV', dist.Uniform(1, 5))
+
+        # tauA = numpyro.sample('tauA', dist.HalfCauchy())
+        tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
+        tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
+            cint_tform = numpyro.sample('cint_tform', dist.Normal(0, 1))
+            cint = numpyro.deterministic('cint', mu_cint + sigma_cint * cint_tform)
+
+            eps_mu = jnp.zeros(N_knots_sig)
+            # eps = numpyro.sample('eps', dist.MultivariateNormal(eps_mu, scale_tril=L_Sigma))
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            redshift = obs[-5, 0, sn_index]
+            redshift_error = obs[-4, 0, sn_index]
+            muhat = obs[-3, 0, sn_index]
+
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
+                jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            flux = self.get_mag_batch_cint(self.M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask,
+                                           self.J_t, self.hsiao_interp, weights)
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1765,6 +2050,11 @@ class SEDmodel(object):
 
         if args['mode'].lower() == 'training_globalrv':
             nuts_kernel = NUTS(self.train_model_globalRV, adapt_step_size=True, target_accept_prob=0.8,
+                               init_strategy=init_strategy,
+                               dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
+                               step_size=0.1)
+        if args['mode'].lower() == 'training_cint':
+            nuts_kernel = NUTS(self.train_model_cint_globalRV, adapt_step_size=True, target_accept_prob=0.8,
                                init_strategy=init_strategy,
                                dense_mass=False, find_heuristic_step_size=False, regularize_mass_matrix=False,
                                step_size=0.1)
