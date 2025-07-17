@@ -1406,6 +1406,7 @@ class SEDmodel(object):
         W0 = numpyro.sample('W0', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         W1 = numpyro.sample('W1', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         Wc = numpyro.sample('Wc_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
+        print(Wc.shape)
         Wc = jnp.insert(Wc, N_l_knots + 2, Wc[N_l_knots + 1] - 1)
 
         # print(self.l_knots.shape[0], self.tau_knots.shape[0])
@@ -1414,7 +1415,7 @@ class SEDmodel(object):
         Wc = numpyro.deterministic('Wc', jnp.reshape(Wc, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F'))
 
         mu_cint = numpyro.sample('mu_cint', dist.Uniform(-0.3, 0.3))
-        sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 1.0))
+        sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
         # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
         sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
@@ -1935,6 +1936,11 @@ class SEDmodel(object):
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+
+        param_init['Wc_red'] = jnp.array(np.random.normal(size=self.l_knots.shape[0] * self.tau_knots.shape[0] - 1))
+        param_init['mu_cint'] = jnp.array(0.)
+        param_init['sigma_cint'] = jnp.array(0.1)
+        param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
 
         return param_init
 
