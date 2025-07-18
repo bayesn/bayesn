@@ -1416,7 +1416,8 @@ class SEDmodel(object):
         sample_size = self.data.shape[-1]
         N_l_knots = self.l_knots.shape[0]
         N_knots = N_l_knots * self.tau_knots.shape[0]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        fix_eps_knots = 2
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
         W_mu = jnp.zeros(N_knots)
         W_mu2 = jnp.zeros(N_knots - 1)
         W0 = numpyro.sample('W0', dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
@@ -1461,13 +1462,11 @@ class SEDmodel(object):
             eps_tform = eps_tform.T
             eps = jnp.matmul(L_Sigma, eps_tform)
             eps = eps.T
+            eps = jnp.concatenate([eps[:, :self.l_knots.shape[0] - 2], jnp.zeros((eps.shape[0], 2)), eps[:, self.l_knots.shape[0] - 2:]], axis=1)
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
-            eps = eps.at[:, [1, 2], 1].set(0)
-            print(eps.shape)
-            print(eps[0, ...])
-            raise ValueError('Nope')
+            eps = numpyro.deterministic('eps', eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
 
             band_indices = obs[-6, :, sn_index].astype(int).T
