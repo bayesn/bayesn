@@ -1962,18 +1962,28 @@ class SEDmodel(object):
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
-        param_init['mu_cint'] = jnp.array(0.)
-        param_init['sigma_cint'] = jnp.array(0.1)
-        param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
+        if args['mode'] == 'training_cint':
+            param_init['mu_cint'] = jnp.array(0.)
+            param_init['sigma_cint'] = jnp.array(0.1)
+            param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
 
-        # Vaguely sensible starting point
-        param_init['Wc_red'] = jnp.array([-0.11419167, 0.54104733, 0.19320635, 0.34390596, 0.8283132,
-                                          -0.07884289, -1.4435745, 1.1694543, 0.10569326, -0.05316356,
-                                          -0.81321615, 0.78416634, 0.5783348, -0.2910077, -0.90266454,
-                                          -0.81026316, 0.2159231, 0.60019666, 1.0834885, -0.9720504,
-                                          -1.8057108, -1.1563765, 0.57188845, -0.2542837, 1.1017582,
-                                          -0.3566391, -1.2445877, -1.5888847, 0.01582221, -0.02114596,
-                                          0.7664986, -0.37107772, -0.5672312, -0.82566935, -0.08742975])
+            sigmaepsilon_init = 0.1 * np.ones(n_eps - 2)
+            param_init['sigmaepsilon_tform'] = jnp.arctan(
+                sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape) / 1.)
+            L_Omega_init = np.eye(n_eps - 2)
+            param_init['L_Omega'] = jnp.array(L_Omega_init)
+            L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon_init), L_Omega_init)
+
+            param_init['epsilon_tform'] = jnp.matmul(np.linalg.inv(L_Sigma), np.random.normal(0, 1, (n_eps - 2, n_sne)))
+
+            # Vaguely sensible starting point
+            param_init['Wc_red'] = jnp.array([-0.11419167, 0.54104733, 0.19320635, 0.34390596, 0.8283132,
+                                              -0.07884289, -1.4435745, 1.1694543, 0.10569326, -0.05316356,
+                                              -0.81321615, 0.78416634, 0.5783348, -0.2910077, -0.90266454,
+                                              -0.81026316, 0.2159231, 0.60019666, 1.0834885, -0.9720504,
+                                              -1.8057108, -1.1563765, 0.57188845, -0.2542837, 1.1017582,
+                                              -0.3566391, -1.2445877, -1.5888847, 0.01582221, -0.02114596,
+                                              0.7664986, -0.37107772, -0.5672312, -0.82566935, -0.08742975])
 
         return param_init
 
