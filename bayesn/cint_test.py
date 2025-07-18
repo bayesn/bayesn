@@ -10,13 +10,13 @@ cint = np.linspace(-0.3, 0.3, N)
 
 model = SEDmodel(load_model='T21_model')
 
-lc = model.simulate_light_curve(t, 1, bands, theta=0, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
-c = lc[0, :] - lc[1, :]
-print(np.mean(c), np.std(c))
+# lc = model.simulate_light_curve(t, 1, bands, theta=0, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
+# c = lc[0, :] - lc[1, :]
+# print(np.mean(c), np.std(c))
 
-lc = model.simulate_light_curve(t, N, bands, theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
-c = lc[0, :] - lc[1, :]
-print(np.mean(c), np.std(c))
+# lc = model.simulate_light_curve(t, N, bands, theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
+# c = lc[0, :] - lc[1, :]
+# print(np.mean(c), np.std(c))
 
 lc = model.simulate_light_curve_cint(t, 1, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train/chains.pkl',
                                 theta=0, AV=0, mu=0, del_M=0, eps=0, cint=0, mag=True)[0]
@@ -32,8 +32,8 @@ lc = model.simulate_light_curve_cint(t, N, bands, '/Users/matt/Documents/bayesn-
 c = lc[0, :] - lc[1, :]
 print(np.mean(c), np.std(c))
 
-lc = model.simulate_light_curve_cint(t, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train/chains.pkl',
-                                theta=0, AV=0, mu=0, del_M=0, eps=None, cint=0, mag=True)[0]
+# lc = model.simulate_light_curve_cint(t, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_fixeps/chains.pkl',
+#                                 theta=0, AV=0, mu=0, del_M=0, eps=None, cint=0, mag=True)[0]
 c = lc[0, :] - lc[1, :]
 print(np.mean(c), np.std(c))
 
