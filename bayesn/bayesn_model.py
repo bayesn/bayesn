@@ -1552,7 +1552,9 @@ class SEDmodel(object):
             eps_tform = eps_tform.T
             eps = jnp.matmul(L_Sigma, eps_tform)
             eps = eps.T
-            eps = jnp.concatenate([eps[:, :self.l_knots.shape[0] - 2], jnp.zeros((eps.shape[0], 2)), eps[:, self.l_knots.shape[0] - 2:]], axis=1)
+            eps = jnp.concatenate(
+                [eps[:, :self.l_knots.shape[0] - 2], jnp.zeros((eps.shape[0], 2)), eps[:, self.l_knots.shape[0] - 2:]],
+                axis=1)
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
@@ -2078,8 +2080,20 @@ class SEDmodel(object):
         if args['mode'] == 'training_v2':
             W0 = np.r_[W0_init[:self.l_knots.shape[0] + 1], W0_init[self.l_knots.shape[0] + 2:]]
             W1 = np.r_[W1_init[:2 * self.l_knots.shape[0] + 1], W1_init[2 * self.l_knots.shape[0] + 2:]]
-            param_init['W0_red'] = W0
-            param_init['W1_red'] = W1
+            param_init['W0_red'] = jnp.array([-0.31735334, -0.16120237, -0.15201446, -0.08799549, 0.00404103,
+                                              1.6202486, -0.20290692, -0.03030483, 0.0646527, 0.12108941,
+                                              0.8122862, -0.08708367, 0.05674911, 0.04332165, 0.0792105,
+                                              0.07520244, 0.00588138, 0.06924736, 0.09204818, 0.01503144,
+                                              0.01792986, 0.17954071, 0.3616422, -0.6802706, 0.18003377,
+                                              0.06042502, 0.18682818, 0.23119259, 0.52677476, -0.04040419,
+                                              -0.00720279, -0.04388783, 0.04956818, 0.1489716, 0.1140381])
+            param_init['W1_red'] = jnp.array([-0.21515869, -2.145551, -1.2416027, -1.4383932, -0.9359693,
+                                              0.02531869, -1.5240302, -0.5477565, -0.7247985, -0.13544236,
+                                              -0.80283314, -0.37605128, -0.14988881, -0.7194317, -0.725907,
+                                              -0.44500858, 0.18142828, -0.13229074, -2.2351394, -0.5704879,
+                                              0.20879842, -0.31777635, -1.640181, -1.1459658, -2.1843877,
+                                              -2.2001548, -1.8479712, -1.7601068, -1.4430971, -0.12370869,
+                                              -1.190379, -1.246873, -1.5434902, -2.4554367, -0.41585627])
             param_init['theta_tform'] = jnp.array(np.random.normal(0, 1, n_sne))
 
         return param_init
@@ -2631,7 +2645,7 @@ class SEDmodel(object):
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
             if args['mode'] != 'training_v2':
-            # Sign flipping-----------------
+                # Sign flipping-----------------
                 J_R = spline_coeffs_irr([6200.0], self.l_knots, invKD_irr(self.l_knots))
                 J_10 = spline_coeffs_irr([10.0], self.tau_knots, invKD_irr(self.tau_knots))
                 J_0 = spline_coeffs_irr([0.0], self.tau_knots, invKD_irr(self.tau_knots))
@@ -3801,9 +3815,10 @@ class SEDmodel(object):
             raise ValueError('If writing to SNANA files, please generate mags')
         return data, yerr, param_dict
 
-    def simulate_light_curve_cint(self, t, N, bands, model_path, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
-                             logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, cint=None, mag=True,
-                             write_to_files=False, output_dir=None):
+    def simulate_light_curve_cint(self, t, N, bands, model_path, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0,
+                                  RV=None,
+                                  logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, cint=None, mag=True,
+                                  write_to_files=False, output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
         files if requested
@@ -3894,14 +3909,14 @@ class SEDmodel(object):
             samples = pickle.load(file)
 
         W0 = jnp.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
-                                                         order='F')
+                                                          order='F')
         W1 = jnp.mean(samples['W1'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
-                                                         order='F')
+                                                          order='F')
         Wc = jnp.mean(samples['Wc'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
-                                                         order='F')
+                                                          order='F')
 
         L_Sigma = jnp.matmul(np.diag(np.mean(samples['sigmaepsilon'], axis=[0, 1])),
-                            np.mean(samples['L_Omega'], axis=[0, 1]))
+                             np.mean(samples['L_Omega'], axis=[0, 1]))
         self.L_Sigma = L_Sigma
         sigma0 = jnp.mean(samples['sigma0'])
         sigma_cint = jnp.mean(samples['sigma_cint'])
@@ -4033,8 +4048,9 @@ class SEDmodel(object):
                                                                                                                      0)
         t = t.reshape(keep_shape, order='F')
         if mag:
-            data = self.get_mag_batch_cint(self.M0, theta, AV, cint, W0, W1, Wc, eps, mu + del_M, RV, band_indices, mask,
-                                      J_t, hsiao_interp, band_weights)
+            data = self.get_mag_batch_cint(self.M0, theta, AV, cint, W0, W1, Wc, eps, mu + del_M, RV, band_indices,
+                                           mask,
+                                           J_t, hsiao_interp, band_weights)
         else:
             data = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, mu + del_M, RV, band_indices, mask,
                                        J_t,

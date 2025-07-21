@@ -5,11 +5,11 @@ from bayesn import SEDmodel
 
 t = np.array([0, 10])
 N = 10
-bands = ['r_PS1']
+bands = ['g_PS1']
 cint = np.linspace(-0.3, 0.3, N)
-theta = np.linspace(-5, 5, N)
+theta = np.linspace(-0.3, 0.3, N)
 
-model = SEDmodel(load_model='/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_test/bayesn.yaml')
+model = SEDmodel(load_model='/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2/bayesn.yaml')
 
 print(model.W0)
 print(model.W1)
@@ -25,6 +25,12 @@ for i in range(N):
 # m15 = lc[0, :] - lc[1, :]
 # plt.plot(theta, m15)
 plt.gca().invert_yaxis()
+plt.show()
+
+t2 = np.arange(-10, 40, 1)
+lc = model.simulate_light_curve(t, N, bands, theta=theta, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
+m15 = lc[0, :] - lc[1, :]
+plt.plot(theta, m15)
 plt.show()
 
 # print(lc.flatten())
