@@ -595,6 +595,16 @@ class SEDmodel(object):
         WJt = jnp.matmul(W, J_t)
         W_grid = jnp.matmul(self.J_l_T, WJt)
 
+        # plt.plot(self.tau_knots, W1[1, :])
+        # print(W1[1, 1] - W1[1, 2])
+        # # plt.plot(self.model_wave, jnp.matmul(self.J_l_T, W1)[:, 1])
+        # # plt.vlines([4900, 6200], -1.5, 1.3, ls='--')
+        # print(self.model_wave[100], self.model_wave[171])
+        # print(jnp.matmul(self.J_l_T, W1)[100, 1], jnp.matmul(self.J_l_T, W1)[100, 2])
+        # print(jnp.matmul(self.J_l_T, W1)[100, 1] - jnp.matmul(self.J_l_T, W1)[100, 2])
+        # plt.show()
+        # raise ValueError('Nope')
+
         low_hsiao = self.hsiao_flux[:, hsiao_interp[0, ...].astype(int)]
         up_hsiao = self.hsiao_flux[:, hsiao_interp[1, ...].astype(int)]
         H_grid = ((1 - hsiao_interp[2, :]) * low_hsiao + hsiao_interp[2, :] * up_hsiao).transpose(2, 0, 1)
@@ -1424,10 +1434,12 @@ class SEDmodel(object):
         W0 = numpyro.deterministic('W0', jnp.insert(W0, N_l_knots + 1, 0))
         W1 = numpyro.sample('W1_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
         W1 = numpyro.deterministic('W1', jnp.insert(W1, 2 * N_l_knots + 1, W1[N_l_knots + 1] - 1))
+
         W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
         W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
 
         M0 = numpyro.sample('M0', dist.Uniform(-20, -19))
+        sigma_theta = numpyro.sample('sigma_theta', dist.Uniform(0, 2))
 
         # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
         sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
@@ -1447,7 +1459,8 @@ class SEDmodel(object):
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
         with numpyro.plate('SNe', sample_size) as sn_index:
-            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
+            theta_tform = numpyro.sample(f'theta_tform', dist.Normal(0, 1.0))  # _{sn_index}
+            theta = numpyro.deterministic('theta', theta_tform * sigma_theta)
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
 
             eps_mu = jnp.zeros(N_knots_sig)
@@ -2067,6 +2080,7 @@ class SEDmodel(object):
             W1 = np.r_[W1_init[:2 * self.l_knots.shape[0] + 1], W1_init[2 * self.l_knots.shape[0] + 2:]]
             param_init['W0_red'] = W0
             param_init['W1_red'] = W1
+            param_init['theta_tform'] = jnp.array(np.random.normal(0, 1, n_sne))
 
         return param_init
 
@@ -2344,10 +2358,12 @@ class SEDmodel(object):
             rng = PRNGKey(0)
             start = timeit.default_timer()
 
-            mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
+            # mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
             end = timeit.default_timer()
-            mcmc.print_summary()
-            samples = mcmc.get_samples(group_by_chain=True)
+            # mcmc.print_summary()
+            # samples = mcmc.get_samples(group_by_chain=True)
+            with open('/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2/initial_chains.pkl', 'rb') as file:
+                samples = pickle.load(file)
         print(f'Total inference runtime: {end - start} seconds')
         self.postprocess(samples, args)
 
@@ -2616,27 +2632,28 @@ class SEDmodel(object):
         if 'W1' in samples.keys():  # If training
             with open(os.path.join(args['outputdir'], 'initial_chains.pkl'), 'wb') as file:
                 pickle.dump(samples, file)
+            if args['mode'] != 'training_v2':
             # Sign flipping-----------------
-            J_R = spline_coeffs_irr([6200.0], self.l_knots, invKD_irr(self.l_knots))
-            J_10 = spline_coeffs_irr([10.0], self.tau_knots, invKD_irr(self.tau_knots))
-            J_0 = spline_coeffs_irr([0.0], self.tau_knots, invKD_irr(self.tau_knots))
-            W1 = np.reshape(samples['W1'], (
-                samples['W1'].shape[0], samples['W1'].shape[1], self.l_knots.shape[0], self.tau_knots.shape[0]),
-                            order='F')
-            N_chains = W1.shape[0]
-            sign = np.zeros(N_chains)
-            for chain in range(N_chains):
-                chain_W1 = np.mean(W1[chain, ...], axis=0)
-                chain_sign = np.sign(
-                    np.squeeze(np.matmul(J_R, np.matmul(chain_W1, J_10.T))) - np.squeeze(
-                        np.matmul(J_R, np.matmul(chain_W1, J_0.T))))
-                sign[chain] = chain_sign
-            samples["W1"] = samples["W1"] * sign[:, None, None]
-            samples["theta"] = samples["theta"] * sign[:, None, None]
-            # Modify W1 and theta----------------
-            theta_std = np.std(samples["theta"], axis=2)
-            samples['theta'] = samples['theta'] / theta_std[..., None]
-            samples['W1'] = samples['W1'] * theta_std[..., None]
+                J_R = spline_coeffs_irr([6200.0], self.l_knots, invKD_irr(self.l_knots))
+                J_10 = spline_coeffs_irr([10.0], self.tau_knots, invKD_irr(self.tau_knots))
+                J_0 = spline_coeffs_irr([0.0], self.tau_knots, invKD_irr(self.tau_knots))
+                W1 = np.reshape(samples['W1'], (
+                    samples['W1'].shape[0], samples['W1'].shape[1], self.l_knots.shape[0], self.tau_knots.shape[0]),
+                                order='F')
+                N_chains = W1.shape[0]
+                sign = np.zeros(N_chains)
+                for chain in range(N_chains):
+                    chain_W1 = np.mean(W1[chain, ...], axis=0)
+                    chain_sign = np.sign(
+                        np.squeeze(np.matmul(J_R, np.matmul(chain_W1, J_10.T))) - np.squeeze(
+                            np.matmul(J_R, np.matmul(chain_W1, J_0.T))))
+                    sign[chain] = chain_sign
+                samples["W1"] = samples["W1"] * sign[:, None, None]
+                samples["theta"] = samples["theta"] * sign[:, None, None]
+                # Modify W1 and theta----------------
+                theta_std = np.std(samples["theta"], axis=2)
+                samples['theta'] = samples['theta'] / theta_std[..., None]
+                samples['W1'] = samples['W1'] * theta_std[..., None]
 
             # Save best fit global params to files for easy inspection and reading in------
             W0 = np.mean(samples['W0'], axis=[0, 1]).reshape((self.l_knots.shape[0], self.tau_knots.shape[0]),
@@ -2664,9 +2681,9 @@ class SEDmodel(object):
                 'L_SIGMA_EPSILON': L_Sigma.tolist()
             }
 
-            if 'singlerv' in args['mode'].lower():
+            if 'RV' in samples.keys():
                 yaml_data['RV'] = float(np.mean(samples['RV']))
-            elif 'poprv' in args['mode'].lower():
+            elif 'mu_R' in samples.keys():
                 yaml_data['MUR'] = float(np.mean(samples['mu_R']))
                 yaml_data['SIGMAR'] = float(np.mean(samples['sigma_R']))
 
