@@ -2358,12 +2358,10 @@ class SEDmodel(object):
             rng = PRNGKey(0)
             start = timeit.default_timer()
 
-            # mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
+            mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
             end = timeit.default_timer()
-            # mcmc.print_summary()
-            # samples = mcmc.get_samples(group_by_chain=True)
-            with open('/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2/initial_chains.pkl', 'rb') as file:
-                samples = pickle.load(file)
+            mcmc.print_summary()
+            samples = mcmc.get_samples(group_by_chain=True)
         print(f'Total inference runtime: {end - start} seconds')
         self.postprocess(samples, args)
 
