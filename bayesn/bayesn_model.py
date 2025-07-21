@@ -2062,6 +2062,12 @@ class SEDmodel(object):
                                               -0.3566391, -1.2445877, -1.5888847, 0.01582221, -0.02114596,
                                               0.7664986, -0.37107772, -0.5672312, -0.82566935, -0.08742975])
 
+        if args['mode'] == 'training_v2':
+            W0 = np.r_[W0_init[:self.l_knots.shape[0] + 1], W0_init[self.l_knots.shape[0] + 2:]]
+            W1 = np.r_[W1_init[:2 * self.l_knots.shape[0] + 1], W1_init[2 * self.l_knots.shape[0] + 2:]]
+            param_init['W0_red'] = W0
+            param_init['W1_red'] = W1
+
         return param_init
 
     def parse_yaml_input(self, args, cmd_args):
