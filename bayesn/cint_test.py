@@ -18,14 +18,14 @@ lc = model.simulate_light_curve(t, 1, bands, theta=0, AV=0, mu=0, del_M=0, eps=0
 print(lc.shape)
 m150 = lc[0, 0] - lc[1, 0]
 
-t2 = np.arange(-10, 40, 1)
-lc = model.simulate_light_curve(t2, N, bands, theta=theta, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
-for i in range(N):
-    plt.plot(t2, lc[:, i], label=theta[i])
-# m15 = lc[0, :] - lc[1, :]
-# plt.plot(theta, m15)
-plt.gca().invert_yaxis()
-plt.show()
+# t2 = np.arange(-10, 40, 1)
+# lc = model.simulate_light_curve(t2, N, bands, theta=theta, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
+# for i in range(N):
+#     plt.plot(t2, lc[:, i], label=theta[i])
+# # m15 = lc[0, :] - lc[1, :]
+# # plt.plot(theta, m15)
+# plt.gca().invert_yaxis()
+# plt.show()
 
 t2 = np.arange(-10, 40, 1)
 lc = model.simulate_light_curve(t, N, bands, theta=theta, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
