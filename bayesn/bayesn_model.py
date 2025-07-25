@@ -1425,7 +1425,7 @@ class SEDmodel(object):
         """
         sample_size = self.data.shape[-1]
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
-        fix_eps_knots = 2
+        fix_eps_knots = 3
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
         N_l_knots = self.l_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
@@ -1436,11 +1436,17 @@ class SEDmodel(object):
         W1 = numpyro.sample('W1_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
         W1 = numpyro.deterministic('W1', jnp.insert(W1, 2 * N_l_knots + 1, W1[N_l_knots + 1] - 1))
 
+        Wc = numpyro.sample('Wc_red', dist.MultivariateNormal(W_mu3, jnp.eye(N_knots - 2)))
+        Wc = jnp.insert(Wc, N_l_knots + 2, Wc[N_l_knots + 1] - 1)
+        Wc = jnp.insert(Wc, 2 * N_l_knots + 1, Wc[N_l_knots + 1])
+        Wc = numpyro.deterministic('Wc', jnp.reshape(Wc, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F'))
+
         W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
         W1 = jnp.reshape(W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')
 
         M0 = numpyro.sample('M0', dist.Uniform(-20, -19))
         sigma_theta = numpyro.sample('sigma_theta', dist.Uniform(0, 2))
+        sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
         # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
         sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
@@ -1463,6 +1469,8 @@ class SEDmodel(object):
             theta_tform = numpyro.sample(f'theta_tform', dist.Normal(0, 1.0))  # _{sn_index}
             theta = numpyro.deterministic('theta', theta_tform * sigma_theta)
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
+            cint_tform = numpyro.sample('cint_tform', dist.Normal(0, 1))
+            cint = numpyro.deterministic('cint', sigma_cint * cint_tform)
 
             eps_mu = jnp.zeros(N_knots_sig)
             # eps = numpyro.sample('eps', dist.MultivariateNormal(eps_mu, scale_tril=L_Sigma))
@@ -1480,8 +1488,8 @@ class SEDmodel(object):
             eps = jnp.matmul(L_Sigma, eps_tform)
             eps = eps.T
             eps = jnp.concatenate(
-                [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 1)), eps[:, N_l_knots - 2:2 * N_l_knots - 5],
-                 jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 5:]],
+                [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+                 jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
                 axis=1)
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
@@ -1498,9 +1506,10 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
-                                      self.hsiao_interp,
-                                      weights)
+            # flux = self.get_mag_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
+            #                           self.hsiao_interp, weights)
+            flux = self.get_mag_batch_cint(M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask,
+                                           self.J_t, self.hsiao_interp, weights)
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
