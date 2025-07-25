@@ -2110,6 +2110,15 @@ class SEDmodel(object):
                                               -1.190379, -1.246873, -1.5434902, -2.4554367, -0.41585627])
             param_init['theta_tform'] = jnp.array(np.random.normal(0, 1, n_sne))
 
+            fix_eps_knots = 2
+            N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
+            param_init['eps_tform'] = jnp.zeros((n_sne, N_knots_sig))
+            sigmaepsilon_init = 0.1 * np.ones(n_eps - fix_eps_knots)
+            param_init['sigmaepsilon_tform'] = jnp.arctan(
+                sigmaepsilon_init + np.random.normal(0, 0.01, sigmaepsilon_init.shape) / 1.)
+            L_Omega_init = np.eye(n_eps - fix_eps_knots)
+            param_init['L_Omega'] = jnp.array(L_Omega_init)
+
         return param_init
 
     def parse_yaml_input(self, args, cmd_args):
