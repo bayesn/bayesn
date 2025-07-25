@@ -1425,7 +1425,7 @@ class SEDmodel(object):
         """
         sample_size = self.data.shape[-1]
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
-        fix_eps_knots = 3
+        fix_eps_knots = 2
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
         N_l_knots = self.l_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
@@ -1487,9 +1487,13 @@ class SEDmodel(object):
             eps_tform = eps_tform.T
             eps = jnp.matmul(L_Sigma, eps_tform)
             eps = eps.T
+            # eps = jnp.concatenate(
+            #     [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+            #      jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
+            #     axis=1)
             eps = jnp.concatenate(
-                [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
-                 jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
+                [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
+                 eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
                 axis=1)
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
@@ -2131,7 +2135,7 @@ class SEDmodel(object):
             param_init['sigma_theta'] = jnp.array(0.1)
             param_init['sigma_cint'] = jnp.array(0.05)
 
-            fix_eps_knots = 3
+            fix_eps_knots = 2
             N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
             param_init['eps_tform'] = jnp.zeros((n_sne, N_knots_sig))
             sigmaepsilon_init = 0.1 * np.ones(n_eps - fix_eps_knots)
