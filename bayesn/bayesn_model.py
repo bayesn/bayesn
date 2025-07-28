@@ -1513,13 +1513,6 @@ class SEDmodel(object):
             # flux = self.get_mag_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t,
             #                           self.hsiao_interp, weights)
 
-            print(W0)
-            print(W1)
-            print(Wc)
-            print(eps[0, ...])
-            print(eps[1, ...])
-            raise ValueError('Nope')
-
             flux = self.get_mag_batch_cint(M0, theta, AV, cint, W0, W1, Wc, eps, Ds, RV, band_indices, mask,
                                            self.J_t, self.hsiao_interp, weights)
 
