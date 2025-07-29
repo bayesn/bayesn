@@ -4,10 +4,10 @@ import matplotlib.pyplot as plt
 from bayesn import SEDmodel
 
 t = np.array([0, 10, 20])
-N = 10
+N = 5
 bands = ['g_PS1', 'r_PS1']
-cint = np.linspace(-0.3, 0.3, N)
-theta = np.linspace(-0.3, 0.3, N)
+cint = np.linspace(-0.1, 0.1, N)
+theta = np.linspace(-0.2, 0.2, N)
 
 model = SEDmodel(load_model='/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_full/bayesn.yaml')
 
@@ -18,9 +18,10 @@ m150 = lc[0, 0] - lc[1, 0]
 t2 = np.arange(-10, 40, 1)
 lc = model.simulate_light_curve(t2, N, bands, theta=theta, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
 for i in range(N):
-    plt.plot(t2, lc[:len(t2), i], label=theta[i])
+    plt.plot(t2, lc[:len(t2), i], label=f'{theta[i]:.2f}')
 # m15 = lc[0, :] - lc[1, :]
 # plt.plot(theta, m15)
+plt.legend()
 plt.gca().invert_yaxis()
 plt.show()
 
@@ -38,13 +39,13 @@ plt.show()
 # c = lc[0, :] - lc[1, :]
 # print(np.mean(c), np.std(c))
 
-lc = model.simulate_light_curve_cint(t, 1, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_full/chains.pkl',
-                                theta=0, AV=0, mu=0, del_M=0, eps=0, cint=0, mag=True)[0]
-print(lc.shape)
-c = lc[0, :] - lc[3, :]
-print(np.mean(c), np.std(c))
-c0 = lc[0, :] - lc[3, :]
-m100 = lc[0, :] - lc[1, :]
+# lc = model.simulate_light_curve_cint(t, 1, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_full/chains.pkl',
+#                                 theta=0, AV=0, mu=0, del_M=0, eps=0, cint=0, mag=True)[0]
+# print(lc.shape)
+# c = lc[0, :] - lc[3, :]
+# print(np.mean(c), np.std(c))
+# c0 = lc[0, :] - lc[3, :]
+# m100 = lc[0, :] - lc[1, :]
 
 # lc = model.simulate_light_curve_cint(t, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train/chains.pkl',
 #                                 theta=0, AV=0, mu=0, del_M=0, eps=0, cint=None, mag=True)[0]
@@ -54,16 +55,14 @@ m100 = lc[0, :] - lc[1, :]
 # # lc = model.simulate_light_curve_cint(t, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_fixeps/chains.pkl',
 # #                                 theta=0, AV=0, mu=0, del_M=0, eps=None, cint=0, mag=True)[0]
 # c = lc[0, :] - lc[1, :]
-print(np.mean(c), np.std(c))
+# print(np.mean(c), np.std(c))
 
 # Make plots------------------------------------------
-N = 10
-
 t2 = np.arange(-10, 40, 1)
 lc = model.simulate_light_curve_cint(t2, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_full/chains.pkl',
                                      theta=theta, AV=0, mu=0, del_M=0, eps=0, cint=0, mag=True)[0]
 for i in range(N):
-    plt.plot(t2, lc[:len(t2), i], label=theta[i])
+    plt.plot(t2, lc[:len(t2), i], label=f'{theta[i]:.2f}')
 # m15 = lc[0, :] - lc[1, :]
 # plt.plot(theta, m15)
 plt.gca().invert_yaxis()
@@ -74,7 +73,7 @@ t2 = np.arange(-10, 40, 1)
 lc = model.simulate_light_curve_cint(t2, N, bands, '/Users/matt/Documents/bayesn-input/cint_train/T21_train_v2_full/chains.pkl',
                                      theta=0, AV=0, mu=0, del_M=0, eps=0, cint=cint, mag=True)[0]
 for i in range(N):
-    plt.plot(t2, lc[:len(t2), i], label=cint[i])
+    plt.plot(t2, lc[:len(t2), i], label=f'{cint[i]:.2f}')
 # m15 = lc[0, :] - lc[1, :]
 # plt.plot(theta, m15)
 plt.gca().invert_yaxis()
