@@ -3417,6 +3417,7 @@ class SEDmodel(object):
         eps_tform = np.random.multivariate_normal(eps_mu, np.eye(N_knots_sig), N)
         eps_tform = eps_tform.T
         eps = np.matmul(self.L_Sigma, eps_tform)
+        eps = eps.T
         eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
         eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full[:, 1:-1, :] = eps
