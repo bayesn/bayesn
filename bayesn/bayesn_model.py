@@ -1448,13 +1448,13 @@ class SEDmodel(object):
         sigma_theta = numpyro.sample('sigma_theta', dist.Uniform(0, 2))
         sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
-        # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
+        sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
 
-        # sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
-        #                                     dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
-        # sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
-        # L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
-        # L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+        sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
+                                            dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
+        sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
+        L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample('sigma0_tform', dist.Uniform(0, jnp.pi / 2.))
@@ -1482,24 +1482,24 @@ class SEDmodel(object):
             # eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             # eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             # eps = eps_full.at[:, 1:-1, :].set(eps)
-            eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
 
-            # eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
-            # eps_tform = eps_tform.T
-            # eps = jnp.matmul(L_Sigma, eps_tform)
-            # eps = eps.T
-            # # eps = jnp.concatenate(
-            # #     [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
-            # #      jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
-            # #     axis=1)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = jnp.matmul(L_Sigma, eps_tform)
+            eps = eps.T
             # eps = jnp.concatenate(
-            #     [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
-            #      eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
+            #     [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+            #      jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
             #     axis=1)
-            # eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
-            # eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            # eps = eps_full.at[:, 1:-1, :].set(eps)
-            # eps = numpyro.deterministic('eps', eps)
+            eps = jnp.concatenate(
+                [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
+                 eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
+                axis=1)
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            eps = numpyro.deterministic('eps', eps)
 
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
