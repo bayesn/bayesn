@@ -1448,7 +1448,7 @@ class SEDmodel(object):
         sigma_theta = numpyro.sample('sigma_theta', dist.Uniform(0, 2))
         sigma_cint = numpyro.sample('sigma_cint', dist.Uniform(0, 0.3))
 
-        sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
+        # sigmaepsilon = numpyro.sample('sigmaepsilon', dist.HalfNormal(1 * jnp.ones(N_knots_sig)))
 
         sigmaepsilon_tform = numpyro.sample('sigmaepsilon_tform',
                                             dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
