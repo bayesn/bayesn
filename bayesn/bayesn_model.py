@@ -214,7 +214,7 @@ class SEDmodel(object):
         load_model="T21_model",
         filter_yaml=None,
         fiducial_cosmology={"H0": 73.24, "Om0": 0.28},
-        load_redlaw="F99",
+        load_redlaw="F19",
     ):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
@@ -268,6 +268,7 @@ class SEDmodel(object):
         self.W0 = jnp.array(params["W0"])
         self.W1 = jnp.array(params["W1"])
         self.L_Sigma = jnp.array(params["L_SIGMA_EPSILON"])
+        self.L_Sigma_dust = jnp.array(params["L_SIGMA_EPSILON_DUST"])
         self.M0 = jnp.array(params["M0"])
         self.sigma0 = jnp.array(params["SIGMA0"])
         self.tauA = jnp.array(params["TAUA"])
@@ -294,6 +295,7 @@ class SEDmodel(object):
         self.J_t_map = jax.jit(
             jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
         )
+
     def _load_hsiao_template(self):
         """
         Loads the Hsiao template from the internal HDF5 file.
@@ -760,6 +762,7 @@ class SEDmodel(object):
                                 neginf=0,
                             )
                         )
+                        # Drude profile
                         * jnp.nan_to_num(
                             amp
                             * (gamma / center) ** 2
@@ -795,7 +798,18 @@ class SEDmodel(object):
         bx = (self.redlaw_bx @ yk.T).T
         return ax + bx / jnp.array(RV)[..., None]
 
-    def get_spectra(self, theta, AV, W0, W1, eps, RV, J_t, hsiao_interp):
+    def get_spectra(
+        self,
+        theta,
+        AV,
+        W0,
+        W1,
+        eps,
+        eps_dust,
+        RV,
+        J_t,
+        hsiao_interp,
+    ):
         """
         Calculates rest-frame spectra for given parameter values
 
@@ -843,7 +857,9 @@ class SEDmodel(object):
         ).transpose(2, 0, 1)
 
         model_spectra = H_grid * 10 ** (-0.4 * W_grid)
-        A = AV[..., None] * self.get_axav(RV, num_batch)
+        A = AV[..., None] * (
+            self.get_axav(RV=RV, num_batch=num_batch) + jnp.matmul(self.J_l_T, eps_dust)
+        )
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
@@ -857,6 +873,7 @@ class SEDmodel(object):
         W0,
         W1,
         eps,
+        eps_dust,
         Ds,
         RV,
         band_indices,
@@ -909,7 +926,17 @@ class SEDmodel(object):
         num_batch = theta.shape[0]
         num_observations = band_indices.shape[0]
 
-        model_spectra = self.get_spectra(theta, AV, W0, W1, eps, RV, J_t, hsiao_interp)
+        model_spectra = self.get_spectra(
+            theta,
+            AV,
+            W0,
+            W1,
+            eps,
+            eps_dust,
+            RV,
+            J_t,
+            hsiao_interp,
+        )
 
         batch_indices = (jnp.arange(num_batch).repeat(num_observations)).astype(int)
         obs_band_weights = (
@@ -937,6 +964,7 @@ class SEDmodel(object):
         W0,
         W1,
         eps,
+        eps_dust,
         Ds,
         RV,
         band_indices,
@@ -992,6 +1020,7 @@ class SEDmodel(object):
             W0,
             W1,
             eps,
+            eps_dust,
             Ds,
             RV,
             band_indices,
@@ -1097,8 +1126,8 @@ class SEDmodel(object):
         h = x[q + 1] - x[q]
         a = (x[q + 1] - x_now) / h
         b = 1 - a
-        c = ((a ** 3 - a) / 6) * h ** 2
-        d = ((b ** 3 - b) / 6) * h ** 2
+        c = ((a**3 - a) / 6) * h**2
+        d = ((b**3 - b) / 6) * h**2
 
         X = X.at[q].set(X[q] + a * interp)
         X = X.at[q + 1].set(X[q + 1] + b * interp)
@@ -1106,7 +1135,16 @@ class SEDmodel(object):
 
         return X
 
-    def fit_model_uniformRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+    def fit_model_uniformRV(
+        self,
+        obs,
+        weights,
+        fix_tmax=False,
+        fix_theta=False,
+        theta_val=0,
+        fix_AV=False,
+        AV_val=0,
+    ):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -1133,45 +1171,106 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
-        with numpyro.plate('SNe', sample_size) as sn_index:
-            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+        with numpyro.plate("SNe", sample_size) as sn_index:
+            theta = numpyro.sample(f"theta", dist.Normal(0, 1.0))
             theta = theta * (1 - fix_theta) + theta_val * fix_theta
-            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = numpyro.sample(f"AV", dist.Exponential(1 / self.tauA))
+            # AV = numpyro.sample(f"AV", dist.Gamma(concentration=1 / self.tauA, rate=self.gammaA))
             AV = AV * (1 - fix_AV) + AV_val * fix_AV
-            RV = numpyro.sample('RV', dist.Uniform(1, 6))
-            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            RV = numpyro.sample("RV", dist.Uniform(1, 6))
+            tmax = numpyro.sample("tmax", dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
             t = obs[0, ...] - tmax[None, sn_index]
-            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            hsiao_interp = jnp.array(
+                [19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)]
+            )
             keep_shape = t.shape
-            t = t.flatten(order='F')
-            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
-                                                                     order='F').transpose(1, 2, 0)
+            t = t.flatten(order="F")
+            J_t = (
+                self.J_t_map(t, self.tau_knots, self.KD_t)
+                .reshape((*keep_shape, self.tau_knots.shape[0]), order="F")
+                .transpose(1, 2, 0)
+            )
             eps_mu = jnp.zeros(N_knots_sig)
-            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = numpyro.sample(
+                "eps_tform", dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig))
+            )
             eps_tform = eps_tform.T
-            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = numpyro.deterministic("eps", jnp.matmul(self.L_Sigma, eps_tform))
             eps = eps.T
-            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
-            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = jnp.reshape(
+                eps,
+                (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]),
+                order="F",
+            )
+            eps_full = jnp.zeros(
+                (sample_size, self.l_knots.shape[0], self.tau_knots.shape[0])
+            )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            Ds = numpyro.sample("Ds", dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(
+                self.M0,
+                theta,
+                AV,
+                self.W0,
+                self.W1,
+                eps,
+                eps_dust,
+                Ds,
+                RV,
+                band_indices,
+                mask,
+                J_t,
+                hsiao_interp,
+                weights,
+            )
             with numpyro.handlers.mask(mask=mask):
-                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
-                               obs=obs[1, :, sn_index].T)
+                numpyro.sample(
+                    f"obs",
+                    dist.Normal(flux, obs[2, :, sn_index].T),
+                    obs=obs[1, :, sn_index].T,
+                )
 
-    def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+    def fit_model_globalRV(
+        self,
+        obs,
+        weights,
+        fix_tmax=False,
+        fix_theta=False,
+        theta_val=0,
+        fix_AV=False,
+        AV_val=0,
+    ):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -1198,7 +1297,8 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         with numpyro.plate("SNe", sample_size) as sn_index:
             theta = numpyro.sample(f"theta", dist.Normal(0, 1.0))
@@ -1235,6 +1335,26 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
@@ -1249,6 +1369,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 self.RV,
                 band_indices,
@@ -1278,7 +1399,8 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         with numpyro.plate("SNe", sample_size) as sn_index:
             AV = numpyro.sample(f"AV", My_Exponential(1 / self.tauA))
@@ -1313,6 +1435,26 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
@@ -1327,6 +1469,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 self.RV,
                 band_indices,
@@ -1375,7 +1518,8 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
         phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
 
         with numpyro.plate("SNe", sample_size) as sn_index:
@@ -1385,9 +1529,12 @@ class SEDmodel(object):
             AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample("tmax", dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
-            RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
-            RV = numpyro.deterministic('RV',
-                                       self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            RV_tform = numpyro.sample("RV_tform", dist.Uniform(0, 1))
+            RV = numpyro.deterministic(
+                "RV",
+                self.mu_R
+                + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)),
+            )
 
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array(
@@ -1417,6 +1564,26 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
@@ -1431,6 +1598,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 RV,
                 band_indices,
@@ -1460,7 +1628,8 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
         phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
 
         with numpyro.plate("SNe", sample_size) as sn_index:
@@ -1502,6 +1671,26 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
@@ -1516,6 +1705,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 RV,
                 band_indices,
@@ -1545,7 +1735,8 @@ class SEDmodel(object):
         """
         sample_size = self.data.shape[-1]
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
         W0 = numpyro.sample("W0", dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         W1 = numpyro.sample("W1", dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
@@ -1566,6 +1757,17 @@ class SEDmodel(object):
         )
         L_Omega = numpyro.sample("L_Omega", dist.LKJCholesky(N_knots_sig))
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        # Dust variation
+        sigmaepsilon_dust_tform = numpyro.sample(
+            "sigmaepsilon_dust_tform",
+            dist.Uniform(0, (jnp.pi / 2.0) * jnp.ones(N_knots_sig_l)),
+        )
+        sigmaepsilon_dust = numpyro.deterministic(
+            "sigmaepsilon_dust", 1.0 * jnp.tan(sigmaepsilon_dust_tform)
+        )
+        L_Omega_dust = numpyro.sample("L_Omega_dust", dist.LKJCholesky(N_knots_sig_l))
+        L_Sigma_dust = jnp.matmul(jnp.diag(sigmaepsilon_dust), L_Omega_dust)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample("sigma0_tform", dist.Uniform(0, jnp.pi / 2.0))
@@ -1591,7 +1793,7 @@ class SEDmodel(object):
             eps = eps.T
             eps = jnp.reshape(
                 eps,
-                (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]),
+                (sample_size, N_knots_sig, self.tau_knots.shape[0]),
                 order="F",
             )
             eps_full = jnp.zeros(
@@ -1599,6 +1801,25 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
 
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
@@ -1620,6 +1841,7 @@ class SEDmodel(object):
                 W0,
                 W1,
                 eps,
+                eps_dust,
                 Ds,
                 RV,
                 band_indices,
@@ -1650,7 +1872,8 @@ class SEDmodel(object):
         """
         sample_size = self.data.shape[-1]
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
         W0 = numpyro.sample("W0", dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
         W1 = numpyro.sample("W1", dist.MultivariateNormal(W_mu, jnp.eye(N_knots)))
@@ -1671,6 +1894,17 @@ class SEDmodel(object):
         )
         L_Omega = numpyro.sample("L_Omega", dist.LKJCholesky(N_knots_sig))
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        # Dust variation
+        sigmaepsilon_dust_tform = numpyro.sample(
+            "sigmaepsilon_dust_tform",
+            dist.Uniform(0, (jnp.pi / 2.0) * jnp.ones(N_knots_sig_l)),
+        )
+        sigmaepsilon_dust = numpyro.deterministic(
+            "sigmaepsilon_dust", 1.0 * jnp.tan(sigmaepsilon_dust_tform)
+        )
+        L_Omega_dust = numpyro.sample("L_Omega_dust", dist.LKJCholesky(N_knots_sig_l))
+        L_Sigma_dust = jnp.matmul(jnp.diag(sigmaepsilon_dust), L_Omega_dust)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
         sigma0_tform = numpyro.sample("sigma0_tform", dist.Uniform(0, jnp.pi / 2.0))
@@ -1712,6 +1946,25 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
 
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
             redshift_error = obs[-4, 0, sn_index]
@@ -1732,6 +1985,7 @@ class SEDmodel(object):
                 W0,
                 W1,
                 eps,
+                eps_dust,
                 Ds,
                 RV,
                 band_indices,
@@ -1764,7 +2018,8 @@ class SEDmodel(object):
 
         """
         sample_size = self.data.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         mu_R = numpyro.sample("mu_R", dist.Uniform(1.2, 6))
         sigma_R = numpyro.sample("sigma_R", dist.HalfNormal(2))
@@ -1801,6 +2056,25 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
             redshift_error = obs[-4, 0, sn_index]
@@ -1822,6 +2096,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 Rv,
                 band_indices,
@@ -1854,7 +2129,8 @@ class SEDmodel(object):
 
         """
         sample_size = self.data.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         mu_R_0 = numpyro.sample("mu_R_0", dist.Uniform(1.2, 6))
         sigma_R = numpyro.sample("sigma_R", dist.HalfNormal(2))
@@ -1912,6 +2188,25 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             Ds = numpyro.sample("Ds", dist.Normal(muhat, Ds_err))
             flux = self.get_flux_batch(
                 self.M0,
@@ -1920,6 +2215,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 Rv,
                 band_indices,
@@ -1950,7 +2246,8 @@ class SEDmodel(object):
 
         """
         sample_size = self.data.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         mu_R_HM = numpyro.sample("mu_R_HM", dist.Uniform(1.2, 6))
         sigma_R_HM = numpyro.sample("sigma_R_HM", dist.HalfNormal(2))
@@ -2029,6 +2326,25 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             sigma0 = HM_flag * sigma0_HM + (1 - HM_flag) * sigma0_LM
 
             band_indices = obs[-6, :, sn_index].astype(int).T
@@ -2052,6 +2368,7 @@ class SEDmodel(object):
                 self.W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 Rv,
                 band_indices,
@@ -2082,7 +2399,8 @@ class SEDmodel(object):
 
         """
         sample_size = self.data.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        N_knots_sig_l = self.l_knots.shape[0] - 2
+        N_knots_sig = N_knots_sig_l * self.tau_knots.shape[0]
 
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
@@ -2177,6 +2495,25 @@ class SEDmodel(object):
             )
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
+            # Dust variation
+            eps_mu_dust = jnp.zeros(N_knots_sig_l)
+            eps_dust_tform = numpyro.sample(
+                "eps_dust_tform",
+                dist.MultivariateNormal(eps_mu_dust, jnp.eye(N_knots_sig_l)),
+            )
+            eps_dust_tform = eps_dust_tform.T
+            eps_dust = numpyro.deterministic(
+                "eps_dust", jnp.matmul(self.L_Sigma_dust, eps_dust_tform)
+            )
+            eps_dust = eps_dust.T
+            eps_dust = jnp.reshape(
+                eps_dust,
+                (sample_size, N_knots_sig_l),
+                order="F",
+            )
+            eps_dust_full = jnp.zeros((sample_size, self.l_knots.shape[0]))
+            eps_dust = eps_dust_full.at[:, 1:-1].set(eps_dust)
+
             sigma0 = HM_flag * sigma0_HM + (1 - HM_flag) * sigma0_LM
 
             band_indices = obs[-6, :, sn_index].astype(int).T
@@ -2200,6 +2537,7 @@ class SEDmodel(object):
                 W0,
                 self.W1,
                 eps,
+                eps_dust,
                 Ds,
                 Rv,
                 band_indices,
@@ -2718,7 +3056,7 @@ class SEDmodel(object):
         mu_R=False,
         sigma_R=False,
         mag=False,
-        redlaw=None
+        redlaw=None,
     ):
         """
         Method to fit light curve contained in SNANA-format text file using BayeSN model
@@ -2797,7 +3135,7 @@ class SEDmodel(object):
             mu_R=mu_R,
             sigma_R=sigma_R,
             mag=mag,
-            redlaw=redlaw
+            redlaw=redlaw,
         )
 
         return samples, sn_props
@@ -2822,7 +3160,7 @@ class SEDmodel(object):
         mu_R=False,
         sigma_R=False,
         mag=False,
-        redlaw=None
+        redlaw=None,
     ):
         """
         Method to fit light curve data loaded into memory with BayeSN model
@@ -2903,11 +3241,12 @@ class SEDmodel(object):
             flux_err = (np.log(10) / 2.5) * flux * flux_err
         if peak_mjd is not None:
             t = (t - peak_mjd) / (1 + z)
-        flux = flux[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
-        flux_err = flux_err[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
-        filters = filters[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        t_mask = (t > self.tau_knots.min()) & (t < self.tau_knots.max())
+        flux = flux[t_mask]
+        flux_err = flux_err[t_mask]
+        filters = filters[t_mask]
         filters = np.array([filt_map.get(filter, filter) for filter in filters])
-        t = t[(t > self.tau_knots.min()) & (t < self.tau_knots.max())]
+        t = t[t_mask]
 
         # Prepare filters
         for f in np.unique(filters):
@@ -2953,26 +3292,46 @@ class SEDmodel(object):
         )
 
         # Update dust parameters if specified manually
-        if RV == 'uniform':
-            nuts_kernel = NUTS(self.fit_model_uniformRV, adapt_step_size=True, init_strategy=init_to_median(),
-                               max_tree_depth=10)
+        if RV == "uniform":
+            nuts_kernel = NUTS(
+                self.fit_model_uniformRV,
+                adapt_step_size=True,
+                init_strategy=init_to_median(),
+                max_tree_depth=10,
+            )
         else:
             if RV:
                 self.RV = jnp.array(RV)
-                self.model_type = 'fixed_RV'
+                self.model_type = "fixed_RV"
             elif mu_R:
                 if not sigma_R:
-                    raise ValueError('You have set a custom mu_R, please also set a custom sigma_R')
+                    raise ValueError(
+                        "You have set a custom mu_R, please also set a custom sigma_R"
+                    )
                 self.mu_R = jnp.array(mu_R)
                 self.sigma_R = jnp.array(sigma_R)
-                self.model_type = 'pop_RV'
-            if self.model_type == 'fixed_RV':
-                nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
-                                   max_tree_depth=10)
-            elif self.model_type == 'pop_RV':
-                nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
-                                   max_tree_depth=10)
-        mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
+                self.model_type = "pop_RV"
+            if self.model_type == "fixed_RV":
+                nuts_kernel = NUTS(
+                    self.fit_model_globalRV,
+                    adapt_step_size=True,
+                    init_strategy=init_to_median(),
+                    max_tree_depth=10,
+                )
+            elif self.model_type == "pop_RV":
+                nuts_kernel = NUTS(
+                    self.fit_model_popRV,
+                    adapt_step_size=True,
+                    init_strategy=init_to_median(),
+                    max_tree_depth=10,
+                )
+        mcmc = MCMC(
+            nuts_kernel,
+            num_samples=250,
+            num_warmup=250,
+            num_chains=4,
+            chain_method="parallel",
+        )
         rng = PRNGKey(0)
 
         theta_val = 0
@@ -3917,7 +4276,7 @@ class SEDmodel(object):
             self.fitres_table = table
         else:
             table_path = os.path.join(args["data_root"], args["data_table"])
-            sn_list = pd.read_csv(table_path, comment="#", delim_whitespace=True)
+            sn_list = pd.read_csv(table_path, comment="#", sep="\s+")
             n_obs = []
 
             all_lcs = []
@@ -4441,7 +4800,7 @@ class SEDmodel(object):
         mag=True,
         write_to_files=False,
         output_dir=None,
-        redlaw="F99",
+        redlaw="F19",
     ):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. and saves them to SNANA-format text
@@ -4926,9 +5285,15 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             del_M = chains["delM"][..., i].flatten(order="F")
 
-            theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
-                                        eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
-            if 'RV' in chains.keys():
+            theta, AV, mu, eps, del_M, tmax = (
+                theta[:num_samples],
+                AV[:num_samples],
+                mu[:num_samples],
+                eps[:num_samples, ...],
+                del_M[:num_samples, ...],
+                tmax[:num_samples, ...],
+            )
+            if "RV" in chains.keys():
                 RV = RV[:num_samples, ...]
             if mean:
                 theta, AV, mu, eps, del_M, tmax = (
