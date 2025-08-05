@@ -2959,6 +2959,8 @@ class SEDmodel(object):
                     data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
+                    if meta['SURVEY'] in map_dict.keys():
+                        map_dict = map_dict[meta['SURVEY']]
                     for f in data.FLT.unique():
                         if f not in map_dict.keys():
                             map_dict[f] = f
