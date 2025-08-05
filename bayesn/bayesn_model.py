@@ -4011,7 +4011,7 @@ class SEDmodel(object):
                 raise ValueError('If not providing a scalar theta value, array must be of same length as the number of '
                                  'objects to simulate, N')
         if eps is None:
-            eps = self.sample_epsilon(N)
+            eps = self.sample_epsilon_cint(N)
         elif len(np.array(eps).shape) == 0:
             eps = np.array(eps)
             if eps == 0:
@@ -4215,6 +4215,37 @@ class SEDmodel(object):
         eps_tform = eps_tform.T
         eps = np.matmul(self.L_Sigma, eps_tform)
         eps = eps.T
+        eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+        eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
+        eps_full[:, 1:-1, :] = eps
+        return eps_full
+
+    def sample_epsilon_cint(self, N):
+        """
+        Samples epsilon from model prior
+
+        Parameters
+        ----------
+        N: int
+            Number of objects to sample for
+
+        Returns
+        -------
+        eps_full: array-like
+            Sampled epsilon values
+        """
+        fix_eps_knots = 3
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
+        N_l_knots = self.l_knots.shape[0]
+        eps_mu = jnp.zeros(N_knots_sig)
+        eps_tform = np.random.multivariate_normal(eps_mu, np.eye(N_knots_sig), N)
+        eps_tform = eps_tform.T
+        eps = np.matmul(self.L_Sigma, eps_tform)
+        eps = eps.T
+        eps = jnp.concatenate(
+            [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+             jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
+            axis=1)
         eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
         eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full[:, 1:-1, :] = eps
