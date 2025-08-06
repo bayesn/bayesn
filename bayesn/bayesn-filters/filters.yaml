@@ -240,22 +240,39 @@ filters:
     magsys: bd17
     magzero: 9.64
     path: filters/LCO/Swope/g_CSP2_tel_ccd_atm_ext_1.2.dat
+  g_D3YR:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.003
+    magcal: 0.0002
+    path: filters/DECam/DECam_g.dat
+    wave_sigma: 5
   g_DES:
     magsys: ab
     magzero: 0.0
     magupdate: -0.003
+    magcal: 0.0002
     path: filters/DECam/DECam_g.dat
+    wave_sigma: 5
   g_LSST:
     magsys: ab
     magzero: 0.0
     path: filters/LSST/total_g.dat
     lam_unit: nm
+  g_Foundation:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.011
+    magcal: 0.0049
+    path: filters/PS1/g_filt_revised.txt
+    wave_sigma: 5
   g_PS1:
     magsys: ab
     magzero: 0.0
     magupdate: -0.011
+    magcal: -0.0084
     path: filters/PS1/g_filt_revised.txt
-    wave_sigma: 7
+    wave_sigma: 5
   g_prime:
     magsys: bd17
     magzero: 9.64
@@ -268,22 +285,39 @@ filters:
     magsys: bd17
     magzero: 9.25
     path: filters/LCO/Swope/i_CSP2_tel_ccd_atm_ext_1.2.dat
+  i_D3YR:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.003
+    magcal: -0.001
+    path: filters/DECam/DECam_i.dat
+    wave_sigma: 10
   i_DES:
     magsys: ab
     magzero: 0.0
     magupdate: -0.003
+    magcal: -0.001
     path: filters/DECam/DECam_i.dat
+    wave_sigma: 10
   i_LSST:
     magsys: ab
     magzero: 0.0
     path: filters/LSST/total_i.dat
     lam_unit: nm
+  i_Foundation:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.008
+    magcal: 0.0017
+    path: filters/PS1/i_filt_tonry.txt
+    wave_sigma: 15
   i_PS1:
     magsys: ab
     magzero: 0.0
     magupdate: -0.008
+    magcal: -0.0178
     path: filters/PS1/i_filt_tonry.txt
-    wave_sigma: 7
+    wave_sigma: 15
   i_prime:
     magsys: bd17
     magzero: 9.25
@@ -320,18 +354,35 @@ filters:
     magsys: ab
     magzero: 0.0
     magupdate: -0.003
+    magcal: -0.0082
     path: filters/DECam/DECam_r.dat
+    wave_sigma: 5
+  r_D3YR:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.003
+    magcal: -0.0082
+    path: filters/DECam/DECam_r.dat
+    wave_sigma: 5
   r_LSST:
     magsys: ab
     magzero: 0.0
     path: filters/LSST/total_r.dat
     lam_unit: nm
+  r_Foundation:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.012
+    magcal: 0.0065
+    path: filters/PS1/r_filt_tonry.txt
+    wave_sigma: 10
   r_PS1:
     magsys: ab
     magzero: 0.0
     magupdate: -0.012
+    magcal: -0.0223
     path: filters/PS1/r_filt_tonry.txt
-    wave_sigma: 7
+    wave_sigma: 10
   r_prime:
     magsys: bd17
     magzero: 9.35
@@ -367,22 +418,39 @@ filters:
     magzero: 0.0
     path: filters/PS1/y_filt_tonry.txt
     wave_sigma: 7
+  z_D3YR:
+    magsys: ab
+    magzero: 0.0
+    magupdate: 0.001
+    magcal: -0.0056
+    path: filters/DECam/DECam_z.dat
+    wave_sigma: 30
   z_DES:
     magsys: ab
     magzero: 0.0
     magupdate: 0.001
+    magcal: -0.0056
     path: filters/DECam/DECam_z.dat
+    wave_sigma: 30
   z_LSST:
     magsys: ab
     magzero: 0.0
     path: filters/LSST/total_z.dat
     lam_unit: nm
+  z_Foundation:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.008
+    magcal: 0.012
+    path: filters/PS1/z_filt_tonry.txt
+    wave_sigma: 20
   z_PS1:
     magsys: ab
     magzero: 0.0
     magupdate: -0.008
+    magcal: -0.013
     path: filters/PS1/z_filt_tonry.txt
-    wave_sigma: 7
+    wave_sigma: 20
   z_prime:
     magsys: bd17
     magzero: 9.23

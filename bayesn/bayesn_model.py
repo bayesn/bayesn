@@ -410,8 +410,10 @@ class SEDmodel(object):
         band_ind = 1
         for key, val in filter_dict['filters'].items():
             band, magsys, offset = key, val['magsys'], val['magzero']
+            # MADE UP VALUES, FIX THIS!!!!!
             wave_sigma = val.get('wave_sigma', 10)
             mag_update = val.get('magupdate', 0)
+            mag_cal = val.get('magcal', 0)
             try:
                 R = np.loadtxt(val['path'])
             except:
@@ -471,7 +473,7 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
-            offset = offset + mag_update
+            offset = offset + mag_update + mag_cal
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
@@ -483,7 +485,6 @@ class SEDmodel(object):
             offsets.append(offset)
             wave_sigmas.append(wave_sigma)
             band_ind += 1
-
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
@@ -527,10 +528,14 @@ class SEDmodel(object):
         self.KD_x = device_put(invKD_irr(self.xk))
         self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, self.KD_x))
 
-        calib_cov = np.load(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_COV_V6.0.npz'))
-        # print(self.calib_cov)
-        self.calib_cov = calib_cov['cov']
-        self.calib_labels = np.loadtxt(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_CHCOV_labels.txt'), dtype=str)
+        calib_cov = np.load(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_COV_V9.0.npz'))
+        cov = calib_cov['cov'][4:, 4:] # Skip PS1 aperture photometry values
+        labels = calib_cov['labels'][4:] # Skip PS1 aperture photometry values
+        map_dict = {'g_PS1SN': 'g_PS1', 'r_PS1SN': 'r_PS1', 'i_PS1SN': 'i_PS1', 'z_PS1SN': 'z_PS1'}
+        labels = ['_'.join(label.replace(' O', '').split('-')[::-1]) for label in labels]
+        labels = [map_dict.get(label, label) for label in labels]
+        self.calib_cov = cov
+        self.calib_labels = np.array(labels)
         self.wave_sigma = jnp.array(wave_sigmas)
 
     def _calculate_band_weights(self, redshifts, ebv):
