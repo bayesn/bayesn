@@ -3452,6 +3452,10 @@ class SEDmodel(object):
                 np.diag(np.mean(samples["sigmaepsilon"], axis=[0, 1])),
                 np.mean(samples["L_Omega"], axis=[0, 1]),
             )
+            L_Sigma_dust = np.matmul(
+                np.diag(np.mean(samples["sigmaepsilon_dust"], axis=[0, 1])),
+                np.mean(samples["L_Omega_dust"], axis=[0, 1]),
+            )
             sigma0 = np.mean(samples["sigma0"])
 
             tauA = np.mean(samples["tauA"])
@@ -3465,6 +3469,7 @@ class SEDmodel(object):
                 "W0": W0.tolist(),
                 "W1": W1.tolist(),
                 "L_SIGMA_EPSILON": L_Sigma.tolist(),
+                "L_SIGMA_EPSILON_DUST": L_Sigma_dust.tolist(),
             }
 
             if "singlerv" in args["mode"].lower():
