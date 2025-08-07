@@ -1,7 +1,9 @@
 plots/*
 results/*
 data/lcs/simulations/*
-data/dust_maps/
+bayesn/data/dust_maps/
+training_data/
+test_input.yaml
 model_files/T21_model/T21_free_tmax
 bayesn.egg-info/
 build/
