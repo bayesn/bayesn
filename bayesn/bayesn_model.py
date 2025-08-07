@@ -3819,7 +3819,7 @@ class SEDmodel(object):
                             "REDSHIFT_FINAL_ERR", 5e-4
                         )  # Assume some low z error if not specified
                         vpec, vpec_err = meta.get("VPEC", 0.0), meta.get(
-                            "VPEC_ERR", self.sigma_pec * 3e5
+                            "VPEC_ERR", self.sigma_pec * c
                         )
                         zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
                         zhd = (1 + zcmb) / (1 + zpec) - 1
@@ -3988,7 +3988,7 @@ class SEDmodel(object):
                         "REDSHIFT_FINAL_ERR", 5e-4
                     )  # Assume some low z error if not specified
                     vpec, vpec_err = meta.get("VPEC", 0.0), meta.get(
-                        "VPEC_ERR", self.sigma_pec * 3e5
+                        "VPEC_ERR", self.sigma_pec * c
                     )
                     zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
                     zhd = (1 + zcmb) / (1 + zpec) - 1
