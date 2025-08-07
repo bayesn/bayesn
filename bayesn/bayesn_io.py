@@ -4,11 +4,13 @@ curves
 """
 
 import os
+import gzip
 import numpy as np
 import astropy.table as at
 import sncosmo
 import time
 
+from collections import OrderedDict as odict
 
 def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio, z_cmb, z_cmb_err, ebv_mw, ra=None,
                        dec=None, author="anonymous", survey=None, paper=None, filename=None):
@@ -130,3 +132,84 @@ def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio,
 
     # Return filename
     return filename
+
+def read_snana_spectra(file_path):
+    """
+    Read spectroscopy from the SNANA lightcurve file
+    Forked and lightly modified from David Jones' SALTShaker repo
+    https://github.com/djones1040/SALTShaker/blob/main/saltshaker/util/snana.py
+
+    Parameters
+    ----------
+    file_path : str
+        path to the light curve file.
+
+    Returns
+    -------
+    spectrum : dict
+        dictionary with keys for each SPECTRUM_ID and values of 2-tuples.
+        The first element in the 2-tuple is a float for the observation MJD.
+        The second elment is a 4xN np.ndarray spanning:
+            wavelength_min, wavelength_max, flux, flux_error.
+
+    Notes
+    -----
+    Expected format is something like
+    ```
+    ...
+    NSPECTRA: 21
+
+
+    NVAR_SPEC: 5
+    VARNAMES_SPEC: LAMMIN LAMMAX  FLAM  FLAMERR SPECFLAG
+
+    SPECTRUM_ID: 1
+    SPECTRUM_MJD:  48639.50
+    SPECTRUM_NLAM:     1520
+    SPEC:   3540.52   3542.84 6.48624e-14 2.81711e-15 1
+    SPEC:   3542.84   3545.14 6.48624e-14 2.81711e-15 1
+    ...
+    SPEC:   7054.62   7056.93 3.98786e-15 2.76859e-15 1
+    SPECTRUM_END:
+
+    SPECTRUM_ID: 2
+    SPECTRUM_MJD:  48635.50
+    SPECTRUM_NLAM:     1520
+    SPEC:   3520.64   3522.97 5.53949e-14 1.38963e-15 1
+    SPEC:   3527.62   3529.95 5.35848e-14 1.38963e-15 1
+    ...
+    ```
+    """
+
+    if file_path.endswith('.gz'):
+        f = gzip.open(file_path, 'rt')
+    else:
+        f = open(file_path, 'r')
+    lines = f.readlines()
+    f.close()
+    spec_lines = np.array([line.split()[1:] for line in lines if line.startswith('SPEC:')]).astype(float)
+
+    spectra = {}
+    startSpec = False
+    spec_line_idx = 0
+    for line in lines:
+        if line.startswith('VARNAMES_SPEC'):
+            specvarnames = line.split()[1:]
+        elif startSpec and line.startswith('SPEC:'):
+            spec_line_idx += 1
+        elif line.startswith('SPECTRUM'):
+            if line.startswith('SPECTRUM_ID'):
+                startSpec = True
+                specid = int(line.split()[1])-1
+                spectra[specid] = {}
+                idx_start = spec_line_idx
+            elif not line.startswith('SPECTRUM_END'):
+                # SPECTRUM_MJD or SPECTRUM_NLAM
+                spectra[specid][line.split()[0].replace("SPECTRUM_", "")] = float(line.split()[1])
+            elif startSpec:
+                # SPECTRUM_END
+                startSpec = False
+                idx_end = spec_line_idx
+                for var_idx, column in enumerate(spec_lines.T):
+                    spectra[specid][specvarnames[var_idx]] = column[idx_start:idx_end]
+    return spectra
