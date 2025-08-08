@@ -1370,14 +1370,14 @@ class SEDmodel(object):
 
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
-            print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
-            print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
-            print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
-            print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
-            plt.close()
-            plt.scatter(redshift, Ds)
-            plt.show()
-            raise ValueError('Nope')
+            # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
+            # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
+            # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
+            # print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
+            # plt.close()
+            # plt.scatter(redshift, Ds)
+            # plt.show()
+            # raise ValueError('Nope')
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
