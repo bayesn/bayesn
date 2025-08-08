@@ -2993,6 +2993,9 @@ class SEDmodel(object):
             calib_inds = jnp.array(calib_inds)
             calib_cov = self.calib_cov[jnp.ix_(calib_inds, calib_inds)]
             self.calib_chcov = jnp.linalg.cholesky(calib_cov)
+            print('----------------------------------')
+            print(self.calib_chcov)
+            print('----------------------------------')
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
