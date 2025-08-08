@@ -205,7 +205,7 @@ def read_snana_spectra(file_path):
                 idx_start = spec_line_idx
             elif not line.startswith('SPECTRUM_END'):
                 # SPECTRUM_MJD or SPECTRUM_NLAM
-                spectra[specid][line.split()[0].replace("SPECTRUM_", "")] = float(line.split()[1])
+                spectra[specid][line.split()[0].replace("SPECTRUM_", "").strip(':')] = float(line.split()[1])
             elif startSpec:
                 # SPECTRUM_END
                 startSpec = False
