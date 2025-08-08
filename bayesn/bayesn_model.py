@@ -1367,6 +1367,14 @@ class SEDmodel(object):
 
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
+            print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
+            print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
+            print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
+            print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
+            plt.close()
+            plt.scatter(redshift, Ds)
+            plt.show()
+            raise ValueError('Nope')
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
@@ -1842,7 +1850,7 @@ class SEDmodel(object):
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
         param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1])
-        param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1] - 1) + 0.005
+        param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1] - 1)
 
         return param_init
 
@@ -2882,6 +2890,17 @@ class SEDmodel(object):
                              'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                         lc = lc.dropna(subset=['flux', 'flux_err'])
                         lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+                        if lc['MAG'].min() < 8:
+                            print(lc.MAG.describe())
+                            print(lc.flux.min(), lc.flux.max())
+                            print(sn_name)
+                            plt.close()
+                            plt.errorbar(lc.MJD, lc.flux, lc.flux_err, fmt='o', label=sn_name)
+                            plt.figure()
+                            plt.errorbar(lc.MJD, lc.MAG, lc.MAGERR, fmt='o', label=sn_name)
+                            plt.gca().invert_yaxis()
+                            plt.show()
+                            BRODIE
                         sne.append(sn_name)
                         peak_mjds.append(peak_mjd)
                         t_ranges.append((lc['t'].min(), lc['t'].max()))
