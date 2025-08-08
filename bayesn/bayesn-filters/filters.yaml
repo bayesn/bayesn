@@ -11,7 +11,9 @@ filters:
   B_CSP:
     magsys: bd17
     magzero: 9.896
-    path: filters/LCO/Swope/B_tel_ccd_atm_ext_1.2.dat
+    magcal: -0.0009
+    path: filters/LCO/Swope/B_tel_ccd_atm_ext_1.2.dat+50
+    wave_sigma: 15
   B_CSP2:
     magsys: vega
     magzero: 0.03
@@ -191,7 +193,15 @@ filters:
   V_CSP:
     magsys: bd17
     magzero: 9.494
+    magcal: -0.01
+    path: filters/LCO/Swope/V_LC9844_tel_ccd_atm_ext_1.2.dat+-50
+    wave_sigma: 15
+  V_CSP_noshift:
+    magsys: bd17
+    magzero: 9.494
+    magcal: 0.0022
     path: filters/LCO/Swope/V_LC9844_tel_ccd_atm_ext_1.2.dat
+    wave_sigma: 15
   V_CSP2:
     magsys: vega
     magzero: 0.03
@@ -199,10 +209,13 @@ filters:
   V_CSP_3009:
     magsys: bd17
     magzero: 9.488
+    magcal: -0.0092
     path: filters/LCO/Swope/V_LC3009_tel_ccd_atm_ext_1.2.dat
+    wave_sigma: 15
   V_CSP_3014:
     magsys: bd17
     magzero: 9.492
+    magcal: 0.0016
     path: filters/LCO/Swope/V_LC3014_tel_ccd_atm_ext_1.2.dat
   V_SWIFT:
     magsys: vega
@@ -235,7 +248,9 @@ filters:
   g_CSP:
     magsys: bd17
     magzero: 9.644
+    magcal: 0.0009
     path: filters/LCO/Swope/g_tel_ccd_atm_ext_1.2.dat
+    wave_sigma: 15
   g_CSP2:
     magsys: bd17
     magzero: 9.64
@@ -280,7 +295,9 @@ filters:
   i_CSP:
     magsys: bd17
     magzero: 9.25
+    magcal: -0.0206
     path: filters/LCO/Swope/i_tel_ccd_atm_ext_1.2.dat
+    wave_sigma: 15
   i_CSP2:
     magsys: bd17
     magzero: 9.25
@@ -345,7 +362,9 @@ filters:
   r_CSP:
     magsys: bd17
     magzero: 9.352
+    magcal: -0.0049
     path: filters/LCO/Swope/r_tel_ccd_atm_ext_1.2.dat
+    wave_sigma: 10
   r_CSP2:
     magsys: bd17
     magzero: 9.35
@@ -459,3 +478,180 @@ filters:
     magsys: vega
     magzero: 0.0
     path: filters/UKIRT/WFCAM/z_total.dat
+  CFA41-B/D:
+    magsys: bd17
+    magzero: 9.88605
+    magcal: -0.012
+    path: filters/CfA4/cfa4_B_p1_modtran.dat_weighted
+    wave_sigma: 20
+  CFA41-V/E:
+    magsys: bd17
+    magzero: 9.47432
+    magcal: -0.0009
+    path: filters/CfA4/cfa4_V_p1_modtran.dat_weighted
+    wave_sigma: 15
+  CFA41-r/F:
+    magsys: bd17
+    magzero: 9.35252
+    magcal: 0.0023
+    path: filters/CfA4/cfa4_r_p1_modtran.dat_weighted
+    wave_sigma: 10
+  CFA41-i/G:
+    magsys: bd17
+    magzero: 9.25465
+    magcal: 0.0023
+    path: filters/CfA4/cfa4_i_p1_modtran.dat_weighted
+    wave_sigma: 15
+  CFA42-B/P:
+    magsys: bd17
+    magzero: 9.86124
+    magcal: 0.0264
+    path: filters/CfA4/cfa4_B_p2_modtran.dat_weighted+-20
+    wave_sigma: 20
+  CFA42-V/Q:
+    magsys: bd17
+    magzero: 9.47432
+    magcal: 0.0137
+    path: filters/CfA4/cfa4_V_p2_modtran.dat_weighted+20
+    wave_sigma: 15
+  CFA42-r/W:
+    magsys: bd17
+    magzero: 9.3573
+    magcal: 0.0193
+    path: filters/CfA4/cfa4_r_p2_modtran.dat_weighted+20
+    wave_sigma: 15
+  CFA42-i/T:
+    magsys: bd17
+    magzero: 9.25521
+    magcal: 0.0127
+    path: filters/CfA4/cfa4_i_p2_modtran.dat_weighted+20
+    wave_sigma: 15
+  CFA3S-U/a:
+    magsys: bd17
+    magzero: 9.724
+    magcal: 0.
+    path: filters/CfA3/4sh_U_modtran.dat
+  CFA3S-B/b:
+    magsys: bd17
+    magzero: 9.874
+    magcal: -0.0266
+    path: filters/CfA3/4sh_B_modtran.dat+70
+    wave_sigma: 20
+  CFA3S-V/c:
+    magsys: bd17
+    magzero: 9.479
+    magcal: -0.012
+    path: filters/CfA3/4sh_V_modtran.dat
+    wave_sigma: 15
+  CFA3S-R/d:
+    magsys: bd17
+    magzero: 9.155
+    magcal: -0.0118
+    path: filters/CfA3/4sh_R_modtran.dat
+    wave_sigma: 20
+  CFA3S-I/e:
+    magsys: bd17
+    magzero: 8.851
+    magcal: -0.0021
+    path: filters/CfA3/4sh_I_modtran.dat
+    wave_sigma: 20
+  CFA3K-B/h:
+    magsys: bd17
+    magzero: 9.88
+    magcal: -0.0102
+    path: filters/CfA3/KC_B_modtran.dat+70
+    wave_sigma: 15
+  CFA3K-V/j:
+    magsys: bd17
+    magzero: 9.472
+    magcal: -0.007
+    path: filters/CfA3/KC_V_modtran.dat
+    wave_sigma: 15
+  CFA3K-r/k:
+    magsys: bd17
+    magzero: 9.352
+    magcal: 0.0107
+    path: filters/CfA3/KC_r_modtran.dat
+    wave_sigma: 20
+  CFA3K-i/l:
+    magsys: bd17
+    magzero: 9.254
+    magcal: 0.0033
+    path: filters/CfA3/KC_i_modtran.dat
+    wave_sigma: 20
+  Bessell-U/U:
+    magsys: bd17
+    magzero: 9.724
+    path: filters/standard/Bessell/sux-shifted.dat_5A
+  Bessell-B/B:
+    magsys: bd17
+    magzero: 9.907
+    path: filters/standard/Bessell/sb-shifted.dat_5A
+  Bessell-V/V:
+    magsys: bd17
+    magzero: 9.464
+    path: filters/standard/Bessell/sv-shifted.dat_5A
+  Bessell-R/R:
+    magsys: bd17
+    magzero: 9.166
+    path: filters/standard/Bessell/sr-shifted.dat_5A
+  Bessell-I/I:
+    magsys: bd17
+    magzero: 8.846
+    path: filters/standard/Bessell/si-shifted.dat_5A
+  g_SNLS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.005
+    magcal: 0.0099
+    path: filters/SNLS/effMEGACAM-g.dat+30
+    wave_sigma: 5
+  r_SNLS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.006
+    magcal: 0.0097
+    path: filters/SNLS/effMEGACAM-r.dat+30
+    wave_sigma: 20
+  i_SNLS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.007
+    magcal: 0.0036
+    path: filters/SNLS/effMEGACAM-i.dat+30
+    wave_sigma: 15
+  z_SNLS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.007
+    magcal: 0.002
+    path: filters/SNLS/effMEGACAM-z.dat+30
+    wave_sigma: 20
+  g_SDSS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: -0.005
+    magcal: -0.0183
+    path: filters/SDSS/g.dat+15
+    wave_sigma: 10
+  r_SDSS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.006
+    magcal: 0.0058
+    path: filters/SDSS/r.dat
+    wave_sigma: 10
+  i_SDSS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.007
+    magcal: 0.001
+    path: filters/SDSS/i.dat
+    wave_sigma: 15
+  z_SDSS:
+    magsys: ab
+    magzero: 0.0
+    magupdate: +0.007
+    magcal: -0.0022
+    path: filters/SDSS/z.dat
+    wave_sigma: 20
