@@ -3197,8 +3197,6 @@ class SEDmodel(object):
             self.calib_chcov = jnp.linalg.cholesky(calib_cov)
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
-            print(used_bands)
-            raise ValueError('BRODIE')
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
             self.wave_sigma = self.wave_sigma[self.used_band_inds]
