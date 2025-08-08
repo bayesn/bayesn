@@ -1319,6 +1319,8 @@ class SEDmodel(object):
                                             dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
         sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
         L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        print(L_Omega)
+        print(jnp.isnan(L_Omega).sum())
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
@@ -1333,9 +1335,6 @@ class SEDmodel(object):
 
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
         mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
-
-        lam_shift = lam_shift * 0
-        mag_shift = mag_shift * 0
 
         mag_shift = jnp.r_[0, mag_shift]
 
@@ -1370,6 +1369,17 @@ class SEDmodel(object):
 
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
+            # print(obs.shape)
+            # plt.close()
+            # for i in range(self.data.shape[-1]):
+            #     mask = obs[-1, :, i].astype(bool)
+            #     plt.figure(figsize=(12, 8))
+            #     plt.scatter(obs[0, mask, i], flux[mask, i], label=f'SN {i}', color='b')
+            #     plt.errorbar(obs[0, mask, i], obs[1, mask, i], yerr=obs[2, mask, i], fmt='x', label=f'SN {i}', color='r')
+            #     plt.gca().invert_yaxis()
+            #     plt.savefig(f'/Users/matt/Documents/SALT_train_plots/{self.sn_list[i]}.png')
+            #     plt.close()
+            # raise ValueError('Nope')
             # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
             # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
             # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
