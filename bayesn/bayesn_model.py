@@ -1334,6 +1334,9 @@ class SEDmodel(object):
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
         mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
 
+        lam_shift = lam_shift * 0
+        mag_shift = mag_shift * 0
+
         mag_shift = jnp.r_[0, mag_shift]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
