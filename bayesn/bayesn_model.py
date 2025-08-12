@@ -412,7 +412,6 @@ class SEDmodel(object):
             band, magsys, offset = key, val['magsys'], val['magzero']
             # MADE UP VALUES, FIX THIS!!!!!
             wave_sigma = val.get('wave_sigma', 10)
-            wave_sigma = 1000
             mag_update = val.get('magupdate', 0)
             mag_cal = val.get('magcal', 0)
             try:
@@ -539,7 +538,7 @@ class SEDmodel(object):
                     'CFA3K-r': 'CFA3K-r/k', 'CFA3K-i': 'CFA3K-i/l', 'CFA3S-B': 'CFA3S-B/b', 'CFA3S-V': 'CFA3S-V/c',
                     'CFA3S-R': 'CFA3S-R/d', 'CFA3S-I': 'CFA3S-I/e', 'CSP-g': 'g_CSP', 'CSP-r': 'r_CSP',
                     'CSP-B': 'B_CSP', 'CSP-V': 'V_CSP', 'CSP-i': 'i_CSP', 'CSP-o': 'V_CSP_3009', 'CSP-m': 'V_CSP_3014',
-                    'CSP-n': 'V_CSP_noshift', 'CFA4P1-B': 'CFAP1-B/D', 'CFA4P1-V': 'CFA41-V/E',
+                    'CSP-n': 'V_CSP_noshift', 'CFA4P1-B': 'CFA41-B/D', 'CFA4P1-V': 'CFA41-V/E',
                     'CFA4P1-r': 'CFA41-r/F', 'CFA4P1-i': 'CFA41-i/G', 'CFA4P2-B': 'CFA42-B/P',
                     'CFA4P2-V': 'CFA42-V/Q', 'CFA4P2-r': 'CFA42-r/W', 'CFA4P2-i': 'CFA42-i/T', 'D3YR-g': 'g_D3YR',
                     'D3YR-r': 'r_D3YR', 'D3YR-i': 'i_D3YR', 'D3YR-z': 'z_D3YR', 'Foundation-g': 'g_Foundation',
@@ -547,7 +546,6 @@ class SEDmodel(object):
                     }
         labels = [l.replace(' O', '') for l in labels]  # Remove ' O' from labels
         labels = [map_dict.get(label, label) for label in labels]
-        print(labels)
         self.calib_cov = cov
         self.calib_labels = np.array(labels)
         self.wave_sigma = jnp.array(wave_sigmas)
@@ -1337,7 +1335,7 @@ class SEDmodel(object):
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
-        print(lam_shift)
+        # print(lam_shift)
         # print(self.wave_sigma)
         # lam_shift = jnp.zeros_like(self.wave_sigma)
         mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
@@ -1392,7 +1390,10 @@ class SEDmodel(object):
             # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
             # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
             # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
+            # print('------------------------------------')
             # print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
+            # print((obs.shape[1] * obs.shape[2]))
+            # print((1 - mask).sum())
             # plt.close()
             # plt.scatter(redshift, Ds)
             # plt.show()
@@ -1400,8 +1401,6 @@ class SEDmodel(object):
 
             with numpyro.handlers.mask(mask=mask):
                 test = numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
-            # print(test)
-            # print(jnp.isnan(test).sum(), jnp.isinf(test).sum())
 
     def train_model_popRV(self, obs, weights):
         """
@@ -3023,6 +3022,7 @@ class SEDmodel(object):
             self.calib_chcov = jnp.linalg.cholesky(calib_cov)
             print('----------------------------------')
             print(self.calib_chcov)
+            print(used_bands)
             print('----------------------------------')
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
