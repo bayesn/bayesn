@@ -412,6 +412,7 @@ class SEDmodel(object):
             band, magsys, offset = key, val['magsys'], val['magzero']
             # MADE UP VALUES, FIX THIS!!!!!
             wave_sigma = val.get('wave_sigma', 10)
+            wave_sigma = 1000
             mag_update = val.get('magupdate', 0)
             mag_cal = val.get('magcal', 0)
             try:
@@ -819,16 +820,18 @@ class SEDmodel(object):
         def linterp(x, xp, fp):
             return jnp.interp(x, xp, fp, left=0)
 
-        lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
+        # lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
+        #
+        # new_model_wave = self.model_wave[None, :, None] - lam_shift[None, None, :] / (1 + z[:, None, None])
+        # new_model_wave = new_model_wave.transpose(0, 2, 1)
+        # new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
+        #                                          new_model_wave.shape[2]), order='F')
+        # new_weights = weights.transpose(0, 2, 1)
+        # new_weights = new_weights.reshape((new_weights.shape[0] * new_weights.shape[1], new_weights.shape[2]), order='F')
+        # new_weights = lmap(self.model_wave, new_model_wave, new_weights)
+        # new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
 
-        new_model_wave = self.model_wave[None, :, None] - lam_shift[None, None, :] * (1 + z[:, None, None])
-        new_model_wave = new_model_wave.transpose(0, 2, 1)
-        new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
-                                                 new_model_wave.shape[2]), order='F')
-        new_weights = weights.transpose(0, 2, 1)
-        new_weights = new_weights.reshape((new_weights.shape[0] * new_weights.shape[1], new_weights.shape[2]), order='F')
-        new_weights = lmap(self.model_wave, new_model_wave, new_weights)
-        new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
+        new_weights = weights
 
         num = self.model_wave[None, :, None] * new_weights
         denom = jnp.sum(0.5 * (num[:, :-1, :] + num[:, 1:, :]) * self.dlambda[None, :, None], axis=1)
@@ -837,10 +840,10 @@ class SEDmodel(object):
 
         new_model_wave_obs = (self.model_wave[None, :, None] * (1 + z[:, None, None]) - lam_shift[None, None, :]).transpose(1, 0, 2)
         new_model_wave_obs_flat = new_model_wave_obs.reshape((new_model_wave_obs.shape[0] * new_model_wave_obs.shape[1] * new_model_wave_obs.shape[2]), order='F')
-
         M_fitz_block = self.J_t_map(1e4 / new_model_wave_obs_flat, self.xk, self.KD_x)
         M_fitz_block = M_fitz_block.reshape((*new_model_wave_obs.shape, M_fitz_block.shape[1]), order='F').transpose(1, 0, 2, 3)
         A_MW = av_mw[:, None, None] * (1 + (M_fitz_block @ self.yk.T[None, None, ...]) / self.RV_MW)[..., 0]
+        # A_MW = (av_mw[:, None, None] * (((1 + (self.M_fitz_block @ self.yk.T) / self.RV_MW)[..., 0]).T)).transpose(0, 2, 1)
 
         weights *= 10 ** (-0.4 * A_MW)
         weights /= (1 + z)[:, None, None]
@@ -1319,8 +1322,8 @@ class SEDmodel(object):
                                             dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
         sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
         L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
-        print(L_Omega)
-        print(jnp.isnan(L_Omega).sum())
+        # print(L_Omega)
+        # print(jnp.isnan(L_Omega).sum())
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
@@ -1334,6 +1337,9 @@ class SEDmodel(object):
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+        print(lam_shift)
+        # print(self.wave_sigma)
+        # lam_shift = jnp.zeros_like(self.wave_sigma)
         mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
 
         mag_shift = jnp.r_[0, mag_shift]
@@ -1372,6 +1378,8 @@ class SEDmodel(object):
             # print(obs.shape)
             # plt.close()
             # for i in range(self.data.shape[-1]):
+            #     if redshift[i] < 0.6:
+            #         continue
             #     mask = obs[-1, :, i].astype(bool)
             #     plt.figure(figsize=(12, 8))
             #     plt.scatter(obs[0, mask, i], flux[mask, i], label=f'SN {i}', color='b')
@@ -1380,6 +1388,7 @@ class SEDmodel(object):
             #     plt.savefig(f'/Users/matt/Documents/SALT_train_plots/{self.sn_list[i]}.png')
             #     plt.close()
             # raise ValueError('Nope')
+            # print('-------->', jnp.min(flux))
             # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
             # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
             # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
@@ -1390,7 +1399,9 @@ class SEDmodel(object):
             # raise ValueError('Nope')
 
             with numpyro.handlers.mask(mask=mask):
-                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+                test = numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
+            # print(test)
+            # print(jnp.isnan(test).sum(), jnp.isinf(test).sum())
 
     def train_model_popRV(self, obs, weights):
         """
@@ -1453,14 +1464,16 @@ class SEDmodel(object):
             redshift = obs[-5, 0, sn_index]
             redshift_error = obs[-4, 0, sn_index]
             muhat = obs[-3, 0, sn_index]
+            av_mw = obs[-2, 0, sn_index] * self.RV_MW
 
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
-                                      weights)
+            # self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift, mag_shift
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+                                      weights, 0, 0)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
@@ -2818,6 +2831,7 @@ class SEDmodel(object):
                 for dir_ind, list_file in enumerate(list_files):
                     print(list_file)
                     sn_list = np.atleast_1d(np.loadtxt(list_file, dtype='str'))
+                    survey_zs = []
                     for sn_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
                         if (sn_ind + 1 - args['jobid']) % args['njobtot'] != 0:
                             continue
@@ -2851,12 +2865,15 @@ class SEDmodel(object):
                                 meta[column] = sn_override[column].values[0]
                         peak_mjd = meta.get('PEAKMJD', meta.get('SEARCH_PEAKMJD', -99))
                         zhel = meta['REDSHIFT_HELIO']
+                        # if zhel < 0.62:
+                        #     continue
                         zcmb = meta.get('REDSHIFT_FINAL', meta['REDSHIFT_CMB'])
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
                         vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
                         zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
                         zhd = (1 + zcmb) / (1 + zpec) - 1
+                        survey_zs.append(zhd)
                         # We deliberately don't include vpec error here, as BayeSN includes this elsewhere
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                         # If filter not in map_dict, assume one-to-one mapping------
@@ -2961,6 +2978,7 @@ class SEDmodel(object):
                         snrmax3s.append(snrmax3)
                     self.survey = meta.get('SURVEY', 'NULL')
                     self.survey_id = survey_dict.get(self.survey, 0)
+                    print(meta['SURVEY'], np.min(survey_zs), np.max(survey_zs), np.isnan(survey_zs).sum())
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
