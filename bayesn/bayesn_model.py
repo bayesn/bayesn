@@ -818,18 +818,18 @@ class SEDmodel(object):
         def linterp(x, xp, fp):
             return jnp.interp(x, xp, fp, left=0)
 
-        # lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
-        #
-        # new_model_wave = self.model_wave[None, :, None] - lam_shift[None, None, :] / (1 + z[:, None, None])
-        # new_model_wave = new_model_wave.transpose(0, 2, 1)
-        # new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
-        #                                          new_model_wave.shape[2]), order='F')
-        # new_weights = weights.transpose(0, 2, 1)
-        # new_weights = new_weights.reshape((new_weights.shape[0] * new_weights.shape[1], new_weights.shape[2]), order='F')
-        # new_weights = lmap(self.model_wave, new_model_wave, new_weights)
-        # new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
+        lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
 
-        new_weights = weights
+        new_model_wave = self.model_wave[None, :, None] - lam_shift[None, None, :] / (1 + z[:, None, None])
+        new_model_wave = new_model_wave.transpose(0, 2, 1)
+        new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
+                                                 new_model_wave.shape[2]), order='F')
+        new_weights = weights.transpose(0, 2, 1)
+        new_weights = new_weights.reshape((new_weights.shape[0] * new_weights.shape[1], new_weights.shape[2]), order='F')
+        new_weights = lmap(self.model_wave, new_model_wave, new_weights)
+        new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
+
+        # new_weights = weights
 
         num = self.model_wave[None, :, None] * new_weights
         denom = jnp.sum(0.5 * (num[:, :-1, :] + num[:, 1:, :]) * self.dlambda[None, :, None], axis=1)
