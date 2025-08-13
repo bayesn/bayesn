@@ -2466,6 +2466,8 @@ class SEDmodel(object):
             with open(os.path.join(args['outputdir'], 'bayesn.yaml'), 'w') as file:
                 yaml.dump(yaml_data, file)
 
+            self.fitres_table.to_pandas().to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}_snprops.csv'), index=False)
+
         z_HEL = self.data[-5, 0, :]
         muhat = self.data[-3, 0, :]
 
