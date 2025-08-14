@@ -471,6 +471,7 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
+            print(apply_mag_shifts)
             offset = offset + (mag_update + mag_cal) * int(apply_mag_shifts)
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
