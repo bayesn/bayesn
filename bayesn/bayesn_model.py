@@ -3063,8 +3063,6 @@ class SEDmodel(object):
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
-            print(self.fitres_table)
-            FRANK
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
             sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
