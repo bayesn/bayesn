@@ -471,7 +471,6 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
-            print(apply_mag_shifts)
             offset = offset + (mag_update + mag_cal) * int(apply_mag_shifts)
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
@@ -1957,7 +1956,7 @@ class SEDmodel(object):
 
         if 'training' in args['mode'].lower():
             self.l_knots = device_put(np.array(args['l_knots'], dtype=float))
-            self._setup_band_weights(args)
+            self._setup_band_weights(args['apply_mag_shifts'])
             KD_l = invKD_irr(self.l_knots)
             self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
             self.tau_knots = device_put(np.array(args['tau_knots'], dtype=float))
