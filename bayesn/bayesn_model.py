@@ -820,7 +820,7 @@ class SEDmodel(object):
 
         lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
 
-        new_model_wave = self.model_wave[None, :, None] - lam_shift[None, None, :] / (1 + z[:, None, None])
+        new_model_wave = self.model_wave[None, :, None] + lam_shift[None, None, :] / (1 + z[:, None, None])
         new_model_wave = new_model_wave.transpose(0, 2, 1)
         new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
                                                  new_model_wave.shape[2]), order='F')
@@ -829,6 +829,16 @@ class SEDmodel(object):
         new_weights = lmap(self.model_wave, new_model_wave, new_weights)
         new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]), order='F').transpose(0, 2, 1)
 
+        # print(z[0])
+        # print(lam_shift)
+        # print(weights.shape)
+        # plt.close()
+        # plt.plot(self.model_wave, weights[0, :, -1], label='Original Weights')
+        # plt.plot(self.model_wave, new_weights[0, :, -1], label='New Weights')
+        # plt.legend()
+        # plt.show()
+        # raise ValueError('Nope')
+
         # new_weights = weights
 
         num = self.model_wave[None, :, None] * new_weights
@@ -836,7 +846,7 @@ class SEDmodel(object):
         weights = num / denom[:, None, :]
         # weights /= weights.sum(axis=1)[:, None, :]
 
-        new_model_wave_obs = (self.model_wave[None, :, None] * (1 + z[:, None, None]) - lam_shift[None, None, :]).transpose(1, 0, 2)
+        new_model_wave_obs = (self.model_wave[None, :, None] * (1 + z[:, None, None]) + lam_shift[None, None, :]).transpose(1, 0, 2)
         new_model_wave_obs_flat = new_model_wave_obs.reshape((new_model_wave_obs.shape[0] * new_model_wave_obs.shape[1] * new_model_wave_obs.shape[2]), order='F')
         M_fitz_block = self.J_t_map(1e4 / new_model_wave_obs_flat, self.xk, self.KD_x)
         M_fitz_block = M_fitz_block.reshape((*new_model_wave_obs.shape, M_fitz_block.shape[1]), order='F').transpose(1, 0, 2, 3)
@@ -855,11 +865,6 @@ class SEDmodel(object):
         # raise ValueError('Nope')
 
         # plt.plot(self.model_wave, denom[])
-
-        # plt.plot(self.model_wave, weights[0, :, 1])
-        # plt.plot(self.model_wave, self.test_weights[0, :, 1])
-        # plt.show()
-        # raise ValueError('Nope')
 
         # test_obs_band_weights = (
         #     self.test_weights[batch_indices, :, band_indices.T.flatten()]
@@ -880,9 +885,8 @@ class SEDmodel(object):
         # print(test_model_flux[:, 0] / model_flux[:, 0])
         # raise ValueError('Nope')
         # model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
-        model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds))
         mag_shift = mag_shift[band_indices]
-        model_flux = model_flux * 10 ** (-0.4 * mag_shift)
+        model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds + mag_shift))
         zps = self.zps[band_indices]
         offsets = self.offsets[band_indices]
         zp_flux = 10 ** (zps / 2.5)
@@ -1874,7 +1878,7 @@ class SEDmodel(object):
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
 
-        param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1])
+        param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1]) + 100
         param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1] - 1)
 
         return param_init
@@ -2939,6 +2943,7 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
+                        idsurvey.append(meta.get('SURVEY', 'NULL'))
                         sn_type.append(meta.get('TYPE', 0))
                         field.append(meta.get('FIELD', 'VOID'))
                         z_hels.append(zhel)
@@ -3022,23 +3027,24 @@ class SEDmodel(object):
             calib_inds = jnp.array(calib_inds)
             calib_cov = self.calib_cov[jnp.ix_(calib_inds, calib_inds)]
             self.calib_chcov = jnp.linalg.cholesky(calib_cov)
-            print('----------------------------------')
-            print(self.calib_chcov)
-            print(used_bands)
-            print('----------------------------------')
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
             self.zps = self.zps[self.used_band_inds]
             self.wave_sigma = self.wave_sigma[self.used_band_inds]
+            print('----------------------------------')
+            print(self.calib_chcov)
+            print(used_bands)
+            print(self.wave_sigma)
+            print('----------------------------------')
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
-            idsurvey = [self.survey_id] * len(sne)
+            # idsurvey = [self.survey_id] * len(sne)
             snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
             if self.sim:
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
@@ -3057,6 +3063,8 @@ class SEDmodel(object):
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3'])
             self.fitres_table = table
+            print(self.fitres_table)
+            FRANK
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
             sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
