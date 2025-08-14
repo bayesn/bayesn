@@ -46,9 +46,13 @@ with open(cmd_args.input, 'r') as file:
 if 'load_model' not in args.keys() and cmd_args.load_model is None:
     args['load_model'] = 'T21_model'
 
+# Apply mag shifts unless explicitly set to False
+if 'apply_mag_shifts' not in args.keys() and vars(cmd_args).get('apply_mag_shifts') is None:
+    args['apply_mag_shifts'] = True
+
 # If no default filters.yaml is specified in input.yaml, use argparse value (including default of None)
 if 'filters' not in args.keys():
     args['filters'] = cmd_args.filters
 
-model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'])
+model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'], apply_mag_shifts=args['apply_mag_shifts'])
 model.run(args, cmd_args)
