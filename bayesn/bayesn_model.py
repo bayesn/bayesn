@@ -196,7 +196,8 @@ class SEDmodel(object):
     out: `bayesn_model.SEDmodel` instance
     """
 
-    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None, apply_mag_shifts=True,
+    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None, apply_dovekie_mag_shifts=True,
+                 apply_mag_shifts=False, apply_lam_shifts=False, shift_file=None,
                  fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
@@ -253,7 +254,7 @@ class SEDmodel(object):
 
         self.used_band_inds = None
         self.band_weights = None
-        self._setup_band_weights(apply_mag_shifts)
+        self._setup_band_weights(apply_dovekie_mag_shifts, shift_file, apply_mag_shifts, apply_lam_shifts)
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
@@ -284,7 +285,7 @@ class SEDmodel(object):
         self.hsiao_flux = device_put(hsiao_flux.T)
         self.hsiao_flux = jnp.matmul(self.J_l_T_hsiao, self.hsiao_flux)
 
-    def _setup_band_weights(self, apply_mag_shifts=True):
+    def _setup_band_weights(self, apply_dovekie_mag_shifts=True, shift_file=None, apply_mag_shifts=False, apply_lam_shifts=False):
         """
         Sets up the interpolation for the band weights used for photometry as well as calculating the zero points for
         each band. This code is partly based off ParSNiP from Boone+21
@@ -295,6 +296,11 @@ class SEDmodel(object):
         self.spectrum_bins = 300
         self.band_oversampling = 51
         self.max_redshift = 4
+        
+        if shift_file is not None:
+            if not os.path.exists(shift_file):
+                raise FileNotFoundError(f'Specified shift file {shift_file} does not exist')
+            shift_file = pd.read_csv(shift_file, comment='#')
 
         model_log_wave = np.linspace(np.log10(self.min_wave),
                                      np.log10(self.max_wave),
@@ -407,6 +413,7 @@ class SEDmodel(object):
         offsets.append(0)
         wave_sigmas.append(10)
 
+        count = 0
         band_ind = 1
         for key, val in filter_dict['filters'].items():
             band, magsys, offset = key, val['magsys'], val['magzero']
@@ -425,6 +432,14 @@ class SEDmodel(object):
                 R[:, 0] = R[:, 0] * 10
             elif units.lower() == 'micron':  # Convert from microns to Angstroms
                 R[:, 0] = R[:, 0] * 1e4
+
+            lam_shift, mag_shift = 0, 0
+            if shift_file is not None and key in shift_file.BAND.values:
+                shift = shift_file[shift_file.BAND == key]
+                lam_shift, mag_shift = shift['LAM_SHIFT'].values[0] * int(apply_lam_shifts), \
+                                       shift['MAG_SHIFT'].values[0] * int(apply_mag_shifts)
+
+            R[:, 0] = R[:, 0] + lam_shift  # Apply wavelength shift if specified
 
             band_low_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][0], 0]
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
@@ -471,7 +486,7 @@ class SEDmodel(object):
                 standard = filter_dict['standards'][magsys]
                 zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
 
-            offset = offset + (mag_update + mag_cal) * int(apply_mag_shifts)
+            offset = offset + (mag_update + mag_cal) * int(apply_dovekie_mag_shifts) + mag_shift
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
@@ -483,7 +498,8 @@ class SEDmodel(object):
             offsets.append(offset)
             wave_sigmas.append(wave_sigma)
             band_ind += 1
-
+        print(count)
+        FRANK
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
@@ -2476,6 +2492,25 @@ class SEDmodel(object):
 
             self.fitres_table.to_pandas().to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}_snprops.csv'), index=False)
 
+        if 'lam_shift' in samples.keys() or 'mag_shift' in samples.keys():
+            rows = [[f] for f in self.used_bands[1:]]
+            columns = ['BAND']
+            if 'lam_shift' in samples.keys():
+                columns.extend(['LAM_SHIFT', 'LAM_SHIFT_ERR'])
+                for f_ind, f in enumerate(self.used_bands[1:]):
+                    lam_shift, lam_shift_err = float(samples['lam_shift'][..., f_ind + 1].mean()), float(
+                        samples['lam_shift'][..., f_ind + 1].std())
+                    rows[f_ind].append(lam_shift)
+                    rows[f_ind].append(lam_shift_err)
+            if 'mag_shift' in samples.keys():
+                columns.extend(['MAG_SHIFT', 'MAG_SHIFT_ERR'])
+                for f_ind, f in enumerate(self.used_bands[1:]):
+                    mag_shift, mag_shift_err = float(samples['mag_shift'][..., f_ind + 1].mean()), float(samples['mag_shift'][..., f_ind + 1].std())
+                    rows[f_ind].append(mag_shift)
+                    rows[f_ind].append(mag_shift_err)
+            df = pd.DataFrame(np.array(rows), columns=columns)
+            df.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}_band_shifts.csv'), index=False)
+
         z_HEL = self.data[-5, 0, :]
         muhat = self.data[-3, 0, :]
 
@@ -3037,12 +3072,12 @@ class SEDmodel(object):
             self.used_band_dict = used_band_dict
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
+            self.used_bands = used_bands
             self.zps = self.zps[self.used_band_inds]
             self.wave_sigma = self.wave_sigma[self.used_band_inds]
             print('----------------------------------')
             print(self.calib_chcov)
             print(used_bands)
-            print(self.wave_sigma)
             print('----------------------------------')
             self.offsets = self.offsets[self.used_band_inds]
             self.band_weights, self.band_weights_shift = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
