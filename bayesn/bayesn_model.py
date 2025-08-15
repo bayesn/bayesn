@@ -413,7 +413,6 @@ class SEDmodel(object):
         offsets.append(0)
         wave_sigmas.append(10)
 
-        count = 0
         band_ind = 1
         for key, val in filter_dict['filters'].items():
             band, magsys, offset = key, val['magsys'], val['magzero']
@@ -498,8 +497,7 @@ class SEDmodel(object):
             offsets.append(offset)
             wave_sigmas.append(wave_sigma)
             band_ind += 1
-        print(count)
-        FRANK
+
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
