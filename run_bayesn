@@ -36,8 +36,8 @@ parser.add_argument('--save_fit_errors', type=int, required=False)
 parser.add_argument('--error_floor', type=float, required=False)
 parser.add_argument('--apply_dovekie_mag_shifts', type=bool, required=False)
 parser.add_argument('--shift_file', type=str, required=False)
-parser.add_argument('--apply_mag_shifts', type=bool, required=False)
-parser.add_argument('--apply_lam_shifts', type=bool, required=False)
+parser.add_argument('--apply_mag_shifts', type=lambda x: (str(x).lower() == 'true'), required=False)
+parser.add_argument('--apply_lam_shifts', type=lambda x: (str(x).lower() == 'true'), required=False)
 cmd_args = parser.parse_args()
 
 if not os.path.exists(cmd_args.input):
