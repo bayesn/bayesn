@@ -57,14 +57,20 @@ if 'apply_dovekie_mag_shifts' not in args.keys() and cmd_args.apply_dovekie_mag_
 # Defaults to no shift file
 if 'shift_file' not in args.keys() and cmd_args.shift_file is None:
     args['shift_file'] = None
+elif cmd_args.shift_file is not None:
+    args['shift_file'] = cmd_args.shift_file
 
 # Default to not applying BayeSN mag shifts
 if 'apply_mag_shifts' not in args.keys() and cmd_args.apply_mag_shifts is None:
     args['apply_mag_shifts'] = False
+elif cmd_args.apply_mag_shifts is not None:
+    args['apply_mag_shifts'] = cmd_args.apply_mag_shifts
 
 # Default to not applying BayeSN wavelength shifts
 if 'apply_lam_shifts' not in args.keys() and cmd_args.apply_mag_shifts is None:
     args['apply_lam_shifts'] = False
+elif cmd_args.apply_lam_shifts is not None:
+    args['apply_lam_shifts'] = cmd_args.apply_lam_shifts
 
 # If no default filters.yaml is specified in input.yaml, use argparse value (including default of None)
 if 'filters' not in args.keys():
