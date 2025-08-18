@@ -1392,7 +1392,15 @@ class SEDmodel(object):
             Ds_err = Ds_err * fixdist + 5 * (1 - fixdist)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
 
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, J_t, hsiao_interp,
                                       weights, lam_shift, mag_shift)
             # print(obs.shape)
             # plt.close()
@@ -1894,6 +1902,8 @@ class SEDmodel(object):
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+
+        param_init['tmax'] = jnp.zeros_like(self.data[-3, 0, :])
 
         param_init['lam_shift'] = jnp.zeros(self.band_weights.shape[-1]) + 100
         param_init['mag_shift'] = jnp.zeros(self.band_weights.shape[-1] - 1)
