@@ -293,7 +293,7 @@ class SEDmodel(object):
         # Build the model in log wavelength
         self.min_wave = self.l_knots[0]
         self.max_wave = self.l_knots[-1]
-        self.spectrum_bins = 600
+        self.spectrum_bins = 300
         self.band_oversampling = 51
         self.max_redshift = 4
         
