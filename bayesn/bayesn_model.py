@@ -1402,7 +1402,7 @@ class SEDmodel(object):
             # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
             #                                                          order='F').transpose(1, 2, 0)
 
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
             # print(obs.shape)
             # plt.close()
@@ -3066,10 +3066,10 @@ class SEDmodel(object):
                 mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
-            if 'training' in args['mode'].lower():
-                self.data = device_put(mag_data)
-            else:
-                self.data = device_put(flux_data)
+            # if 'training' in args['mode'].lower():
+            #     self.data = device_put(mag_data)
+            # else:
+            self.data = device_put(flux_data)
             self.sn_list = sne
             self.J_t = device_put(J_t)
             calib_inds = []
