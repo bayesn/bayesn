@@ -1358,9 +1358,6 @@ class SEDmodel(object):
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
         lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
-        # print(lam_shift)
-        # print(self.wave_sigma)
-        # lam_shift = jnp.zeros_like(self.wave_sigma)
         mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
 
         mag_shift = jnp.r_[0, mag_shift]
@@ -1435,7 +1432,7 @@ class SEDmodel(object):
 
     def train_model_popRV(self, obs, weights):
         """
-        Numpyro model used for training to learn global parameters with a truncated Gaussian RV distribution
+        Numpyro model used for training to learn global parameters, assuming a single global RV
 
         Parameters
         ----------
@@ -1459,6 +1456,8 @@ class SEDmodel(object):
                                             dist.Uniform(0, (jnp.pi / 2.) * jnp.ones(N_knots_sig)))
         sigmaepsilon = numpyro.deterministic('sigmaepsilon', 1. * jnp.tan(sigmaepsilon_tform))
         L_Omega = numpyro.sample('L_Omega', dist.LKJCholesky(N_knots_sig))
+        # print(L_Omega)
+        # print(jnp.isnan(L_Omega).sum())
         L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
 
         # sigma0 = numpyro.sample('sigma0', dist.HalfCauchy(0.1))
@@ -1473,11 +1472,16 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
+        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+        mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
+
+        mag_shift = jnp.r_[0, mag_shift]
+
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
             RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
-            RV = numpyro.deterministic('Rv_LM', mu_R + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            RV = numpyro.deterministic('RV', mu_R + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
             eps_mu = jnp.zeros(N_knots_sig)
             # eps = numpyro.sample('eps', dist.MultivariateNormal(eps_mu, scale_tril=L_Sigma))
@@ -1500,10 +1504,46 @@ class SEDmodel(object):
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            fixdist = redshift < 0.08
+            Ds_err = Ds_err * fixdist + 5 * (1 - fixdist)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            # self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift, mag_shift
-            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
-                                      weights, 0, 0)
+
+            # tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            # t = obs[0, ...] - tmax[None, sn_index]
+            # hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            # keep_shape = t.shape
+            # t = t.flatten(order='F')
+            # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+            #                                                          order='F').transpose(1, 2, 0)
+
+            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+                                      weights, lam_shift, mag_shift)
+            # print(obs.shape)
+            # plt.close()
+            # for i in range(self.data.shape[-1]):
+            #     if redshift[i] < 0.6:
+            #         continue
+            #     mask = obs[-1, :, i].astype(bool)
+            #     plt.figure(figsize=(12, 8))
+            #     plt.scatter(obs[0, mask, i], flux[mask, i], label=f'SN {i}', color='b')
+            #     plt.errorbar(obs[0, mask, i], obs[1, mask, i], yerr=obs[2, mask, i], fmt='x', label=f'SN {i}', color='r')
+            #     plt.gca().invert_yaxis()
+            #     plt.savefig(f'/Users/matt/Documents/SALT_train_plots/{self.sn_list[i]}.png')
+            #     plt.close()
+            # raise ValueError('Nope')
+            # print('-------->', jnp.min(flux))
+            # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
+            # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
+            # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
+            # print('------------------------------------')
+            # print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
+            # print((obs.shape[1] * obs.shape[2]))
+            # print((1 - mask).sum())
+            # plt.close()
+            # plt.scatter(redshift, Ds)
+            # plt.show()
+            # raise ValueError('Nope')
+
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
