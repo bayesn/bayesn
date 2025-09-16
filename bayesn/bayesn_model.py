@@ -2135,7 +2135,7 @@ class SEDmodel(object):
             param_init['sigma_theta'] = jnp.array(0.1)
             param_init['sigma_cint'] = jnp.array(0.05)
 
-            fix_eps_knots = 3
+            fix_eps_knots = 2
             N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
             param_init['eps_tform'] = jnp.zeros((n_sne, N_knots_sig))
             sigmaepsilon_init = 0.1 * np.ones(n_eps - fix_eps_knots)
