@@ -23,6 +23,7 @@ The output of a fitting job will have the following structure:
 - ``fit_summary.csv``: A summary of the MCMC output, showing parameter means/medians etc. as well as the Gelman-Rubin statistic and effective sample sizes to assess fit quality.
 - ``chains.pkl``: The MCMC chains, as for the training output. Unlike for training, no postprocessing is required therefore only one set of chains needs to be saved.
 - ``output.fitres``: A FITRES file of the same structure as those returned by fits done within SNANA e.g. from SALT, summarising the properties of each fit light curve.
+- ``output.LCPLOT``: An LCPLOT data table containing both the data that was fit and corresponding model fits (with or without errors depending on whether you set ``save_fit_errors`` in the input yaml. Data is stored in rows with DATA_FLAG=1, while the fit is stored in rows with DATA_FLAG=0.
 
 The plan for large SNANA jobs is that only the last of these outputs will be saved to avoid creating a very large number of output files.
 
