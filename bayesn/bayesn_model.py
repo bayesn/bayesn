@@ -1425,7 +1425,7 @@ class SEDmodel(object):
         """
         sample_size = self.data.shape[-1]
         N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
-        fix_eps_knots = 2
+        fix_eps_knots = 3
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
         N_l_knots = self.l_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
@@ -1488,14 +1488,14 @@ class SEDmodel(object):
             eps_tform = eps_tform.T
             eps = jnp.matmul(L_Sigma, eps_tform)
             eps = eps.T
-            # eps = jnp.concatenate(
-            #     [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
-            #      jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
-            #     axis=1)
             eps = jnp.concatenate(
-                [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
-                 eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
+                [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+                 jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
                 axis=1)
+            # eps = jnp.concatenate(
+            #     [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
+            #      eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
+            #     axis=1)
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
@@ -2109,33 +2109,33 @@ class SEDmodel(object):
         if args['mode'] == 'training_v2':
             W0 = np.r_[W0_init[:self.l_knots.shape[0] + 1], W0_init[self.l_knots.shape[0] + 2:]]
             W1 = np.r_[W1_init[:2 * self.l_knots.shape[0] + 1], W1_init[2 * self.l_knots.shape[0] + 2:]]
-            param_init['W0_red'] = jnp.array([-1.0005629 , -0.04106534, -0.20502935, -0.0548492 ,  0.00239564,
-        1.8611451 , -0.21624829, -0.03505822,  0.06564147,  0.13464816,
-        0.9022631 , -0.33310276,  0.07913845,  0.01689261,  0.09493199,
-        0.08196121,  0.19765759,  0.00920103,  0.08346113,  0.00487107,
-        0.02228414,  0.18739103,  0.41409227, -0.72179407,  0.16535665,
-        0.05466741,  0.1896579 ,  0.24020293,  0.5805974 ,  0.02745671,
-       -0.02135916, -0.05245115,  0.03904502,  0.15152942,  0.35161206])
-            param_init['W1_red'] = jnp.array([-0.60132754, -2.3677957 , -1.400509  , -1.7078046 , -0.8689167 ,
-        0.04032803,  5.8790793 , -1.6409212 ,  0.06757373, -0.392157  ,
-       -0.46897754, -1.0486549 , -5.2417393 , -0.97939044, -0.5140773 ,
-       -0.50402737,  1.1114115 , -0.58022547, -1.986625  , -0.3802709 ,
-        0.4170801 , -0.1622666 , -1.1230084 , -0.96181595, -1.8900167 ,
-       -2.0081503 , -1.617059  , -1.546833  , -0.9113416 , -0.09438348,
-       -1.2446305 , -1.0304885 , -1.4610457 , -2.306706  , -0.13869713])
-            param_init['Wc_red'] = jnp.array([-0.15883803,  0.6691943 ,  1.8598908 ,  1.8543975 ,  0.26356697,
-        0.17140795,  2.4206216 ,  0.6143882 ,  0.1725745 , -0.53316844,
-       -0.1402032 , -3.298229  , -0.10328298,  0.5762618 ,  0.09031799,
-        0.6555919 ,  0.29149228, -0.3337551 , -0.40321022,  0.06854713,
-       -0.1856213 ,  0.06595645, -0.36319497,  0.6919039 , -0.661736  ,
-       -0.82037807, -0.7749025 ,  0.01918425,  0.02043783,  0.04930818,
-        0.4255355 ,  0.13914548, -0.7429491 , -0.11580069])
+            param_init['W0_red'] = jnp.array([-0.33002263, -0.16611046, -0.15744324, -0.09390546, -0.03231157,
+        1.3280425 , -0.19466828, -0.02751061,  0.06483366,  0.10507142,
+        0.7616973 ,  0.06440454,  0.0324329 ,  0.04849258,  0.07480597,
+        0.07260877, -0.01146984, -0.01484789,  0.09001668,  0.00686859,
+        0.03435605,  0.17239851,  0.4074164 , -0.5428639 ,  0.14652443,
+        0.05156759,  0.16785675,  0.2171385 ,  0.4386788 , -0.18444404,
+        0.01115638, -0.05531065,  0.03697701,  0.09223546,  0.01527985])
+            param_init['W1_red'] = jnp.array([0.8711952 ,  2.636076  ,  1.5632235 ,  1.8474456 ,  1.2132231 ,
+       -0.15008132,  1.8897369 ,  0.652902  ,  1.002607  ,  0.18983603,
+        1.040541  ,  1.0423782 ,  2.2666173 ,  0.9363808 ,  0.8677329 ,
+        0.52974534, -0.8885846 ,  0.7058834 ,  2.5666683 ,  0.7387118 ,
+       -0.26552123,  0.50841576,  3.8533642 ,  2.429559  ,  2.4928205 ,
+        2.570306  ,  2.0316968 ,  2.1310935 ,  5.4361405 ,  0.40265954,
+        1.5472957 ,  1.6011423 ,  1.7436783 ,  2.8843803 ,  2.201987])
+            param_init['Wc_red'] = jnp.array([-0.00745235,  0.04962178,  0.090987  , -0.0014432 , -0.00136112,
+        0.02081292,  0.05808543,  0.04619687,  0.05820354, -0.00131411,
+        0.03638767, -0.0006108 ,  0.03308673, -0.11722435, -0.04529284,
+       -0.01702887,  0.0248769 , -0.09829013,  0.00361714,  0.04416804,
+        0.07508896, -0.01287309, -0.01255193, -0.08750097, -0.01299546,
+        0.0810647 ,  0.07257591,  0.01799347, -0.00391681, -0.00679731,
+       -0.05397797,  0.03133315,  0.01670402, -0.03352705])
             param_init['theta_tform'] = jnp.array(np.random.normal(0, 1, n_sne))
             param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
             param_init['sigma_theta'] = jnp.array(0.1)
             param_init['sigma_cint'] = jnp.array(0.05)
 
-            fix_eps_knots = 2
+            fix_eps_knots = 3
             N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
             param_init['eps_tform'] = jnp.zeros((n_sne, N_knots_sig))
             sigmaepsilon_init = 0.1 * np.ones(n_eps - fix_eps_knots)
@@ -4232,7 +4232,7 @@ class SEDmodel(object):
         eps_full: array-like
             Sampled epsilon values
         """
-        fix_eps_knots = 3
+        fix_eps_knots = 2
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0] - fix_eps_knots
         N_l_knots = self.l_knots.shape[0]
         eps_mu = jnp.zeros(N_knots_sig)
@@ -4240,9 +4240,13 @@ class SEDmodel(object):
         eps_tform = eps_tform.T
         eps = np.matmul(self.L_Sigma, eps_tform)
         eps = eps.T
+        # eps = jnp.concatenate(
+        #     [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
+        #      jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
+        #     axis=1)
         eps = jnp.concatenate(
-            [eps[:, :N_l_knots - 2], jnp.zeros((eps.shape[0], 2)), eps[:, N_l_knots - 2:2 * N_l_knots - 6],
-             jnp.zeros((eps.shape[0], 1)), eps[:, 2 * N_l_knots - 6:]],
+            [eps[:, :N_l_knots - 1], eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, N_l_knots - 1:2 * N_l_knots - 5],
+             eps[:, N_l_knots - 2:N_l_knots - 1], eps[:, 2 * N_l_knots - 5:]],
             axis=1)
         eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
         eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))

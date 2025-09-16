@@ -10,7 +10,7 @@ bands = ['g_PS1', 'r_PS1']
 cint = np.linspace(-0.1, 0.1, N)
 theta = np.linspace(-0.2, 0.2, N)
 
-model_path = '/Users/matt/Documents/bayesn-input/cint_train/T21_sim_train_someeps0'
+model_path = '/Users/matt/Documents/bayesn-input/cint_train/T21_sim_train_eps0'
 model_chains = os.path.join(model_path, 'chains.pkl')
 
 model = SEDmodel(load_model=os.path.join(model_path, 'bayesn.yaml'))
@@ -38,14 +38,14 @@ plt.show()
 lc = model.simulate_light_curve_cint(np.array([0]), 1, bands, model_chains, theta=0, AV=0, mu=0, del_M=0, cint=0, eps=0, mag=True)[0]
 
 print('Colour scatter-----------------------------------')
-c0 = lc[0, :] - lc[1, :]
-print(c0)
-lc = model.simulate_light_curve_cint(np.array([0]), 1000, bands, model_chains, theta=0, AV=0, mu=0, del_M=0, cint=0, eps=None, mag=True)[0]
-c = lc[0, :] - lc[1, :]
-print(np.mean(c), np.std(c))
-lc = model.simulate_light_curve_cint(np.array([0]), 1000, bands, model_chains, theta=0, AV=0, mu=0, del_M=0, cint=None, eps=0, mag=True)[0]
-c = lc[0, :] - lc[1, :]
-print(np.mean(c), np.std(c))
+# c0 = lc[0, :] - lc[1, :]
+# print(c0)
+# lc = model.simulate_light_curve_cint(np.array([0]), 1000, bands, model_chains, theta=0, AV=0, mu=0, del_M=0, cint=0, eps=None, mag=True)[0]
+# c = lc[0, :] - lc[1, :]
+# print(np.mean(c), np.std(c))
+# lc = model.simulate_light_curve_cint(np.array([0]), 1000, bands, model_chains, theta=0, AV=0, mu=0, del_M=0, cint=None, eps=0, mag=True)[0]
+# c = lc[0, :] - lc[1, :]
+# print(np.mean(c), np.std(c))
 print('------------------------------------------------')
 
 # print(lc.flatten())
