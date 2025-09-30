@@ -2,3 +2,9 @@ plots/*
 results/*
 data/lcs/simulations/*
 model_files/T21_model/T21_free_tmax
+.DS_Store
+bayesn.egg-info/
+bayesn/.DS_Store
+bayesn/__pycache__/
+bayesn/*/.DS_Store
+build/
