@@ -93,9 +93,14 @@ class SEDmodel(object):
     filter_yaml: str, optional
         Path to yaml file containing details on filters and standards to use. If not specified, will look for a file
         called filters.yaml in directory that BayeSN is called from.
-    wave_extrap : bool, optional
-        If True, will revert smooth back towards the Hsiao template outside the BayeSN model's wavelength range.
-        Default is False.
+    time_extrap : "linear", "zero" or "flat", optional
+        If "linear" (default), the model warping surface will linearly extrapolate at early or late times. If
+        "zero", the model will smoothly revert to the Hsiao+07 template within one knot-length (usually ~10d).
+        If "flat", the model will smoothly revert to a renormalized Hsiao+07 template.
+    wave_extrap : False, "linear", "zero" or "flat", optional
+        If False (default), the model will not be allowed to extrapolate in wavelength. If "zero", the model will
+        revert to the Hsiao+07 template within one knot-length. If "flat", the model will revert to a renormalized
+        Hsiao+07 template within one knot-length. If "linear", the warping surface will be extrapolated linearly.
 
     Methods
     -------
@@ -200,7 +205,8 @@ class SEDmodel(object):
     """
 
     def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
-                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}, wave_extrap=False):
+                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}, 
+                 time_extrap="linear", wave_extrap=False):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
         self.start_time = time.time()
@@ -254,9 +260,13 @@ class SEDmodel(object):
 
         self.trunc_val = 1.2
 
+        # internal variables to track extrapolation mode
+        self.time_extrap = time_extrap
+        self.wave_extrap = wave_extrap
+
         self.used_band_inds = None
         self.band_weights = None
-        self._setup_band_weights(wave_extrap=wave_extrap)
+        self._setup_band_weights(allow_wave_extrap=False if wave_extrap is False else True)
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
@@ -287,13 +297,12 @@ class SEDmodel(object):
         self.hsiao_flux = device_put(hsiao_flux.T)
         self.hsiao_flux = jnp.matmul(self.J_l_T_hsiao, self.hsiao_flux)
 
-    def _setup_band_weights(self, wave_extrap=False):
+    def _setup_band_weights(self, allow_wave_extrap=False):
         """
         Sets up the interpolation for the band weights used for photometry as well as calculating the zero points for
         each band. This code is partly based off ParSNiP from Boone+21
         """
-        # Build the model in log wavelength
-        if wave_extrap is False:
+        if allow_wave_extrap is False:
             self.min_wave = self.l_knots[0]
             self.max_wave = self.l_knots[-1]
         else:
@@ -489,7 +498,7 @@ class SEDmodel(object):
 
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l,
-            allow_extrap=wave_extrap, hermite=wave_extrap))
+            allow_extrap=allow_wave_extrap, hermite=False if self.wave_extrap=="linear" else self.wave_extrap))
         self.KD_t = device_put(invKD_irr(self.tau_knots))
         self._load_hsiao_template()
         self.sim = False  # Keep track of whether data is simulated
@@ -2929,7 +2938,7 @@ class SEDmodel(object):
             self.fitres_table = table
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
-                          eps=None, wave_extrap=False, wave_min=None, wave_max=None):
+                          eps=None, wave_min=None, wave_max=None):
         """
         Simulates spectra for given parameter values in the observer-frame. If parameter values are not set, model
         priors will be sampled.
@@ -2980,16 +2989,13 @@ class SEDmodel(object):
             and provide an epsilon value for each generated SN. You can also pass 0, in which case an array of zeros of
             shape (N, l_knots, tau_knots) will be used and epsilon is effectively turned off. Defaults to None, in which
             case the prior distribution will be sampled for each object.
-        wave_extrap : bool, optional
-            If True, allows extrapolation in the wavelength direction by reverting to Hsiao within one knot-length.
-            Default is False (no extrapolation).
         wave_min : float or None, optional
             Minimum (rest-frame) wavelength to evaluate the spectrum at in Angstroms. Defaults to None, which will 
-            evaluate only as far as the outermost spline knot in the BayeSN model. If wave_extrap is False, the
+            evaluate only as far as the outermost spline knot in the BayeSN model. If self.wave_extrap is False, the
             wave_min will be ignored if it is below the outermost spline knot.
         wave_max : float or None, optional
             Maximum (rest-frame) wavelength to evaluate the spectrum at in Angstroms. Defaults to None, which will 
-            evaluate only as far as the outermost spline knot in the BayeSN model. If wave_extrap is False, the
+            evaluate only as far as the outermost spline knot in the BayeSN model. If self.wave_extrap is False, the
             wave_max will be ignored if it is above the outermost spline knot.
 
         Returns
@@ -3086,13 +3092,13 @@ class SEDmodel(object):
         # Set default min/max if not provided
         if wave_min is None:
             l_min = min(self.l_knots)
-        elif wave_extrap is False:
+        elif self.wave_extrap is False:
             l_min = max([min(self.l_knots), wave_min])
         else:
             l_min = wave_min
         if wave_max is None:
             l_max = max(self.l_knots)
-        elif wave_extrap is False:
+        elif self.wave_extrap is False:
             l_max = min([max(self.l_knots), wave_max])
         else:
             l_max = wave_max
@@ -3108,7 +3114,8 @@ class SEDmodel(object):
         self.uv_x = 1e4 / self.model_wave[self.uv_ind1]
         KD_l = invKD_irr(self.l_knots)
         self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l, 
-            allow_extrap=wave_extrap, hermite=wave_extrap))
+            allow_extrap=False if self.wave_extrap is False else True, 
+            hermite=False if self.wave_extrap=="linear" else self.wave_extrap))
         KD_x = invKD_irr(self.xk)
         self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, KD_x))
         self._load_hsiao_template()
@@ -3136,7 +3143,7 @@ class SEDmodel(object):
 
     def simulate_light_curve(self, t, N, bands, yerr=0, err_type='mag', z=0, zerr=1e-4, mu=0, ebv_mw=0, RV=None,
                              logM=None, tmax=0, del_M=None, AV=None, theta=None, eps=None, mag=True, write_to_files=False,
-                             output_dir=None, wave_extrap=False):
+                             output_dir=None):
         """
         Simulates light curves from the BayeSN model in either mag or flux space. Saves them to SNANA-format text
         files if requested.
@@ -3211,10 +3218,6 @@ class SEDmodel(object):
             Determines whether to save simulated light curves to SNANA-format light curve files, defaults to False
         output_dir: str, optional
             Path to output directory to save simulated SNANA-format files, only required if write_to_files=True
-        wave_extrap: bool, optional
-            If True, allows out-of-bounds wavelengths to be simulated. Simulating passbands that are far outside the
-            model boundaries will revert to something Hsiao-like. Default is False. Setting this to True is not
-            recommended in most circumstances.
 
         Returns
         -------
