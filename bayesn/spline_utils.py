@@ -231,3 +231,83 @@ def spline_coeffs_irr_step(x_now, x, invkd):
 	X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
 
 	return X
+
+def spline_coeffs_irr_step_zero(x_now, x, invkd):
+	X = jnp.zeros_like(x)
+	up_extrap = (x_now > x[-1])*(x_now < 2.0*x[-1] - x[-2])
+	up_zero = x_now >= 2.0*x[-1] - x[-2]
+	down_extrap = (x_now < x[0])*(x_now > 2.0*x[0] - x[1])
+	down_zero = x_now <= 2.0*x[0] - x[1]
+	interp = 1 - up_extrap - down_extrap - up_zero - down_zero
+
+	f = ((x[-1] - x[-2])**2.)/6.0
+	t = (x_now - x[-1])/(x[-1] - x[-2])
+	h00 = 2.0*t**3. - 3.0*t**2. + 1.0
+	h10 = t**3. - 2.0*t**2. + t 
+
+	X = X.at[-2].set(X[-2] - h10 * up_extrap)
+	X = X.at[-1].set(X[-1] + (h00 + h10) * up_extrap)
+	X = X.at[:].set(X[:] + f * h10 * invkd[-2, :] * up_extrap)
+
+	f = ((x[1] - x[0])**2.)/6.0
+	t = 1 + (x_now - x[0])/(x[1] - x[0])
+	h01 = -2.0*t**3. + 3.0*t**2.
+	h11 = t**3. - t**2.
+
+	X = X.at[0].set(X[0] + (h01 - h11) * down_extrap)
+	X = X.at[1].set(X[1] + h11 * down_extrap)
+	X = X.at[:].set(X[:] - f * h11 * invkd[1, :] * down_extrap)
+
+	q = jnp.argmax(x_now < x) - 1
+	h = x[q + 1] - x[q]
+	a = (x[q + 1] - x_now) / h
+	b = 1 - a
+	c = ((a ** 3 - a) / 6) * h ** 2
+	d = ((b ** 3 - b) / 6) * h ** 2
+
+	X = X.at[q].set(X[q] + a * interp)
+	X = X.at[q + 1].set(X[q + 1] + b * interp)
+	X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
+
+	return X
+
+def spline_coeffs_irr_step_flat(x_now, x, invkd):
+	X = jnp.zeros_like(x)
+	up_extrap = (x_now > x[-1])*(x_now < 2.0*x[-1] - x[-2])
+	up_flat = x_now >= 2.0*x[-1] - x[-2]
+	down_extrap = (x_now < x[0])*(x_now > 2.0*x[0] - x[1])
+	down_flat = x_now <= 2.0*x[0] - x[1]
+	interp = 1 - up_extrap - down_extrap - up_flat - down_flat
+
+	f = ((x[-1] - x[-2])**2.)/6.0
+	t = (x_now - x[-1])/(x[-1] - x[-2])
+	h10 = t**3. -2.0*t**2. + t 
+
+	X = X.at[-2].set(X[-2] - h10 * up_extrap)
+	X = X.at[-1].set(X[-1] + (1.0 + h10) * up_extrap)
+	X = X.at[:].set(X[:] + f * h10 * invkd[-2, :] * up_extrap)
+
+	X = X.at[-1].set(X[-1] + 1.0 * up_flat)
+
+	f = ((x[1] - x[0])**2.)/6.0
+	t = 1 + (x_now - x[0])/(x[1] - x[0])
+	h11 = t**3. - t**2.
+
+	X = X.at[0].set(X[0] + (1.0 - h11) * down_extrap)
+	X = X.at[1].set(X[1] + h11 * down_extrap)
+	X = X.at[:].set(X[:] - f * h11 * invkd[1, :] * down_extrap)
+
+	X = X.at[0].set(X[0] + 1.0 * down_flat)
+
+	q = jnp.argmax(x_now < x) - 1
+	h = x[q + 1] - x[q]
+	a = (x[q + 1] - x_now) / h
+	b = 1 - a
+	c = ((a ** 3 - a) / 6) * h ** 2
+	d = ((b ** 3 - b) / 6) * h ** 2
+
+	X = X.at[q].set(X[q] + a * interp)
+	X = X.at[q + 1].set(X[q + 1] + b * interp)
+	X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
+
+	return X

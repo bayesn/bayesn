@@ -261,14 +261,26 @@ class SEDmodel(object):
         self.trunc_val = 1.2
 
         # internal variables to track extrapolation mode
+        if time_extrap not in ["linear", "zero", "flat"]:
+            raise ValueError("Unrecognised time extrapolation mode! " +
+                "Choose one of 'linear', 'zero', 'flat'")
         self.time_extrap = time_extrap
+        if wave_extrap is not False and wave_extrap not in ["linear", "zero", "flat"]:
+            raise ValueError("Unrecognised wavelength extrapolation mode! " +
+                "Choose one of False, 'linear', 'zero', 'flat'")
         self.wave_extrap = wave_extrap
 
         self.used_band_inds = None
         self.band_weights = None
         self._setup_band_weights(allow_wave_extrap=False if wave_extrap is False else True)
 
-        self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
+        if time_extrap == "linear":
+            self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
+        elif time_extrap == "zero":
+            self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step_zero, in_axes=(0, None, None)))
+        elif time_extrap == "flat":
+            self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step_flat, in_axes=(0, None, None)))
+
 
     def _load_hsiao_template(self):
         """
@@ -779,6 +791,7 @@ class SEDmodel(object):
     def spline_coeffs_irr_step(x_now, x, invkd):
         """
         Vectorized version of cubic spline coefficient calculator found in spline_utils
+        This version will linearly extrapolate outside of the knots
 
         Parameters
         ----------
@@ -818,6 +831,128 @@ class SEDmodel(object):
         X = X.at[0].set(X[0] + a * down_extrap)
         X = X.at[1].set(X[1] + b * down_extrap)
         X = X.at[:].set(X[:] - f * invkd[1, :] * down_extrap)
+
+        q = jnp.argmax(x_now < x) - 1
+        h = x[q + 1] - x[q]
+        a = (x[q + 1] - x_now) / h
+        b = 1 - a
+        c = ((a ** 3 - a) / 6) * h ** 2
+        d = ((b ** 3 - b) / 6) * h ** 2
+
+        X = X.at[q].set(X[q] + a * interp)
+        X = X.at[q + 1].set(X[q + 1] + b * interp)
+        X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
+
+        return X
+
+    @staticmethod
+    def spline_coeffs_irr_step_zero(x_now, x, invkd):
+        """
+        Vectorized version of cubic spline coefficient calculator found in spline_utils
+        This version will smoothly asymptote to zero outside of the knots
+
+        Parameters
+        ----------
+        x_now: array-like
+            Current x location to calculate spline knots for
+        x: array-like
+            Numpy array containing the locations of the spline knots.
+        invkd: array-like
+            Precomputed matrix for generating second derivatives. Can be obtained
+            from the output of ``spline_utils.invKD_irr``.
+
+        Returns
+        -------
+
+        X: Set of spline coefficients for each x knot
+
+        """
+        X = jnp.zeros_like(x)
+        up_extrap = (x_now > x[-1])*(x_now < 2.0*x[-1] - x[-2])
+        up_zero = x_now >= 2.0*x[-1] - x[-2]
+        down_extrap = (x_now < x[0])*(x_now > 2.0*x[0] - x[1])
+        down_zero = x_now <= 2.0*x[0] - x[1]
+        interp = 1 - up_extrap - down_extrap - up_zero - down_zero
+
+        f = ((x[-1] - x[-2])**2.)/6.0
+        t = (x_now - x[-1])/(x[-1] - x[-2])
+        h00 = 2.0*t**3. - 3.0*t**2. + 1.0
+        h10 = t**3. - 2.0*t**2. + t 
+
+        X = X.at[-2].set(X[-2] - h10 * up_extrap)
+        X = X.at[-1].set(X[-1] + (h00 + h10) * up_extrap)
+        X = X.at[:].set(X[:] + f * h10 * invkd[-2, :] * up_extrap)
+
+        f = ((x[1] - x[0])**2.)/6.0
+        t = 1 + (x_now - x[0])/(x[1] - x[0])
+        h01 = -2.0*t**3. + 3.0*t**2.
+        h11 = t**3. - t**2.
+
+        X = X.at[0].set(X[0] + (h01 - h11) * down_extrap)
+        X = X.at[1].set(X[1] + h11 * down_extrap)
+        X = X.at[:].set(X[:] - f * h11 * invkd[1, :] * down_extrap)
+
+        q = jnp.argmax(x_now < x) - 1
+        h = x[q + 1] - x[q]
+        a = (x[q + 1] - x_now) / h
+        b = 1 - a
+        c = ((a ** 3 - a) / 6) * h ** 2
+        d = ((b ** 3 - b) / 6) * h ** 2
+
+        X = X.at[q].set(X[q] + a * interp)
+        X = X.at[q + 1].set(X[q + 1] + b * interp)
+        X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
+
+        return X
+
+    @staticmethod
+    def spline_coeffs_irr_step_flat(x_now, x, invkd):
+        """
+        Vectorized version of cubic spline coefficient calculator found in spline_utils
+        This version will flatten out to outermost knot value outside of the knots
+
+        Parameters
+        ----------
+        x_now: array-like
+            Current x location to calculate spline knots for
+        x: array-like
+            Numpy array containing the locations of the spline knots.
+        invkd: array-like
+            Precomputed matrix for generating second derivatives. Can be obtained
+            from the output of ``spline_utils.invKD_irr``.
+
+        Returns
+        -------
+
+        X: Set of spline coefficients for each x knot
+
+        """
+        X = jnp.zeros_like(x)
+        up_extrap = (x_now > x[-1])*(x_now < 2.0*x[-1] - x[-2])
+        up_flat = x_now >= 2.0*x[-1] - x[-2]
+        down_extrap = (x_now < x[0])*(x_now > 2.0*x[0] - x[1])
+        down_flat = x_now <= 2.0*x[0] - x[1]
+        interp = 1 - up_extrap - down_extrap - up_flat - down_flat
+
+        f = ((x[-1] - x[-2])**2.)/6.0
+        t = (x_now - x[-1])/(x[-1] - x[-2])
+        h10 = t**3. -2.0*t**2. + t 
+
+        X = X.at[-2].set(X[-2] - h10 * up_extrap)
+        X = X.at[-1].set(X[-1] + (1.0 + h10) * up_extrap)
+        X = X.at[:].set(X[:] + f * h10 * invkd[-2, :] * up_extrap)
+
+        X = X.at[-1].set(X[-1] + 1.0 * up_flat)
+
+        f = ((x[1] - x[0])**2.)/6.0
+        t = 1 + (x_now - x[0])/(x[1] - x[0])
+        h11 = t**3. - t**2.
+
+        X = X.at[0].set(X[0] + (1.0 - h11) * down_extrap)
+        X = X.at[1].set(X[1] + h11 * down_extrap)
+        X = X.at[:].set(X[:] - f * h11 * invkd[1, :] * down_extrap)
+
+        X = X.at[0].set(X[0] + 1.0 * down_flat)
 
         q = jnp.argmax(x_now < x) - 1
         h = x[q + 1] - x[q]
@@ -3125,7 +3260,12 @@ class SEDmodel(object):
         hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t = t.flatten(order='F')
-        map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        if self.time_extrap == "linear":
+            map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        elif self.time_extrap == "zero":
+            map = jax.vmap(self.spline_coeffs_irr_step_zero, in_axes=(0, None, None))
+        elif self.time_extrap == "flat":
+            map = jax.vmap(self.spline_coeffs_irr_step_flat, in_axes=(0, None, None))
         J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,2,0)
         spectra = self.get_spectra(theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp)
 
@@ -3339,7 +3479,12 @@ class SEDmodel(object):
         hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t = t.flatten(order='F')
-        map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        if self.time_extrap == "linear":
+            map = jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None))
+        elif self.time_extrap == "zero":
+            map = jax.vmap(self.spline_coeffs_irr_step_zero, in_axes=(0, None, None))
+        elif self.time_extrap == "flat":
+            map = jax.vmap(self.spline_coeffs_irr_step_flat, in_axes=(0, None, None))
         J_t = map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1,
                                                                                                                      2,
                                                                                                                      0)
