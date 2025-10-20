@@ -46,51 +46,51 @@ m150 = lc[0, 0] - lc[1, 0]
 T21_N = 10
 T21_thetas = np.linspace(-2, 2, T21_N)
 
-t2 = np.arange(-10, 40, 1)
-lc = T21_model.simulate_light_curve(t2, T21_N, bands, theta=T21_thetas, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
-for i in range(T21_N):
-    plt.plot(t2, lc[:len(t2), i], label=f'{T21_thetas[i]:.2f}')
-# m15 = lc[0, :] - lc[1, :]
-# plt.plot(theta, m15)
-plt.legend()
-plt.gca().invert_yaxis()
-plt.show()
-
-lc = T21_model.simulate_light_curve(np.array([0, 15, 30]), T21_N, ['g_PS1', 'r_PS1'], theta=T21_thetas, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
-print(lc.shape)
-m, m15, c = lc[0, :], lc[1, :] - lc[0, :], lc[0, :] - lc[3, :]
-# print(m.shape, m15.shape, c.shape)
-# plt.scatter(c, m)
+# t2 = np.arange(-10, 40, 1)
+# lc = T21_model.simulate_light_curve(t2, T21_N, bands, theta=T21_thetas, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
+# for i in range(T21_N):
+#     plt.plot(t2, lc[:len(t2), i], label=f'{T21_thetas[i]:.2f}')
+# # m15 = lc[0, :] - lc[1, :]
+# # plt.plot(theta, m15)
+# plt.legend()
 # plt.gca().invert_yaxis()
 # plt.show()
-plt.scatter(c, m15)
-plt.show()
-plt.scatter(T21_thetas, m15)
-plt.show()
-plt.scatter(T21_thetas, c)
-plt.show()
 
-lc = T21_model.simulate_light_curve(np.array([0, 10, 30]), 500, ['g_PS1', 'r_PS1'], theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
-print(lc.shape)
-m, m15, c = lc[0, :], lc[1, :] - lc[0, :], lc[0, :] - lc[3, :]
-# print(m.shape, m15.shape, c.shape)
-# plt.scatter(c, m)
+# lc = T21_model.simulate_light_curve(np.array([0, 15, 30]), T21_N, ['g_PS1', 'r_PS1'], theta=T21_thetas, AV=0, mu=0, del_M=0, eps=0, mag=True)[0]
+# print(lc.shape)
+# m, m15, c = lc[0, :], lc[1, :] - lc[0, :], lc[0, :] - lc[3, :]
+# # print(m.shape, m15.shape, c.shape)
+# # plt.scatter(c, m)
+# # plt.gca().invert_yaxis()
+# # plt.show()
+# plt.scatter(c, m15)
+# plt.show()
+# plt.scatter(T21_thetas, m15)
+# plt.show()
+# plt.scatter(T21_thetas, c)
+# plt.show()
+#
+# lc = T21_model.simulate_light_curve(np.array([0, 10, 30]), 500, ['g_PS1', 'r_PS1'], theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
+# print(lc.shape)
+# m, m15, c = lc[0, :], lc[1, :] - lc[0, :], lc[0, :] - lc[3, :]
+# # print(m.shape, m15.shape, c.shape)
+# # plt.scatter(c, m)
+# # plt.gca().invert_yaxis()
+# # plt.show()
+# print('-->', np.std(c))
+# plt.scatter(c, m15)
+# plt.xlabel(r'c$_{int}$')
+# plt.ylabel(r'$\Delta m_{10}$')
+# plt.show()
+#
+# t2 = np.arange(-10, 40, 1)
+# lc = T21_model.simulate_light_curve(t2, 20, bands, theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
+# for i in range(20):
+#     plt.plot(t2, lc[:len(t2), i])
+# # m15 = lc[0, :] - lc[1, :]
+# # plt.plot(theta, m15)
 # plt.gca().invert_yaxis()
 # plt.show()
-print('-->', np.std(c))
-plt.scatter(c, m15)
-plt.xlabel(r'c$_{int}$')
-plt.ylabel(r'$\Delta m_{10}$')
-plt.show()
-
-t2 = np.arange(-10, 40, 1)
-lc = T21_model.simulate_light_curve(t2, 20, bands, theta=0, AV=0, mu=0, del_M=0, eps=None, mag=True)[0]
-for i in range(20):
-    plt.plot(t2, lc[:len(t2), i])
-# m15 = lc[0, :] - lc[1, :]
-# plt.plot(theta, m15)
-plt.gca().invert_yaxis()
-plt.show()
 
 # plt.scatter(T21_thetas, m15)
 # plt.show()
@@ -158,12 +158,33 @@ plt.legend()
 plt.show()
 
 t2 = np.arange(-10, 40, 1)
-lc = model.simulate_light_curve_cint(t2, N, bands, model_chains,
+lc = model.simulate_light_curve_cint(t2, N, ['g_PS1', 'r_PS1', 'i_PS1', 'z_PS1'], model_chains,
                                      theta=0, AV=0, mu=0, del_M=0, eps=0, cint=cint, mag=True)[0]
 print(lc.shape)
 print(lc[11, :], np.diff(lc[11, :]) / 0.05)
 for i in range(N):
     plt.plot(t2, lc[:len(t2), i], label=rf'$c_\mathrm{{int}}={cint[i]:.2f}$')
+# m15 = lc[0, :] - lc[1, :]
+# plt.plot(theta, m15)
+plt.gca().invert_yaxis()
+plt.legend()
+plt.show()
+for i in range(N):
+    plt.plot(t2, lc[len(t2):2*len(t2), i], label=rf'$c_\mathrm{{int}}={cint[i]:.2f}$')
+# m15 = lc[0, :] - lc[1, :]
+# plt.plot(theta, m15)
+plt.gca().invert_yaxis()
+plt.legend()
+plt.show()
+for i in range(N):
+    plt.plot(t2, lc[2*len(t2):3*len(t2), i], label=rf'$c_\mathrm{{int}}={cint[i]:.2f}$')
+# m15 = lc[0, :] - lc[1, :]
+# plt.plot(theta, m15)
+plt.gca().invert_yaxis()
+plt.legend()
+plt.show()
+for i in range(N):
+    plt.plot(t2, lc[3*len(t2):4*len(t2), i], label=rf'$c_\mathrm{{int}}={cint[i]:.2f}$')
 # m15 = lc[0, :] - lc[1, :]
 # plt.plot(theta, m15)
 plt.gca().invert_yaxis()
