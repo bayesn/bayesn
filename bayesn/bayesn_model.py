@@ -1430,15 +1430,17 @@ class SEDmodel(object):
         N_l_knots = self.l_knots.shape[0]
         W_mu = jnp.zeros(N_knots)
         W_mu2 = jnp.zeros(N_knots - 1)
-        W_mu3 = jnp.zeros(N_knots - 2)
+        W_mu3 = jnp.zeros(N_knots - 4)
         W0 = numpyro.sample('W0_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
         W0 = numpyro.deterministic('W0', jnp.insert(W0, N_l_knots + 1, 0))
         W1 = numpyro.sample('W1_red', dist.MultivariateNormal(W_mu2, jnp.eye(N_knots - 1)))
         W1 = numpyro.deterministic('W1', 0 * jnp.insert(W1, 2 * N_l_knots + 1, W1[N_l_knots + 1] + 1))
 
-        Wc = numpyro.sample('Wc_red', dist.MultivariateNormal(W_mu3, jnp.eye(N_knots - 2)))
+        Wc = numpyro.sample('Wc_red', dist.MultivariateNormal(W_mu3, jnp.eye(N_knots - 4)))
         Wc = jnp.insert(Wc, N_l_knots + 2, Wc[N_l_knots + 1] - 1)
         Wc = jnp.insert(Wc, 2 * N_l_knots + 1, Wc[N_l_knots + 1])
+        Wc = jnp.insert(Wc, 3 * N_l_knots + 1, Wc[N_l_knots + 1])
+        Wc = jnp.insert(Wc, 4 * N_l_knots + 1, Wc[N_l_knots + 1])
         Wc = numpyro.deterministic('Wc', jnp.reshape(Wc, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F'))
 
         W0 = jnp.reshape(W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order='F')

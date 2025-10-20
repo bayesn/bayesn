@@ -10,7 +10,7 @@ bands = ['g_PS1', 'r_PS1']
 cint = np.linspace(-0.1, 0.1, N)
 theta = np.linspace(-0.1, 0.1, N)
 
-model_path = '/Users/matt/Documents/bayesn-input/cint_train/T21_sim_train_theta0AV0'
+model_path = '/Users/matt/Documents/bayesn-input/cint_train/T21_sim_train_AV0'
 model_chains = os.path.join(model_path, 'chains.pkl')
 
 model = SEDmodel(load_model=os.path.join(model_path, 'bayesn.yaml'))
