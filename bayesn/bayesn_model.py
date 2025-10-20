@@ -2132,6 +2132,7 @@ class SEDmodel(object):
        -0.10046801, -0.4895385 ,  1.0053635 , -0.6142998 ,  0.40907592,
         0.14406148,  0.03161104,  0.55186397, -0.09832796, -0.84358346,
        -0.2205218 , -0.53476536, -0.16260345,  0.08359761])
+            param_init['Wc_red'] = jnp.zeros(32)
             param_init['theta_tform'] = jnp.array(np.random.normal(0, 1, n_sne))
             param_init['cint_tform'] = jnp.array(np.random.normal(size=n_sne))
             param_init['sigma_theta'] = jnp.array(0.1)
