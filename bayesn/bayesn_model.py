@@ -258,7 +258,7 @@ class SEDmodel(object):
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
 
-        self.dist2redshift = Distmod2Redshift(Om0=fiducial_cosmology['Om0'], zmax_interp=2.0)
+        self.distmod2redshift = Distmod2Redshift(Om0=fiducial_cosmology['Om0'], zmax_interp=2.0)
 
     def _load_hsiao_template(self):
         """
@@ -1172,24 +1172,28 @@ class SEDmodel(object):
             redshift = obs[-5, 0, sn_index]
             redshift_error = obs[-4, 0, sn_index]
             muhat = obs[-3, 0, sn_index]
-
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5 / (redshift * jnp.log(10)) * jnp.sqrt(
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
 
-            def get_z_pv(sigma_pec):
-                # WRONG BUT SIMPLE FOR NOW
-                z_pv = numpyro.sample("z_pv", dist.Normal(0, sigma_pec/3e5))
-                return z_pv
+            zerr = jnp.sqrt(jnp.power(redshift_error, 2) + jnp.power(self.sigma_pec, 2))
+            deltaM_s_tform = numpyro.sample('deltaM_s_tform', dist.Normal(0, 1))
+            deltaM_s = numpyro.deterministic('deltaM_s', sigma0 * deltaM_s_tform)
+            # Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+            # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            mu_s = numpyro.sample("mu_s", dist.Uniform(25, 45))
 
-            def get_z_cos(Ds, Ds_err):
-                return self.dist2redshift(Ds)
+            # def get_z_pv(sigma_pec):
+            #     # WRONG BUT SIMPLE FOR NOW
+            #     z_pv = numpyro.sample("z_pv", dist.Normal(0, sigma_pec/3e5))
+            #     return z_pv
+            z_pv = 0
 
-            z_pv = get_z_pv(self.sigma_pec)
-            z_cos = get_z_cos(Ds, Ds_err)
-            numpyro.sample("z_obs", dist.Normal((1+z_cos)*(1+z_pv)-1, redshift_error), obs=redshift)
+            z_cos = self.distmod2redshift(mu_s)
+            zpred = (1 + z_cos) * (1 + z_pv) - 1
+            numpyro.sample("z_obs", dist.Normal(zpred, zerr), obs=redshift)
+
+            Ds = mu_s + deltaM_s
 
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
