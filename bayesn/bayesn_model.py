@@ -1178,6 +1178,19 @@ class SEDmodel(object):
                 jnp.power(redshift_error, 2) + np.power(self.sigma_pec, 2))
             Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+
+            def get_z_pv(sigma_pec):
+                # WRONG BUT SIMPLE FOR NOW
+                z_pv = numpyro.sample("z_pv", dist.Normal(0, sigma_pec/3e5))
+                return z_pv
+
+            def get_z_cos(Ds, Ds_err):
+                return self.dist2redshift(Ds)
+
+            z_pv = get_z_pv(self.sigma_pec)
+            z_cos = get_z_cos(Ds, Ds_err)
+            numpyro.sample("z_obs", dist.Normal((1+z_cos)*(1+z_pv)-1, redshift_error), obs=redshift)
+
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, self.J_t, self.hsiao_interp,
                                       weights)
 
@@ -3525,3 +3538,4 @@ class SEDmodel(object):
             flux_grid = flux_grid.at[i, :, :len(fit_bands), :].set(lc)
 
         return flux_grid
+
