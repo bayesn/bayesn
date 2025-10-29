@@ -1181,7 +1181,7 @@ class SEDmodel(object):
             deltaM_s = numpyro.deterministic('deltaM_s', sigma0 * deltaM_s_tform)
             # Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            mu_s = numpyro.sample("mu_s", dist.Uniform(25, 45))
+            mu_s = numpyro.sample('mu_s', dist.Uniform(25, 45))
 
             # def get_z_pv(sigma_pec):
             #     # WRONG BUT SIMPLE FOR NOW
@@ -1670,6 +1670,9 @@ class SEDmodel(object):
         param_init['L_Omega'] = jnp.array(L_Omega_init)
 
         param_init['Ds'] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+
+        param_init['deltaM_s'] = jnp.zeros(n_sne)
+        param_init['mu_s'] = self.data[-3, 0, :]
 
         return param_init
 
