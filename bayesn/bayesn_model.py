@@ -21,7 +21,7 @@ from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiago
 import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr
-from .utils import Distmod2Redshift
+from .utils import Distmod2Redshift, radec_to_cartesian
 from .bayesn_io import write_snana_lcfile
 import pickle
 import pandas as pd
@@ -1153,6 +1153,18 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
+        phi = numpyro.sample(f"Vext_phi", dist.Uniform(0, 2 * jnp.pi))
+        cos_theta = numpyro.sample(f"Vext_cos_theta", dist.Uniform(-1, 1))
+        sin_theta = jnp.sqrt(1 - cos_theta ** 2)
+
+        mag = numpyro.sample(f"Vext_mag", dist.Uniform(0, 1000))
+
+        Vext = mag * jnp.array(
+            [sin_theta * jnp.cos(phi),
+             sin_theta * jnp.sin(phi),
+             cos_theta]
+        )
+
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
@@ -1189,9 +1201,12 @@ class SEDmodel(object):
             #     return z_pv
             z_pv = 0
 
-            z_cos = self.distmod2redshift(mu_s)
-            zpred = (1 + z_cos) * (1 + z_pv) - 1
-            numpyro.sample("z_obs", dist.Normal(zpred, zerr), obs=redshift)
+            rhat = self.vpec_data[:, 2:5]
+            z_pv = jnp.sum(Vext[None, :] * rhat, axis=1) / self.c
+
+            z_cosmo = self.distmod2redshift(mu_s)
+            zpred = (1 + z_cosmo) * (1 + z_pv) - 1
+            numpyro.sample("z_obs", dist.Normal(zpred, zerr), obs=self.vpec_data[:, -1])
 
             Ds = mu_s + deltaM_s
 
@@ -2420,6 +2435,7 @@ class SEDmodel(object):
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
         c = 299792.458
+        self.c = 299792.458
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -2788,6 +2804,7 @@ class SEDmodel(object):
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             sne, peak_mjds = [], []
+            vpec_data = []
             print('Reading light curves...')
             for i in tqdm(range(sn_list.shape[0])):
                 row = sn_list.iloc[i]
@@ -2797,6 +2814,7 @@ class SEDmodel(object):
                 data_root = args['data_root']
                 for file in sn_files:
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
+                    ra, dec = meta['RA'], meta['DECL']
                     data = lcdata['OBS'].to_pandas()
                     if 'SEARCH_PEAKMJD' in sn_list.columns:
                         peak_mjd = row.SEARCH_PEAKMJD
@@ -2846,6 +2864,13 @@ class SEDmodel(object):
                          'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
+
+                    x, y, z = radec_to_cartesian(ra, dec)
+
+                    vpec_data.append([ra, dec, x, y, z, row.REDSHIFT_CMB])
+
+
+
                     if sn_lc is None:
                         sn_lc = lc.copy()
                     else:
@@ -2931,6 +2956,8 @@ class SEDmodel(object):
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
+
+            self.vpec_data = jnp.array(vpec_data)
 
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)

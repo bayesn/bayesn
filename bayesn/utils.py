@@ -32,3 +32,19 @@ class Distmod2Redshift:
             return self._f(mu + 5 * jnp.log10(h))
 
         return jnp.exp(self._f(mu + 5 * jnp.log10(h)))
+
+def radec_to_cartesian(ra, dec):
+    """
+    Convert right ascension and declination (in degrees) to unit Cartesian
+    coordinates.
+    """
+    ra_rad = jnp.deg2rad(ra)
+    dec_rad = jnp.deg2rad(dec)
+    cos_dec = jnp.cos(dec_rad)
+
+    x = cos_dec * jnp.cos(ra_rad)
+    y = cos_dec * jnp.sin(ra_rad)
+    z = jnp.sin(dec_rad)
+
+    return x, y, z
+
