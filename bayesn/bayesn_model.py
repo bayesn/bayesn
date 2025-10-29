@@ -21,6 +21,7 @@ from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiago
 import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr
+from .utils import Distmod2Redshift
 from .bayesn_io import write_snana_lcfile
 import pickle
 import pandas as pd
@@ -256,6 +257,8 @@ class SEDmodel(object):
         self._setup_band_weights()
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
+
+        self.dist2redshift = Distmod2Redshift(Om0=fiducial_cosmology['Om0'], zmax_interp=2.0)
 
     def _load_hsiao_template(self):
         """
