@@ -1195,10 +1195,6 @@ class SEDmodel(object):
             # Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             mu_s = numpyro.sample('mu_s', dist.Uniform(25, 45))
 
-            # def get_z_pv(sigma_pec):
-            #     # WRONG BUT SIMPLE FOR NOW
-            #     z_pv = numpyro.sample("z_pv", dist.Normal(0, sigma_pec/3e5))
-            #     return z_pv
             z_pv = 0
 
             rhat = self.vpec_data[:, 2:5]
