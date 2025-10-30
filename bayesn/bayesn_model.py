@@ -2867,7 +2867,7 @@ class SEDmodel(object):
 
                     x, y, z = radec_to_cartesian(ra, dec)
 
-                    vpec_data.append([ra, dec, x, y, z, row.REDSHIFT_CMB])
+                    vpec_data.append([ra, dec, x, y, z, meta['REDSHIFT_CMB']])
 
 
 
