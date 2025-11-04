@@ -541,7 +541,7 @@ class SEDmodel(object):
         self.KD_x = device_put(invKD_irr(self.xk))
         self.M_fitz_block = device_put(spline_coeffs_irr(1e4 / self.model_wave, self.xk, self.KD_x))
 
-        calib_cov = np.load(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_COV_V9.0.npz'))
+        calib_cov = np.load(os.path.join(self.__root_dir__, 'bayesn-filters', 'DOVEKIE_COV_V9.3.npz'))
         cov = calib_cov['cov'][4:, 4:]  # Skip PS1 aperture photometry values
         labels = calib_cov['labels'][4:]  # Skip PS1 aperture photometry values
         map_dict = {'PS1SN-g': 'g_PS1', 'PS1SN-r': 'r_PS1', 'PS1SN-i': 'i_PS1', 'PS1SN-z': 'z_PS1', 'DES-g': 'g_DES',
@@ -1362,6 +1362,14 @@ class SEDmodel(object):
 
         mag_shift = jnp.r_[0, mag_shift]
 
+        M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
+
+        mass = obs[-7, 0, :]
+        print(mass)
+        pkill
+        M_split = 10  # Hardcoded for now, should make this customisable
+        HM_flag = mass > M_split
+
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
@@ -1376,6 +1384,8 @@ class SEDmodel(object):
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            M0 = self.M0 + HM_flag * M_step
 
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
@@ -1399,7 +1409,7 @@ class SEDmodel(object):
             # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
             #                                                          order='F').transpose(1, 2, 0)
 
-            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
             # print(obs.shape)
             # plt.close()
@@ -1477,6 +1487,12 @@ class SEDmodel(object):
 
         mag_shift = jnp.r_[0, mag_shift]
 
+        M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
+
+        mass = obs[-7, 0, :]
+        M_split = 10  # Hardcoded for now, should make this customisable
+        HM_flag = mass > M_split
+
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
             AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
@@ -1493,6 +1509,8 @@ class SEDmodel(object):
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+
+            M0 = self.M0 + HM_flag * M_step
 
             band_indices = obs[-6, :, sn_index].astype(int).T
             redshift = obs[-5, 0, sn_index]
@@ -1516,7 +1534,7 @@ class SEDmodel(object):
             # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
             #                                                          order='F').transpose(1, 2, 0)
 
-            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
             # print(obs.shape)
             # plt.close()
@@ -2765,7 +2783,7 @@ class SEDmodel(object):
             sne, peak_mjds = [], []
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             if 'meta_override' in args.keys():
-                meta_override = pd.read_csv(args['meta_override'], delim_whitespace=True)
+                meta_override = pd.read_csv(args['meta_override'])
             else:
                 meta_override = None
             print('Reading light curves...')
@@ -2919,6 +2937,7 @@ class SEDmodel(object):
                 meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, dir_list[0], sn_list[0][:-3]), default_tablename='OBS')
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in meta.keys()
+                masses = []
                 # If real data, ignore sim_prescale
                 if not self.sim:
                     args['njobtot'] = args['jobsplit'][1]
@@ -2951,12 +2970,11 @@ class SEDmodel(object):
                         #     plt.close()
                         #     plt.errorbar(data.MJD, data.FLUXCAL, yerr=data.FLUXCALERR, fmt='o', label=sn_name)
                         #     plt.show()
+                        peak_mjd_orig = meta.get('PEAKMJD', meta.get('SEARCH_PEAKMJD', -99))
                         if meta_override is not None:
                             # print(sn_name, meta['SNID'], type(sn_name), type(meta['SNID']))
                             # print(sn_name in meta_override.SNID.values, meta['SNID'] in meta_override.SNID.values)
                             sn_override = meta_override[meta_override['SNID'] == sn_name]
-                            if sn_override.empty:
-                                continue
                             for column in meta_override.columns[1:]:
                                 meta[column] = sn_override[column].values[0]
                         peak_mjd = meta.get('PEAKMJD', meta.get('SEARCH_PEAKMJD', -99))
@@ -3009,6 +3027,7 @@ class SEDmodel(object):
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
+                        masses.append(meta.get('HOSTGAL_LOGMASS', -9.))
                         data['dist_mod'] = self.cosmo.distmod(zhd)
                         data['mask'] = 1
                         lc = data[
@@ -3076,6 +3095,7 @@ class SEDmodel(object):
                     self.survey = meta.get('SURVEY', 'NULL')
                     self.survey_id = survey_dict.get(self.survey, 0)
                     print(meta['SURVEY'], np.min(survey_zs), np.max(survey_zs), np.isnan(survey_zs).sum())
+            masses = np.array(masses)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
