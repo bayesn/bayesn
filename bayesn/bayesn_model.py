@@ -249,6 +249,10 @@ class SEDmodel(object):
             self.model_type = 'pop_RV'
             self.mu_R = jnp.array(params['MUR'])
             self.sigma_R = jnp.array(params['SIGMAR'])
+        if 'MSTEP' in params.keys():
+            self.M_step = jnp.array(params['MSTEP'])
+        else:
+            self.M_step = None
 
         self.trunc_val = 1.2
 
@@ -1264,6 +1268,78 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)  # _{sn_index}
 
+    def fit_model_popRV_Mstep(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+        """
+        Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
+        maximum as well as theta, epsilon, AV, RV and distance modulus.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
+
+        mass = obs[-7, 0, :]
+        M_split = 10  # Hardcoded for now, should make this customisable
+        HM_flag = mass > M_split
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
+            RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+            RV = numpyro.deterministic('RV',
+                                       self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+
+            M0 = self.M0 + HM_flag * self.M_step
+
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, 0., 0.,
+                                       mask, J_t, hsiao_interp, weights, None, None)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)  # _{sn_index}
+
     def fit_model_popRV_vi(self, obs, weights):
         """
         Numpyro model used for fitting latent SN properties with a truncated Gaussian prior on RV. Will fit for time of
@@ -2243,8 +2319,12 @@ class SEDmodel(object):
                                step_size=0.1)
         elif args['mode'].lower() == 'fitting':
             if self.model_type == 'pop_RV':
-                nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_strategy,
-                                   max_tree_depth=10)
+                if self.M_step is not None:
+                    nuts_kernel = NUTS(self.fit_model_popRV_Mstep, adapt_step_size=True, init_strategy=init_strategy,
+                                       max_tree_depth=10)
+                else:
+                    nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_strategy,
+                                       max_tree_depth=10)
             elif self.model_type == 'fixed_RV':
                 nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_strategy,
                                    max_tree_depth=10)
