@@ -2112,7 +2112,7 @@ class SEDmodel(object):
         l_knots = params['L_KNOTS']
         tau_knots = params['TAU_KNOTS']
         W1_init = params['W1']
-        RV_init, tauA_init = params['RV'], params['TAUA']
+        tauA_init = params['TAUA']
 
         # Interpolate to match new wavelength knots
         W0_init = interp1d(l_knots, W0_init, kind='cubic', axis=0, fill_value=0, bounds_error=False)(self.l_knots)
