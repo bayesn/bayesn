@@ -1311,8 +1311,6 @@ class SEDmodel(object):
                                        self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
             M0 = self.M0 + HM_flag * self.M_step
-            print(M0)
-            pkill
 
             t = obs[0, ...] - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
