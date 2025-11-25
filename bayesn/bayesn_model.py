@@ -2959,7 +2959,7 @@ class SEDmodel(object):
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
             print('Saving light curves to standard grid...')
-            lcplot_data = pd.DataFrame()
+            lcplot_data = pd.DataFrame(columns=('CID', 'MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT'))
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
                 save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
