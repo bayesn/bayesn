@@ -3162,6 +3162,8 @@ class SEDmodel(object):
                         #     break
                         meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, dir_list[dir_ind], sn_file[:-3]), default_tablename='OBS')
                         sn_name = meta['SNID']
+                        if sn_name in ['2006bh', '2007af']:
+                            continue
                         if isinstance(sn_name, bytes):
                             sn_name = sn_name.decode('utf-8')
                         sn_name = str(sn_name)
