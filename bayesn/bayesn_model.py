@@ -1629,7 +1629,7 @@ class SEDmodel(object):
             # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
             #                                                          order='F').transpose(1, 2, 0)
 
-            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
             # print(obs.shape)
             # plt.close()
