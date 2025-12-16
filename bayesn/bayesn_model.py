@@ -1460,11 +1460,11 @@ class SEDmodel(object):
 
         mag_shift = jnp.r_[0, mag_shift]
 
-        M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
-
-        mass = obs[-7, 0, :]
-        M_split = 10  # Hardcoded for now, should make this customisable
-        HM_flag = mass > M_split
+        # M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
+        #
+        # mass = obs[-7, 0, :]
+        # M_split = 10  # Hardcoded for now, should make this customisable
+        # HM_flag = mass > M_split
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
@@ -1505,8 +1505,9 @@ class SEDmodel(object):
             # J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
             #                                                          order='F').transpose(1, 2, 0)
 
-            flux = self.get_flux_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
+            flux = self.get_mag_batch(M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
+
             # print(obs.shape)
             # plt.close()
             # for i in range(self.data.shape[-1]):
@@ -1583,11 +1584,11 @@ class SEDmodel(object):
 
         mag_shift = jnp.r_[0, mag_shift]
 
-        M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
+        # M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
 
-        mass = obs[-7, 0, :]
-        M_split = 10  # Hardcoded for now, should make this customisable
-        HM_flag = mass > M_split
+        # mass = obs[-7, 0, :]
+        # M_split = 10  # Hardcoded for now, should make this customisable
+        # HM_flag = mass > M_split
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))  # _{sn_index}
@@ -3655,6 +3656,8 @@ class SEDmodel(object):
                 table_path = os.path.join(args['data_root'], args['data_table'])
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 for i in tqdm(range(sn_list.shape[0])):
+                    if i > 20:
+                        break
                     row = sn_list.iloc[i]
                     sn, peak_mjd, file, mass = row.values
                     mjd, mag, mag_err, filters = [], [], [], []
@@ -3704,6 +3707,7 @@ class SEDmodel(object):
                     # zps = data.FLT.apply(lambda x: self.zp_dict[x])
                     # zp_flux = 10 ** (zps / 2.5)
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
+                    data['MAGERR'] = np.maximum(data['MAGERR'].values, args['error_floor'])
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     # plt.title(sn)
