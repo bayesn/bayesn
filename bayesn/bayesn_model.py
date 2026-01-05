@@ -2795,7 +2795,7 @@ class SEDmodel(object):
             with open(os.path.join(args['outputdir'], 'bayesn.yaml'), 'w') as file:
                 yaml.dump(yaml_data, file)
 
-            self.fitres_table.to_pandas().to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}_snprops.csv'), index=False)
+            # self.fitres_table.to_pandas().to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}_snprops.csv'), index=False)
 
         if 'lam_shift' in samples.keys() or 'mag_shift' in samples.keys():
             rows = [[f] for f in self.used_bands[1:]]
@@ -3656,8 +3656,6 @@ class SEDmodel(object):
                 table_path = os.path.join(args['data_root'], args['data_table'])
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 for i in tqdm(range(sn_list.shape[0])):
-                    if i > 20:
-                        break
                     row = sn_list.iloc[i]
                     sn, peak_mjd, file, mass = row.values
                     mjd, mag, mag_err, filters = [], [], [], []
