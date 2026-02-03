@@ -3344,11 +3344,11 @@ class SEDmodel(object):
             flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
-            for i in range(len(all_lcs)):
-                mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
-                mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
-                mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
-                mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
+            # for i in range(len(all_lcs)):
+            mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+            mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+            mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
+            mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             # if 'training' in args['mode'].lower():
             #     self.data = device_put(mag_data)
@@ -3392,29 +3392,6 @@ class SEDmodel(object):
                                       'SIM_LIBID', 'SIM_ZCMB', 'SIM_VPEC', 'SIM_DLMAG', 'SIM_PEAKMJD',
                                       'SIM_THETA', 'SIM_AV', 'SIM_RV'])
             else:
-                variables = {
-                    "varlist": varlist,
-                    "sne": sne,
-                    "idsurvey": idsurvey,
-                    "sn_type": sn_type,
-                    "field": field,
-                    "z_hels": z_hels,
-                    "z_hel_errs": z_hel_errs,
-                    "z_hds": z_hds,
-                    "z_hd_errs": z_hd_errs,
-                    "vpecs": vpecs,
-                    "vpec_errs": vpec_errs,
-                    "mwebvs": mwebvs,
-                    "host_logmasses": host_logmasses,
-                    "host_logmass_errs": host_logmass_errs,
-                    "snrmax1s": snrmax1s,
-                    "snrmax2s": snrmax2s,
-                    "snrmax3s": snrmax3s
-                }
-
-                for name, var in variables.items():
-                    print(f"{name}: {len(var)}")
-
                 table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
                                 vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
                                names=['VARNAMES:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR',
@@ -3561,10 +3538,10 @@ class SEDmodel(object):
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
             # for i in range(len(all_lcs)):
-            # mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
-            # mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
-            # mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
-            # mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
+            mag_data[:2, (flux_data[1, ...] <= 0)] = 0  # Mask out photometry
+            mag_data[4, (flux_data[1, ...] <= 0)] = 0  # Mask out band
+            mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
+            mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
             sne = sn_list['SNID'].values
             self.sn_list = sne
