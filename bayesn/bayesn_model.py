@@ -3015,7 +3015,6 @@ class SEDmodel(object):
             #     map_dict = args['map']
             #     print('Made it here!')
             if file_format.lower() == 'fits':  # If FITS format
-                raise ValueError('Not yet implemented, please use SNANA text format for now')
                 ntot = 0
                 sn_list = np.atleast_1d(np.loadtxt(list_files[0], dtype='str'))
                 head_file = os.path.join(data_dir, f'{sn_list[0]}')
@@ -3057,6 +3056,10 @@ class SEDmodel(object):
                         # We deliberately don't include vpec error here, as BayeSN includes this elsewhere
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                         # If filter not in map_dict, assume one-to-one mapping------
+                        map_dict = args['map']
+                        # print(meta['SURVEY'])
+                        # if meta['SURVEY'] in map_dict.keys():
+                        #     map_dict = map_dict[meta['SURVEY']]
                         for f in data.BAND.unique():
                             if f not in map_dict.keys():
                                 map_dict[f] = f
@@ -3314,7 +3317,7 @@ class SEDmodel(object):
                     self.survey = meta.get('SURVEY', 'NULL')
                     self.survey_id = survey_dict.get(self.survey, 0)
                     print(meta['SURVEY'], np.min(survey_zs), np.max(survey_zs), np.isnan(survey_zs).sum())
-            masses = np.array(masses)
+            # masses = np.array(masses)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
