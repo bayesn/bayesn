@@ -441,6 +441,10 @@ class SEDmodel(object):
                 shift = shift_file[shift_file.BAND == key]
                 lam_shift, mag_shift = shift['LAM_SHIFT'].values[0] * int(apply_lam_shifts), \
                                        shift['MAG_SHIFT'].values[0] * int(apply_mag_shifts)
+            if key == 'r_DES':
+                lam_shift = 50
+            elif key == 'i_PS1':
+                lam_shift = -50
 
             R[:, 0] = R[:, 0] + lam_shift  # Apply wavelength shift if specified
 
