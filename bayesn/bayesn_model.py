@@ -437,10 +437,12 @@ class SEDmodel(object):
                 R[:, 0] = R[:, 0] * 1e4
 
             lam_shift, mag_shift = 0, 0
-            if key == 'r_DES':
+            if key == 'r_D3YR':
                 lam_shift = 50
+                wave_sigma = 25
             elif key == 'i_PS1':
                 lam_shift = -50
+                wave_sigma = 25
             if shift_file is not None and key in shift_file.BAND.values:
                 shift = shift_file[shift_file.BAND == key]
                 lam_shift, mag_shift = shift['LAM_SHIFT'].values[0] * int(apply_lam_shifts), \
