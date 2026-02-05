@@ -437,14 +437,14 @@ class SEDmodel(object):
                 R[:, 0] = R[:, 0] * 1e4
 
             lam_shift, mag_shift = 0, 0
-            if shift_file is not None and key in shift_file.BAND.values:
-                shift = shift_file[shift_file.BAND == key]
-                lam_shift, mag_shift = shift['LAM_SHIFT'].values[0] * int(apply_lam_shifts), \
-                                       shift['MAG_SHIFT'].values[0] * int(apply_mag_shifts)
             if key == 'r_DES':
                 lam_shift = 50
             elif key == 'i_PS1':
                 lam_shift = -50
+            if shift_file is not None and key in shift_file.BAND.values:
+                shift = shift_file[shift_file.BAND == key]
+                lam_shift, mag_shift = shift['LAM_SHIFT'].values[0] * int(apply_lam_shifts), \
+                                       shift['MAG_SHIFT'].values[0] * int(apply_mag_shifts)
 
             R[:, 0] = R[:, 0] + lam_shift  # Apply wavelength shift if specified
 
@@ -2998,7 +2998,7 @@ class SEDmodel(object):
             sne, peak_mjds = [], []
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             if 'meta_override' in args.keys():
-                meta_override = pd.read_csv(args['meta_override'])
+                meta_override = pd.read_csv(args['meta_override']).astype({'SNID': str})
             else:
                 meta_override = None
             print('Reading light curves...')
@@ -3046,6 +3046,15 @@ class SEDmodel(object):
                         meta, data = sn.meta, sn.to_pandas()
                         data['BAND'] = data.BAND.str.decode("utf-8")
                         data['BAND'] = data.BAND.str.strip()
+                        sn_name = meta['SNID']
+                        if isinstance(sn_name, bytes):
+                            sn_name = sn_name.decode('utf-8')
+                        if meta_override is not None:
+                            sn_override = meta_override[meta_override['SNID'] == sn_name]
+                            if sn_override.empty:
+                                continue
+                            for column in meta_override.columns[1:]:
+                                meta[column] = sn_override[column].values[0]
                         peak_mjd = meta['PEAKMJD']
                         zhel = meta['REDSHIFT_HELIO']
                         zcmb = meta['REDSHIFT_FINAL']
@@ -3106,9 +3115,6 @@ class SEDmodel(object):
                         all_lcs.append(lc)
                         # Set up FITRES table data
                         # (currently just uses second table, should improve for cases where there are multiple lc files)
-                        sn_name = meta['SNID']
-                        if isinstance(sn_name, bytes):
-                            sn_name = sn_name.decode('utf-8')
                         sne.append(sn_name)
                         peak_mjds.append(peak_mjd)
                         sn_type.append(meta.get('TYPE', 0))
