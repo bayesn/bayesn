@@ -438,7 +438,7 @@ class SEDmodel(object):
 
             lam_shift, mag_shift = 0, 0
             if key == 'r_D3YR':
-                lam_shift = 50
+                lam_shift = 0
                 wave_sigma = 100
             elif key == 'i_PS1':
                 lam_shift = -50
