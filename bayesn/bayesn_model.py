@@ -797,6 +797,66 @@ class SEDmodel(object):
 
         return model_spectra
 
+    def _eval_fitz_direct(self, x):
+        """Evaluate Fitzpatrick extinction spline directly without materializing coefficient matrix.
+
+        Instead of computing the full (N, 9) spline coefficient matrix and then
+        contracting with yk via matmul, this evaluates the cubic spline scalar
+        result inline.  All intermediates are the same shape as the input,
+        giving ~9x memory reduction compared to the vmapped approach.
+
+        Parameters
+        ----------
+        x : array-like
+            Wavenumber values (1e4 / wavelength) at which to evaluate the spline.
+
+        Returns
+        -------
+        result : array-like
+            Spline values, same shape as input x.
+        """
+        xk = self.xk
+        yk_flat = self.yk.flatten()          # (9,)
+        y_dd = self.KD_x @ yk_flat           # second derivatives at knots
+
+        orig_shape = x.shape
+        x = x.ravel()
+
+        # --- Interpolation (xk[0] <= x <= xk[-1]) ---
+        q = jnp.searchsorted(xk, x, side='right') - 1
+        q = jnp.clip(q, 0, xk.shape[0] - 2)
+
+        h = xk[q + 1] - xk[q]
+        a = (xk[q + 1] - x) / h
+        b = 1.0 - a
+        c = ((a ** 3 - a) / 6.0) * h ** 2
+        d = ((b ** 3 - b) / 6.0) * h ** 2
+
+        interp_val = (a * yk_flat[q] + b * yk_flat[q + 1]
+                      + c * y_dd[q] + d * y_dd[q + 1])
+
+        # --- Upper extrapolation (x > xk[-1]) ---
+        h_up = xk[-1] - xk[-2]
+        a_up = (xk[-1] - x) / h_up
+        b_up = 1.0 - a_up
+        f_up = (x - xk[-1]) * h_up / 6.0
+        up_val = a_up * yk_flat[-2] + b_up * yk_flat[-1] + f_up * y_dd[-2]
+
+        # --- Lower extrapolation (x < xk[0]) ---
+        h_dn = xk[1] - xk[0]
+        b_dn = (x - xk[0]) / h_dn
+        a_dn = 1.0 - b_dn
+        f_dn = (x - xk[0]) * h_dn / 6.0
+        dn_val = a_dn * yk_flat[0] + b_dn * yk_flat[1] - f_dn * y_dd[1]
+
+        # --- Select branch ---
+        up_mask = x > xk[-1]
+        dn_mask = x < xk[0]
+        result = jnp.where(up_mask, up_val,
+                           jnp.where(dn_mask, dn_val, interp_val))
+
+        return result.reshape(orig_shape)
+
     def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, z, av_mw, mask, J_t, hsiao_interp, weights, lam_shift=None, mag_shift=None):
         """
         Calculates observer-frame fluxes for given parameter values
@@ -885,11 +945,9 @@ class SEDmodel(object):
             weights = num / denom[:, None, :]
             # weights /= weights.sum(axis=1)[:, None, :]
 
-            new_model_wave_obs = (self.model_wave[None, :, None] * (1 + z[:, None, None]) + lam_shift[None, None, :]).transpose(1, 0, 2)
-            new_model_wave_obs_flat = new_model_wave_obs.reshape((new_model_wave_obs.shape[0] * new_model_wave_obs.shape[1] * new_model_wave_obs.shape[2]), order='F')
-            M_fitz_block = self.J_t_map(1e4 / new_model_wave_obs_flat, self.xk, self.KD_x)
-            M_fitz_block = M_fitz_block.reshape((*new_model_wave_obs.shape, M_fitz_block.shape[1]), order='F').transpose(1, 0, 2, 3)
-            A_MW = av_mw[:, None, None] * (1 + (M_fitz_block @ self.yk.T[None, None, ...]) / self.RV_MW)[..., 0]
+            new_model_wave_obs = self.model_wave[None, :, None] * (1 + z[:, None, None]) + lam_shift[None, None, :]
+            fitz_vals = self._eval_fitz_direct(1e4 / new_model_wave_obs)
+            A_MW = av_mw[:, None, None] * (1 + fitz_vals / self.RV_MW)
             # A_MW = (av_mw[:, None, None] * (((1 + (self.M_fitz_block @ self.yk.T) / self.RV_MW)[..., 0]).T)).transpose(0, 2, 1)
 
             weights *= 10 ** (-0.4 * A_MW)
