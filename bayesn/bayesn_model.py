@@ -463,6 +463,11 @@ class SEDmodel(object):
             band_low_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][0], 0]
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
+            if band in ['H_NIRI', 'J_NIRI']:
+                plt.plot(R[:, 0], R[:, 1])
+                plt.show()
+            print(band, band_low_lim, band_up_lim)
+
             # Convolve the bands to match the sampling of the spectrum.
             band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1], left=0, right=0)
             # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
@@ -517,7 +522,7 @@ class SEDmodel(object):
             offsets.append(offset)
             wave_sigmas.append(wave_sigma)
             band_ind += 1
-
+        pkill
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
@@ -1689,31 +1694,13 @@ class SEDmodel(object):
 
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
-            # print(obs.shape)
-            # plt.close()
-            # for i in range(self.data.shape[-1]):
-            #     if redshift[i] < 0.6:
-            #         continue
-            #     mask = obs[-1, :, i].astype(bool)
-            #     plt.figure(figsize=(12, 8))
-            #     plt.scatter(obs[0, mask, i], flux[mask, i], label=f'SN {i}', color='b')
-            #     plt.errorbar(obs[0, mask, i], obs[1, mask, i], yerr=obs[2, mask, i], fmt='x', label=f'SN {i}', color='r')
-            #     plt.gca().invert_yaxis()
-            #     plt.savefig(f'/Users/matt/Documents/SALT_train_plots/{self.sn_list[i]}.png')
-            #     plt.close()
-            # raise ValueError('Nope')
-            # print('-------->', jnp.min(flux))
-            # print(jnp.mean(flux), jnp.std(flux), jnp.min(flux), jnp.max(flux))
-            # print(jnp.mean(obs[1, :, :]), jnp.std(obs[1, :, :]), jnp.min(obs[1, :, :]), jnp.max(obs[1, :, :]))
-            # print(jnp.mean(obs[2, :, :]), jnp.std(obs[2, :, :]), jnp.min(obs[2, :, :]), jnp.max(obs[2, :, :]))
-            # print('------------------------------------')
-            # print(jnp.isnan(flux).sum(), jnp.isnan(obs[[1, 2], ...]).sum())
-            # print((obs.shape[1] * obs.shape[2]))
-            # print((1 - mask).sum())
-            # plt.close()
-            # plt.scatter(redshift, Ds)
-            # plt.show()
-            # raise ValueError('Nope')
+
+            # DEBUG: check for NaN/Inf in flux
+            jax.debug.print("flux NaN={nan} Inf={inf} min={mn} max={mx}",
+                            nan=jnp.isnan(flux).sum(), inf=jnp.isinf(flux).sum(),
+                            mn=jnp.nanmin(flux), mx=jnp.nanmax(flux))
+            jax.debug.print("RV min={mn} max={mx} NaN={nan}", mn=jnp.min(RV), mx=jnp.max(RV), nan=jnp.isnan(RV).sum())
+            jax.debug.print("AV min={mn} max={mx}", mn=jnp.min(AV), mx=jnp.max(AV))
 
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
