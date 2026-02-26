@@ -463,11 +463,6 @@ class SEDmodel(object):
             band_low_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][0], 0]
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
-            if band in ['H_NIRI', 'J_NIRI']:
-                plt.plot(R[:, 0], R[:, 1])
-                plt.show()
-            print(band, band_low_lim, band_up_lim)
-
             # Convolve the bands to match the sampling of the spectrum.
             band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1], left=0, right=0)
             # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
@@ -522,7 +517,7 @@ class SEDmodel(object):
             offsets.append(offset)
             wave_sigmas.append(wave_sigma)
             band_ind += 1
-        pkill
+
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
