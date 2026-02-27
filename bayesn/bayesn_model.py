@@ -2511,6 +2511,9 @@ class SEDmodel(object):
             start = timeit.default_timer()
             print('----------------------')
             print(jnp.isnan(self.band_weights).sum())
+            nan_mask = np.isnan(np.array(self.band_weights)).any(axis=1)
+            for i in np.where(nan_mask.any(axis=0))[0]:
+                print(f'{self.used_bands[i]}: NaN for {nan_mask[:, i].sum()} SNe')
             print('----------------------')
             mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
             end = timeit.default_timer()
