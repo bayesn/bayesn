@@ -2509,7 +2509,9 @@ class SEDmodel(object):
                     chain_method=args['chain_method'])
             rng = PRNGKey(0)
             start = timeit.default_timer()
-
+            print('----------------------')
+            print(jnp.isnan(self.band_weights).sum())
+            print('----------------------')
             mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
             end = timeit.default_timer()
             mcmc.print_summary()
