@@ -538,6 +538,13 @@ class SEDmodel(object):
         self.band_interpolate_weights = jnp.array(band_weights)
         self.model_wave = 10 ** model_log_wave
         self.dlambda = jnp.diff(self.model_wave)
+        # Pre-compute trapezoidal quadrature weights: w[i] such that
+        # ∫f dλ ≈ Σ f[i]*w[i], equivalent to the trapezoidal rule.
+        self.trap_weights = jnp.concatenate([
+            self.dlambda[:1] / 2,
+            (self.dlambda[:-1] + self.dlambda[1:]) / 2,
+            self.dlambda[-1:] / 2
+        ])  # shape (n_wave,)
         self.used_band_dict = {val: val for val in self.band_dict.values()}
 
         self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
@@ -686,6 +693,14 @@ class SEDmodel(object):
             1.19456 + 1.01707 * RV - 5.46959e-3 * RV ** 2 + 7.97809e-4 * RV ** 3 - 4.45636e-5 * RV ** 4 - RV)
         yk = yk.at[:, 7].set(f99_c1 + f99_c2 * self.xk[7] + f99_c3 * f99_d1)
         self.yk = yk.at[:, 8].set(f99_c1 + f99_c2 * self.xk[8] + f99_c3 * f99_d2)
+
+        # Pre-tabulate Fitzpatrick extinction on a fine regular grid for fast lookup
+        n_tab = 50000
+        self.fitz_x_min = 0.0
+        self.fitz_x_max = 4.0
+        self.fitz_dx = (self.fitz_x_max - self.fitz_x_min) / (n_tab - 1)
+        fitz_x_grid = jnp.linspace(self.fitz_x_min, self.fitz_x_max, n_tab)
+        self.fitz_table = self._eval_fitz_direct(fitz_x_grid)
 
         # A = AV[..., None] * (1 + (self.M_fitz_block @ yk.T).T / RV[..., None])
 
@@ -917,8 +932,8 @@ class SEDmodel(object):
 
             lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
 
-            new_model_wave = self.model_wave[None, :, None] + lam_shift[None, None, :] / (1 + z[:, None, None])
-            new_model_wave = new_model_wave.transpose(0, 2, 1)
+            new_model_wave_rest = self.model_wave[None, :, None] + lam_shift[None, None, :] / (1 + z[:, None, None])
+            new_model_wave = new_model_wave_rest.transpose(0, 2, 1)
             new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
                                                      new_model_wave.shape[2]), order='F')
             new_weights = weights.transpose(0, 2, 1)
@@ -941,12 +956,17 @@ class SEDmodel(object):
             # new_weights = weights
 
             num = self.model_wave[None, :, None] * new_weights
-            denom = jnp.sum(0.5 * (num[:, :-1, :] + num[:, 1:, :]) * self.dlambda[None, :, None], axis=1)
-            weights = num / denom[:, None, :]
+            denom = jnp.sum(num * self.trap_weights[None, :, None], axis=1)
+            weights = num * self.trap_weights[None, :, None] / denom[:, None, :]
             # weights /= weights.sum(axis=1)[:, None, :]
 
-            new_model_wave_obs = self.model_wave[None, :, None] * (1 + z[:, None, None]) + lam_shift[None, None, :]
-            fitz_vals = self._eval_fitz_direct(1e4 / new_model_wave_obs)
+            new_model_wave_obs = new_model_wave_rest * (1 + z[:, None, None])
+            x = 1e4 / new_model_wave_obs
+            t = (x - self.fitz_x_min) / self.fitz_dx
+            t = jnp.clip(t, 0, len(self.fitz_table) - 2)
+            idx = t.astype(jnp.int32)
+            frac = t - idx
+            fitz_vals = self.fitz_table[idx] * (1 - frac) + self.fitz_table[idx + 1] * frac
             A_MW = av_mw[:, None, None] * (1 + fitz_vals / self.RV_MW)
             # A_MW = (av_mw[:, None, None] * (((1 + (self.M_fitz_block @ self.yk.T) / self.RV_MW)[..., 0]).T)).transpose(0, 2, 1)
 
@@ -977,8 +997,7 @@ class SEDmodel(object):
         )
 
         if lam_shift is not None:
-            wspec = model_spectra * obs_band_weights
-            model_flux = jnp.sum(0.5 * (wspec[:, :-1, :] + wspec[:, 1:, :]) * self.dlambda[None, :, None], axis=1).T
+            model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
         else:
             # print(model_flux[:, 0])
             # print(test_model_flux[:, 0] / model_flux[:, 0])
