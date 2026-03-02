@@ -1690,13 +1690,6 @@ class SEDmodel(object):
             flux = self.get_mag_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, redshift, av_mw, mask, self.J_t, self.hsiao_interp,
                                       weights, lam_shift, mag_shift)
 
-            # DEBUG: check for NaN/Inf in flux
-            jax.debug.print("flux NaN={nan} Inf={inf} min={mn} max={mx}",
-                            nan=jnp.isnan(flux).sum(), inf=jnp.isinf(flux).sum(),
-                            mn=jnp.nanmin(flux), mx=jnp.nanmax(flux))
-            jax.debug.print("RV min={mn} max={mx} NaN={nan}", mn=jnp.min(RV), mx=jnp.max(RV), nan=jnp.isnan(RV).sum())
-            jax.debug.print("AV min={mn} max={mx}", mn=jnp.min(AV), mx=jnp.max(AV))
-
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T), obs=obs[1, :, sn_index].T)
 
@@ -2509,13 +2502,12 @@ class SEDmodel(object):
                     chain_method=args['chain_method'])
             rng = PRNGKey(0)
             start = timeit.default_timer()
-            print('----------------------')
-            print(jnp.isnan(self.band_weights).sum())
-            nan_mask = np.isnan(np.array(self.band_weights)).any(axis=1)
-            for i in np.where(nan_mask.any(axis=0))[0]:
-                print(f'{self.used_bands[i]}: NaN for {nan_mask[:, i].sum()} SNe')
-            print('----------------------')
-            mcmc.run(rng, self.data, self.band_weights, extra_fields=('potential_energy',))
+            training_modes = ['training_globalrv', 'training_poprv', 'training_poprv_mstep']
+            if args['mode'].lower() in training_modes:
+                run_weights = self.band_weights_shift
+            else:
+                run_weights = self.band_weights
+            mcmc.run(rng, self.data, run_weights, extra_fields=('potential_energy',))
             end = timeit.default_timer()
             mcmc.print_summary()
             samples = mcmc.get_samples(group_by_chain=True)
