@@ -932,8 +932,8 @@ class SEDmodel(object):
 
             lmap = jax.vmap(linterp, in_axes=(None, 0, 0), out_axes=0)
 
-            new_model_wave_rest = self.model_wave[None, :, None] + lam_shift[None, None, :] / (1 + z[:, None, None])
-            new_model_wave = new_model_wave_rest.transpose(0, 2, 1)
+            new_model_wave = self.model_wave[None, :, None] + lam_shift[None, None, :] / (1 + z[:, None, None])
+            new_model_wave = new_model_wave.transpose(0, 2, 1)
             new_model_wave = new_model_wave.reshape((new_model_wave.shape[0] * new_model_wave.shape[1],
                                                      new_model_wave.shape[2]), order='F')
             new_weights = weights.transpose(0, 2, 1)
@@ -960,7 +960,7 @@ class SEDmodel(object):
             weights = num * self.trap_weights[None, :, None] / denom[:, None, :]
             # weights /= weights.sum(axis=1)[:, None, :]
 
-            new_model_wave_obs = new_model_wave_rest * (1 + z[:, None, None])
+            new_model_wave_obs = self.model_wave[None, :, None] * (1 + z[:, None, None]) + lam_shift[None, None, :]
             x = 1e4 / new_model_wave_obs
             t = (x - self.fitz_x_min) / self.fitz_dx
             t = jnp.clip(t, 0, len(self.fitz_table) - 2)
@@ -2282,6 +2282,7 @@ class SEDmodel(object):
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
         args['map'] = args.get('map', {})
         args['drop_bands'] = args.get('drop_bands', [])
+        args['drop_surveys'] = args.get('drop_surveys', [])
         args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd()))
         args['outfile_prefix'] = args.get('outfile_prefix', 'output')
         args['jobid'] = args.get('jobid', False)
@@ -3713,7 +3714,9 @@ class SEDmodel(object):
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
-                    sn, peak_mjd, file, mass = row.values
+                    sn, survey, peak_mjd, file, mass = row.values
+                    if survey in args['drop_surveys']:
+                        continue
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(args['data_root'], file)
                     with open(path, 'r') as file:
