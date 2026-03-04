@@ -1532,10 +1532,13 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
-        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
-        mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
-
-        mag_shift = jnp.r_[0, mag_shift]
+        if self.crosscal:
+            lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+            mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
+            mag_shift = jnp.r_[0, mag_shift]
+        else:
+            lam_shift = None
+            mag_shift = None
 
         # M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
         #
@@ -1656,10 +1659,13 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
-        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
-        mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
-
-        mag_shift = jnp.r_[0, mag_shift]
+        if self.crosscal:
+            lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+            mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
+            mag_shift = jnp.r_[0, mag_shift]
+        else:
+            lam_shift = None
+            mag_shift = None
 
         # M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
 
@@ -1754,10 +1760,13 @@ class SEDmodel(object):
         tauA_tform = numpyro.sample('tauA_tform', dist.Uniform(0, jnp.pi / 2.))
         tauA = numpyro.deterministic('tauA', jnp.tan(tauA_tform))
 
-        lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
-        mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
-
-        mag_shift = jnp.r_[0, mag_shift]
+        if self.crosscal:
+            lam_shift = numpyro.sample('lam_shift', dist.Normal(0, self.wave_sigma))
+            mag_shift = numpyro.sample('mag_shift', dist.MultivariateNormal(0, scale_tril=self.calib_chcov))
+            mag_shift = jnp.r_[0, mag_shift]
+        else:
+            lam_shift = None
+            mag_shift = None
 
         M_step = numpyro.sample('M_step', dist.Uniform(-0.2, 0.2))
 
@@ -2294,6 +2303,8 @@ class SEDmodel(object):
         args['file_format'] = args.get('file_format', 'snana').lower()
         args['error_floor'] = args.get('error_floor', 0.0)
         args['apply_mag_shifts'] = args.get('apply_mag_shifts', True)
+        args['crosscal'] = args.get('crosscal', False)
+        self.crosscal = args['crosscal']
         if args['jobsplit'] is not None:
             args['snana'] = True
         else:
@@ -2524,7 +2535,7 @@ class SEDmodel(object):
             start = timeit.default_timer()
             training_modes = ['training_globalrv', 'training_poprv', 'training_poprv_mstep']
             if args['mode'].lower() in training_modes:
-                run_weights = self.band_weights_shift
+                run_weights = self.band_weights_shift if self.crosscal else self.band_weights
             else:
                 run_weights = self.band_weights
             mcmc.run(rng, self.data, run_weights, extra_fields=('potential_energy',))
