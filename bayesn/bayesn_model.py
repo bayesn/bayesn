@@ -3733,8 +3733,9 @@ class SEDmodel(object):
                     with open(path, 'r') as file:
                         filter = None
                         for i, line in enumerate(file):
+                            line = line.replace('\n', '')
                             if i == 0:
-                                sn, zhel, ra, dec = line.split(' ')
+                                sn, zhel, ra, dec = line.split()
                             if line[:6] == 'filter':
                                 filter = line.strip('\n').split(' ')[1]
                             vals = line.split(' ')
@@ -3852,10 +3853,9 @@ class SEDmodel(object):
             self.calib_chcov = jnp.linalg.cholesky(calib_cov)
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
-            self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
-            self.used_band_dict = used_band_dict
             self.used_bands = used_bands
             self.zps = self.zps[self.used_band_inds]
+            self.offsets = self.offsets[self.used_band_inds]
             self.wave_sigma = self.wave_sigma[self.used_band_inds]
             print('----------------------------------')
             print(self.calib_chcov)
@@ -3867,10 +3867,6 @@ class SEDmodel(object):
                 self.data = device_put(flux_data)
             self.sn_list = sne
             self.J_t = device_put(J_t)
-            self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
-            self.used_band_dict = used_band_dict
-            self.zps = self.zps[self.used_band_inds]
-            self.offsets = self.offsets[self.used_band_inds]
             self.band_weights, self.band_weights_shift = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
