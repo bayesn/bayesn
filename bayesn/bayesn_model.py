@@ -2966,14 +2966,15 @@ class SEDmodel(object):
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
                 for i in tqdm(range(sn_list.shape[0])):
                     row = sn_list.iloc[i]
-                    sn, peak_mjd, file, mass = row.values
+                    sn, survey, peak_mjd, file, mass = row.values
                     mjd, mag, mag_err, filters = [], [], [], []
                     path = os.path.join(args['data_root'], file)
                     with open(path, 'r') as file:
                         filter = None
                         for i, line in enumerate(file):
+                            line = line.replace('\n', '')
                             if i == 0:
-                                sn, zhel, ra, dec = line.split(' ')
+                                sn, zhel, ra, dec = line.split()
                             if line[:6] == 'filter':
                                 filter = line.strip('\n').split(' ')[1]
                             vals = line.split(' ')
