@@ -2878,7 +2878,7 @@ class SEDmodel(object):
             if 'mag_shift' in samples.keys():
                 columns.extend(['MAG_SHIFT', 'MAG_SHIFT_ERR'])
                 for f_ind, f in enumerate(self.used_bands[1:]):
-                    mag_shift, mag_shift_err = float(samples['mag_shift'][..., f_ind + 1].mean()), float(samples['mag_shift'][..., f_ind + 1].std())
+                    mag_shift, mag_shift_err = float(samples['mag_shift'][..., f_ind].mean()), float(samples['mag_shift'][..., f_ind].std())
                     rows[f_ind].append(mag_shift)
                     rows[f_ind].append(mag_shift_err)
             df = pd.DataFrame(np.array(rows), columns=columns)
