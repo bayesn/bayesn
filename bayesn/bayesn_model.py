@@ -2300,6 +2300,8 @@ class SEDmodel(object):
         args['sim_prescale'] = args.get('sim_prescale', 1)
         args['jobsplit'] = args.get('jobsplit')
         args['save_fit_errors'] = args.get('save_fit_errors', False)
+        args['zmin'] = args.get('zmin', -99)
+        args['zmax'] = args.get('zmax', 99)
         args['file_format'] = args.get('file_format', 'snana').lower()
         args['error_floor'] = args.get('error_floor', 0.0)
         args['apply_mag_shifts'] = args.get('apply_mag_shifts', True)
@@ -3121,6 +3123,8 @@ class SEDmodel(object):
                             data['BAND'] = data.BAND.str.strip()
                             peak_mjd = meta['PEAKMJD']
                             zhel = meta['REDSHIFT_HELIO']
+                            if zhel < args['zmin'] or zhel > args['zmax']:
+                                continue
                             zcmb = meta['REDSHIFT_FINAL']
                             zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                             zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
@@ -3264,8 +3268,8 @@ class SEDmodel(object):
                                 meta[column] = sn_override[column].values[0]
                         peak_mjd = meta.get('PEAKMJD', meta.get('SEARCH_PEAKMJD', -99))
                         zhel = meta['REDSHIFT_HELIO']
-                        # if zhel < 0.62:
-                        #     continue
+                        if zhel < args['zmin'] or zhel > args['zmax']:
+                            continue
                         zcmb = meta.get('REDSHIFT_FINAL', meta['REDSHIFT_CMB'])
                         zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                         zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
@@ -3492,6 +3496,8 @@ class SEDmodel(object):
                             data = data.rename(columns={'BAND': 'FLT'})
                         data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
                         zhel = meta['REDSHIFT_HELIO']
+                        if zhel < args['zmin'] or zhel > args['zmax']:
+                            continue
                         data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                         # If filter not in map_dict, assume one-to-one mapping------
                         map_dict = args['map']
@@ -3622,7 +3628,7 @@ class SEDmodel(object):
                 self.zps = self.zps[self.used_band_inds]
                 self.offsets = self.offsets[self.used_band_inds]
                 self.wave_sigma = self.wave_sigma[self.used_band_inds]
-                self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
+                self.band_weights, self.band_weights_shift = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
                 self.peak_mjds = np.array(peak_mjds)
                 self.lcplot_data = lcplot_data
 
@@ -3665,6 +3671,8 @@ class SEDmodel(object):
                                         columns=['MJD', 'MAG', 'MAGERR', 'BAND']).astype({'MJD': float, 'MAG': float, 'MAGERR': float})
                     data = data[~data.BAND.isin(args['drop_bands'])]  # Skip certain bands
                     zhel, ra, dec = float(zhel), float(ra), float(dec)
+                    if zhel < args['zmin'] or zhel > args['zmax']:
+                        continue
                     mwebv = self.sfd.ebv(ra, dec)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
@@ -3752,6 +3760,8 @@ class SEDmodel(object):
                         {'MJD': float, 'MAG': float, 'MAGERR': float})
                     data = data[~data.BAND.isin(args['drop_bands'])]  # Skip certain bands
                     zhel, ra, dec = float(zhel), float(ra), float(dec)
+                    if zhel < args['zmin'] or zhel > args['zmax']:
+                        continue
                     mwebv = self.sfd.ebv(ra, dec)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
