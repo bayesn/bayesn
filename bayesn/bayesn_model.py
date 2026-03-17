@@ -439,7 +439,7 @@ class SEDmodel(object):
             lam_shift, mag_shift = 0, 0
             if key == 'g_Foundation':
                 lam_shift = 50
-                # wave_sigma = 100
+                wave_sigma = 50
             # elif key == 'i_PS1':
             #     lam_shift = -50
             #     wave_sigma = 100
