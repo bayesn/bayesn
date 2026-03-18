@@ -2932,6 +2932,7 @@ class SEDmodel(object):
                     # zps = data.FLT.apply(lambda x: self.zp_dict[x])
                     # zp_flux = 10 ** (zps / 2.5)
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
+                    data['MAGERR'] = np.maximum(data['MAGERR'].values, args['error_floor'])
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     peak_mjd = np.average(data[(data.flux / data.flux_err) > 3].MJD, weights=data[(data.flux / data.flux_err) > 3].flux ** 2)
@@ -3015,6 +3016,7 @@ class SEDmodel(object):
                     # zps = data.FLT.apply(lambda x: self.zp_dict[x])
                     # zp_flux = 10 ** (zps / 2.5)
                     # data['FLUXCAL'] = (np.power(10, -(data['MAG'] - zps) / 2.5) / zp_flux) * 10 ** (0.4 * 27.5)
+                    data['MAGERR'] = np.maximum(data['MAGERR'].values, args['error_floor'])
                     data['flux'] = np.power(10, -0.4 * data['MAG']) * 10 ** (0.4 * 27.5)
                     data['flux_err'] = (np.log(10) / 2.5) * data['flux'] * data['MAGERR']
                     # plt.title(sn)
