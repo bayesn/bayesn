@@ -3645,6 +3645,11 @@ class SEDmodel(object):
         elif args['file_format'] == 'snoopy':
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             all_lcs, n_obs, sne, peak_mjds = [], [], [], []
+            # For FITRES table
+            idsurvey, sn_type, field = [], [], []
+            z_hels, z_hel_errs, z_hds, z_hd_errs = [], [], [], []
+            snrmax1s, snrmax2s, snrmax3s = [], [], []
+            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs = [], [], [], [], []
             if 'version_photometry' in args.keys():
                 data_dir = args['version_photometry']
                 file_list = os.listdir(data_dir)
@@ -3728,6 +3733,35 @@ class SEDmodel(object):
                     n_obs.append(lc.shape[0])
                     sne.append(sn)
                     peak_mjds.append(peak_mjd)
+                    # FITRES table data
+                    idsurvey.append('NULL')
+                    sn_type.append(0)
+                    field.append('NULL')
+                    z_hels.append(zhel)
+                    z_hel_errs.append(5e-4)
+                    z_hds.append(zhel)
+                    z_hd_errs.append(5e-4)
+                    vpecs.append(0.)
+                    vpec_errs.append(self.sigma_pec)
+                    mwebvs.append(mwebv)
+                    host_logmasses.append(-9.)
+                    host_logmass_errs.append(-9.)
+                    snrmax1 = np.max(lc.flux / lc.flux_err)
+                    lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                    if lc_snr2.shape[0] == 0:
+                        snrmax2 = -99
+                        snrmax3 = -99
+                    else:
+                        snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                        lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                          lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                        if lc_snr3.shape[0] == 0:
+                            snrmax3 = -99
+                        else:
+                            snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                    snrmax1s.append(snrmax1)
+                    snrmax2s.append(snrmax2)
+                    snrmax3s.append(snrmax3)
             elif 'data_table' in args.keys():
                 table_path = os.path.join(args['data_root'], args['data_table'])
                 sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
@@ -3815,6 +3849,35 @@ class SEDmodel(object):
                     n_obs.append(lc.shape[0])
                     sne.append(sn)
                     peak_mjds.append(peak_mjd)
+                    # FITRES table data
+                    idsurvey.append(survey)
+                    sn_type.append(0)
+                    field.append('NULL')
+                    z_hels.append(zhel)
+                    z_hel_errs.append(5e-4)
+                    z_hds.append(zhel)
+                    z_hd_errs.append(5e-4)
+                    vpecs.append(0.)
+                    vpec_errs.append(self.sigma_pec)
+                    mwebvs.append(mwebv)
+                    host_logmasses.append(mass)
+                    host_logmass_errs.append(-9.)
+                    snrmax1 = np.max(lc.flux / lc.flux_err)
+                    lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
+                    if lc_snr2.shape[0] == 0:
+                        snrmax2 = -99
+                        snrmax3 = -99
+                    else:
+                        snrmax2 = np.max(lc_snr2.flux / lc_snr2.flux_err)
+                        lc_snr3 = lc_snr2[lc_snr2.band_indices !=
+                                          lc_snr2[(lc_snr2.flux / lc_snr2.flux_err) == snrmax2].band_indices.values[0]]
+                        if lc_snr3.shape[0] == 0:
+                            snrmax3 = -99
+                        else:
+                            snrmax3 = np.max(lc_snr3.flux / lc_snr3.flux_err)
+                    snrmax1s.append(snrmax1)
+                    snrmax2s.append(snrmax2)
+                    snrmax3s.append(snrmax3)
             N_sn = len(all_lcs)
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
@@ -3880,6 +3943,16 @@ class SEDmodel(object):
             self.band_weights, self.band_weights_shift = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
+            # Prep FITRES table
+            varlist = ["SN:"] * len(sne)
+            snrmax1s, snrmax2s, snrmax3s = np.array(snrmax1s), np.array(snrmax2s), np.array(snrmax3s)
+            snrmax1s, snrmax2s, snrmax3s = np.around(snrmax1s, 2), np.around(snrmax2s, 2), np.around(snrmax3s, 2)
+            table = QTable([varlist, sne, idsurvey, sn_type, field, z_hels, z_hel_errs, z_hds, z_hd_errs,
+                            vpecs, vpec_errs, mwebvs, host_logmasses, host_logmass_errs, snrmax1s, snrmax2s, snrmax3s],
+                           names=['VARLIST:', 'CID', 'IDSURVEY', 'TYPE', 'FIELD', 'zHEL', 'zHELERR', 'zHD',
+                                  'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR', 'SNRMAX1',
+                                  'SNRMAX2', 'SNRMAX3'])
+            self.fitres_table = table
 
     def simulate_spectrum(self, t, N, dl=10, z=0, mu=0, ebv_mw=0, RV=None, logM=None, del_M=None, AV=None, theta=None,
                           eps=None):
