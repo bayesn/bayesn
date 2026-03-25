@@ -710,6 +710,105 @@ class SEDmodel(object):
         model_flux *= mask
         return model_flux
 
+    def compute_fitprob(self, samples):
+        """
+        Compute FITPROB for each SN using posterior mean parameters.
+
+        Uses the BayeSN joint test statistic T = chi2_data + chi2_epsilon,
+        where chi2_data is the standard flux chi-squared at the posterior mean
+        and chi2_epsilon = sum(eps_tform_mean^2) penalizes extreme epsilon.
+
+        Parameters
+        ----------
+        samples: dict
+            Posterior samples dictionary with keys including 'theta', 'AV', 'tmax', 'Ds', 'eps_tform'
+
+        Returns
+        -------
+        fitprob : array (n_sne,)
+            Goodness-of-fit probability for each SN
+        fitchi2 : array (n_sne,)
+            Joint test statistic T = chi2_data + chi2_epsilon
+        ndof : array (n_sne,)
+            Effective degrees of freedom: N_obs + alpha*N_eps - N_params
+        """
+        from scipy.stats import chi2 as chi2_dist
+
+        n_sne = self.data.shape[-1]
+
+        # --- 1. Posterior means ---
+        theta_mean = np.array(samples['theta'].mean(axis=(0, 1)))
+        AV_mean = np.array(samples['AV'].mean(axis=(0, 1)))
+        tmax_mean = np.array(samples['tmax'].mean(axis=(0, 1)))
+        Ds_mean = np.array(samples['Ds'].mean(axis=(0, 1)))
+
+        # eps_tform: (n_chains, n_samples, N_knots_sig, n_sne) -> mean -> (N_knots_sig, n_sne)
+        eps_tform_mean = np.array(samples['eps_tform'].mean(axis=(0, 1)))
+        # Reconstruct eps via L_Sigma transform (mirrors fit_model_globalRV lines 864-869)
+        eps = np.matmul(self.L_Sigma, eps_tform_mean)
+        eps = eps.T
+        eps = eps.reshape(
+            (n_sne, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F'
+        )
+        eps_full = jnp.zeros((n_sne, self.l_knots.shape[0], self.tau_knots.shape[0]))
+        eps_full = eps_full.at[:, 1:-1, :].set(eps)
+
+        # RV: per-SN from posterior (popRV) or global scalar (globalRV)
+        if 'RV' in samples:
+            RV = np.array(samples['RV'].mean(axis=(0, 1)))
+        else:
+            RV = self.RV
+
+        # --- 2. Rebuild J_t and hsiao_interp at posterior mean tmax ---
+        obs_times = self.data[0, ...]
+        t = obs_times - tmax_mean[None, :]
+        hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+        keep_shape = t.shape
+        t_flat = t.flatten(order='F')
+        J_t = self.J_t_map(t_flat, self.tau_knots, self.KD_t).reshape(
+            (*keep_shape, self.tau_knots.shape[0]), order='F'
+        ).transpose(1, 2, 0)
+
+        # --- 3. Inputs in (N_obs, n_sne) convention ---
+        band_indices = self.data[4, :, :].astype(int)
+        mask = self.data[9, :, :].astype(bool)
+
+        # --- 4. Model flux — single vectorized JAX call ---
+        model_flux = self.get_flux_batch(
+            self.M0, theta_mean, AV_mean, self.W0, self.W1, eps_full,
+            Ds_mean, RV, band_indices, mask, J_t, hsiao_interp, self.band_weights
+        )
+
+        # --- 5. chi2_data ---
+        obs_flux = self.data[1, :, :]
+        obs_err = self.data[2, :, :]
+        residuals_sq = (obs_flux - model_flux) ** 2
+        chi2_per_obs = jnp.where(mask, residuals_sq / obs_err ** 2, 0.0)
+        chi2_data = jnp.sum(chi2_per_obs, axis=0)
+
+        # --- 6. chi2_epsilon: sum of squared whitened epsilon ---
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        chi2_epsilon = np.sum(eps_tform_mean ** 2, axis=0)
+
+        # --- 7. Joint statistic, NDOF, FITPROB ---
+        T_joint = np.array(chi2_data) + chi2_epsilon
+        # NDOF = N_obs + alpha*N_eps - N_params.
+        # Physical params (tmax, theta, AV, Ds, +RV) consume DOF from data.
+        # Epsilon knots are prior-constrained, so their effective DOF is
+        # between 0 (fully free) and N_knots_sig (fully prior-determined).
+        # alpha=0.75 calibrated on Foundation DR1 sample.
+        alpha = 0.75
+        n_params = 4 + (1 if 'RV' in samples else 0)
+        ndof = (np.sum(np.array(mask), axis=0) + alpha * N_knots_sig - n_params).astype(int)
+
+        fitprob = np.where(
+            (ndof > 0) & (T_joint > 0),
+            chi2_dist.sf(T_joint, ndof),
+            1.0
+        )
+
+        return fitprob, T_joint, ndof
+
     def get_mag_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
         """
         Calculates observer-frame magnitudes for given parameter values
@@ -2269,6 +2368,9 @@ class SEDmodel(object):
                 samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
                             1 + z_HEL[None, None, :])
 
+            # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
+            fitprob, fitchi2, ndof = self.compute_fitprob(samples)
+
             # Create lcplot file
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
@@ -2348,6 +2450,9 @@ class SEDmodel(object):
             self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
             self.fitres_table['PEAKMJD'] = samples['peak_MJD'].mean(axis=(0, 1))
             self.fitres_table['PEAKMJDERR'] = samples['peak_MJD'].std(axis=(0, 1))
+            self.fitres_table['FITCHI2'] = np.array(fitchi2)
+            self.fitres_table['NDOF'] = ndof
+            self.fitres_table['FITPROB'] = fitprob
             # if not args['fit_method'] == 'vi':
             self.fitres_table.round(4)
 
