@@ -2540,10 +2540,10 @@ class SEDmodel(object):
                 run_weights = self.band_weights_shift if self.crosscal else self.band_weights
             else:
                 run_weights = self.band_weights
-            mcmc.run(rng, self.data, run_weights, extra_fields=('potential_energy',))
+            mcmc.run(rng, self.data, run_weights, extra_fields=('potential_energy', 'diverging'))
             end = timeit.default_timer()
             mcmc.print_summary()
-            samples = mcmc.get_samples(group_by_chain=True)
+            samples = {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
         print(f'Total inference runtime: {end - start} seconds')
         self.postprocess(samples, args)
 
