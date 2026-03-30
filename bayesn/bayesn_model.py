@@ -2594,6 +2594,7 @@ class SEDmodel(object):
                     if sn_file_ind == 0:
                         # Check if sim or real data
                         self.sim = 'SIM_REDSHIFT_HELIO' in head_data.dtype.names
+                        self.bayesn_sim = 'SIM_THETA' in meta.keys()
                         if not self.sim:
                             args['njobtot'] = args['jobsplit'][1]
                     SNID = np.char.strip(head_data['SNID'])
@@ -2701,9 +2702,14 @@ class SEDmodel(object):
                             sim_vpecs.append(meta['SIM_VPEC'])
                             sim_dlmags.append(meta['SIM_DLMU'])
                             sim_pkmjds.append(meta['SIM_PEAKMJD'])
+                        if self.bayesn_sim:
                             sim_thetas.append(meta['SIM_THETA'])
                             sim_AVs.append(meta['SIM_AV'])
                             sim_RVs.append(meta['SIM_RV'])
+                        else:
+                            sim_thetas.append(-9.)
+                            sim_AVs.append(-9.)
+                            sim_RVs.append(-9.)
                         snrmax1 = np.max(lc.flux / lc.flux_err)
                         lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                         if lc_snr2.shape[0] == 0:
@@ -2726,6 +2732,7 @@ class SEDmodel(object):
                 meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, sn_list[0]), default_tablename='OBS')
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in meta.keys()
+                self.bayesn_sim = 'SIM_THETA' in meta.keys()
                 # If real data, ignore sim_prescale
                 if not self.sim:
                     args['njobtot'] = args['jobsplit'][1]
@@ -2819,9 +2826,14 @@ class SEDmodel(object):
                         sim_vpecs.append(meta['SIM_VPEC'])
                         sim_dlmags.append(meta['SIM_DLMU'])
                         sim_pkmjds.append(meta['SIM_PEAKMJD'])
+                    if self.bayesn_sim:
                         sim_thetas.append(meta['SIM_THETA'])
                         sim_AVs.append(meta['SIM_AV'])
                         sim_RVs.append(meta['SIM_RV'])
+                    else:
+                        sim_thetas.append(-9.)
+                        sim_AVs.append(-9.)
+                        sim_RVs.append(-9.)
                     snrmax1 = np.max(lc.flux / lc.flux_err)
                     lc_snr2 = lc[lc.band_indices != lc[(lc.flux / lc.flux_err) == snrmax1].band_indices.values[0]]
                     if lc_snr2.shape[0] == 0:
