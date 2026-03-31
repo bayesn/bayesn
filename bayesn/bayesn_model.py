@@ -2594,7 +2594,7 @@ class SEDmodel(object):
                     if sn_file_ind == 0:
                         # Check if sim or real data
                         self.sim = 'SIM_REDSHIFT_HELIO' in head_data.dtype.names
-                        self.bayesn_sim = 'SIM_THETA' in meta.keys()
+                        self.bayesn_sim = 'SIM_THETA' in head_data.dtype.names
                         if not self.sim:
                             args['njobtot'] = args['jobsplit'][1]
                     SNID = np.char.strip(head_data['SNID'])
