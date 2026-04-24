@@ -26,6 +26,7 @@ def invKD_irr(x):
 		y independednt matrix whose product can be taken with y to
 		obtain a vector of second derivatives of y.
 	"""
+	x = np.asarray(x)
 	n = len(x)
 
 	K = np.zeros((n-2,n-2))
@@ -94,6 +95,9 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 		y independednt matrix whose product can be taken with y to evaluate
 		the spline at x_int.
 	"""
+	x_int = np.asarray(x_int)
+	x = np.asarray(x)
+	invkd = np.asarray(invkd)
 	n_x_int = len(x_int)
 	n_x = len(x)
 	X = np.zeros((n_x_int,n_x))

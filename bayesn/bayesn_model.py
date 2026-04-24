@@ -426,15 +426,13 @@ class SEDmodel(object):
             band_up_lim = R[np.where(R[:, 1] > 0.01 * R[:, 1].max())[0][-1], 0]
 
             # Convolve the bands to match the sampling of the spectrum.
-            band_conv_transmission = jnp.interp(band_wave, R[:, 0], R[:, 1], left=0, right=0)
-            # band_conv_transmission = scipy.interpolate.interp1d(R[:, 0], R[:, 1], kind='cubic',
-            #                                                     fill_value=0, bounds_error=False)(band_wave)
+            band_conv_transmission = np.interp(band_wave, R[:, 0], R[:, 1], left=0, right=0)
 
-            dlamba = jnp.diff(band_wave)
-            dlamba = jnp.r_[dlamba, dlamba[-1]]
+            dlamba = np.diff(band_wave)
+            dlamba = np.concatenate([dlamba, dlamba[-1:]])
 
             num = band_wave * band_conv_transmission * dlamba
-            denom = jnp.sum(num)
+            denom = num.sum()
             band_weight = num / denom
 
             band_weights.append(band_weight)
@@ -1779,6 +1777,12 @@ class SEDmodel(object):
         args['num_samples'] = args.get('num_samples', 500)
         args['fit_method'] = args.get('fit_method', 'mcmc')
         args['chain_method'] = args.get('chain_method', 'parallel')
+        args['laplace_method'] = args.get('laplace_method', 'svi').lower()
+        if args['laplace_method'] not in {'svi', 'lm'}:
+            raise ValueError(f"laplace_method must be 'svi' or 'lm', got {args['laplace_method']!r}")
+        args['lm_maxiter'] = args.get('lm_maxiter', 30)
+        args['lm_lam_init'] = args.get('lm_lam_init', 1e-3)
+        args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -1869,6 +1873,15 @@ class SEDmodel(object):
             init_strategy = init_to_sample()
         else:
             init_strategy = init_to_value(values=self.initial_guess(args, reference_model=args['initialisation']))
+
+        if args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi' \
+                and args['laplace_method'] == 'lm':
+            from numpyro.infer.util import initialize_model
+            self._lm_model_info = initialize_model(
+                PRNGKey(0), self.fit_model_globalRV_noeps,
+                init_strategy=init_strategy, dynamic_args=True,
+                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+            )
 
         print(f'Preprocessing time: {time.time() - self.start_time}')
         # print(self.data.shape)
@@ -1980,16 +1993,27 @@ class SEDmodel(object):
                     Samples and other information from MCMC fit
 
                 """
-                optimizer = Adam(0.01)
                 model = self.fit_model_globalRV_noeps
                 sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
-                # First start with the Laplace Approximation
-                laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
-                svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
 
-                svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False)
-                params, losses = svi_result.params, svi_result.losses
-                laplace_median = laplace_guide.median(params)
+                if args['laplace_method'] == 'lm':
+                    from .lm_optim import run_lm_laplace
+                    mi = self._lm_model_info
+                    pot_fn_sn = mi.potential_fn(data[..., None], weights[None, ...])
+                    post_fn_sn = mi.postprocess_fn(data[..., None], weights[None, ...])
+                    laplace_median, _ = run_lm_laplace(
+                        pot_fn_sn, post_fn_sn, mi.param_info.z,
+                        maxiter=args['lm_maxiter'],
+                        lam_init=args['lm_lam_init'],
+                        use_linesearch=args['lm_use_linesearch'],
+                    )
+                else:
+                    optimizer = Adam(0.01)
+                    laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
+                    svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
+                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False)
+                    params, losses = svi_result.params, svi_result.losses
+                    laplace_median = laplace_guide.median(params)
 
                 # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
@@ -2465,7 +2489,8 @@ class SEDmodel(object):
             self.fitres_table = self.fitres_table[new_cols]
 
             sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
-            sncosmo.write_lc(self.all_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCSUMMARY.TEXT'), fmt="snana", metachar="")
+            if hasattr(self, 'all_table'):
+                sncosmo.write_lc(self.all_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCSUMMARY.TEXT'), fmt="snana", metachar="")
 
 
         if args['snana']:
@@ -2638,7 +2663,7 @@ class SEDmodel(object):
                         for f in data.BAND.unique():
                             if f not in map_dict.keys():
                                 map_dict[f] = f
-                        data['FLT'] = data.BAND.apply(lambda x: map_dict[x])
+                        data['FLT'] = data.BAND.map(map_dict)
                         # Remove bands outside of filter coverage-------------------
                         for f in data.FLT.unique():
                             if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
@@ -2654,8 +2679,8 @@ class SEDmodel(object):
                                     raise KeyError(
                                         f'Filter {f} not present in BayeSN, check your filter mapping')
                         # ----------------------------------------------------------
-                        data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                        data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                        data['band_indices'] = data.FLT.map(self.band_dict).map(used_band_dict)
+                        data['zp'] = data.FLT.map(self.zp_dict)
                         data['flux'] = data['FLUXCAL']
                         data['flux_err'] = np.max(
                             np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]),
@@ -2666,7 +2691,7 @@ class SEDmodel(object):
                         data['redshift_error'] = zhel_err
                         data['MWEBV'] = meta.get('MWEBV', 0.)
                         data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                        data['dist_mod'] = self.cosmo.distmod(zhd)
+                        data['dist_mod'] = 0.0  # filled in batch after the read loop
                         data['mask'] = 1
                         lc = data[
                             ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
@@ -2762,7 +2787,7 @@ class SEDmodel(object):
                     for f in data.BAND.unique():
                         if f not in map_dict.keys():
                             map_dict[f] = f
-                    data['FLT'] = data.BAND.apply(lambda x: map_dict[x])
+                    data['FLT'] = data.BAND.map(map_dict)
 
                     # Remove bands outside of filter coverage-------------------
                     for f in data.FLT.unique():
@@ -2779,8 +2804,8 @@ class SEDmodel(object):
                                 raise KeyError(
                                     f'Filter {f} not present in BayeSN, check your filter mapping')
                     # ----------------------------------------------------------
-                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data['band_indices'] = data.FLT.map(self.band_dict).map(used_band_dict)
+                    data['zp'] = data.FLT.map(self.zp_dict)
                     data['flux'] = data['FLUXCAL']
                     data['flux_err'] = np.max(
                         np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
@@ -2810,7 +2835,7 @@ class SEDmodel(object):
                     field.append(meta.get('FIELD', 'VOID'))
                     z_hels.append(zhel)
                     z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', zhel_err))
-                    z_hds.append(meta['REDSHIFT_FINAL'])
+                    z_hds.append(zhd)
                     z_hd_errs.append(meta.get('REDSHIFT_FINAL_ERR', zcmb_err))
                     vpecs.append(vpec)
                     vpec_errs.append(vpec_err)
@@ -2859,22 +2884,27 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
+            distmods = self.cosmo.distmod(z_hds).value
+            dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
             if args['num_lcplot'] is None:
                 num_lcplot = len(all_lcs)
             else:
                 num_lcplot = args['num_lcplot']
-            lcplot_data = pd.DataFrame()
+            lcplot_rows = []
+            mask_fill = 1.0 / np.sqrt(2 * np.pi)
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
                 if i < num_lcplot:
                     save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
                     save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
                     save_lc.insert(loc=0, column='CID', value=sne[i])
-                    lcplot_data = pd.concat([lcplot_data, save_lc])
+                    lcplot_rows.append(save_lc)
                 lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
-                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+                all_data[i, :lc.shape[0], dist_mod_col] = distmods[i]
+                all_data[i, lc.shape[0]:, 2] = mask_fill
+            lcplot_data = pd.concat(lcplot_rows, ignore_index=True) if lcplot_rows else pd.DataFrame()
             all_data = all_data.T
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
@@ -2969,7 +2999,7 @@ class SEDmodel(object):
             for i in tqdm(range(sn_list.shape[0])):
                 row = sn_list.iloc[i]
                 sn_files = row.files.split(',')
-                sn_lc = None
+                sn_lc_parts = []
                 sn = row.SNID
                 if isinstance(sn, bytes):
                     sn = sn.decode('utf-8')
@@ -2995,7 +3025,7 @@ class SEDmodel(object):
                     for f in data.FLT.unique():
                         if f not in map_dict.keys():
                             map_dict[f] = f
-                    data['FLT'] = data.FLT.apply(lambda x: map_dict[x])
+                    data['FLT'] = data.FLT.map(map_dict)
                     # Remove bands outside of filter coverage-------------------
                     for f in data.FLT.unique():
                         if zhel > (self.band_lim_dict[f][0] / self.l_knots[0] - 1) or zhel < (
@@ -3011,8 +3041,8 @@ class SEDmodel(object):
                                 raise KeyError(
                                     f'Filter {f} not present in BayeSN, check your filter mapping')
                     # ----------------------------------------------------------
-                    data['band_indices'] = data.FLT.apply(lambda x: used_band_dict[self.band_dict[x]])
-                    data['zp'] = data.FLT.apply(lambda x: self.zp_dict[x])
+                    data['band_indices'] = data.FLT.map(self.band_dict).map(used_band_dict)
+                    data['zp'] = data.FLT.map(self.zp_dict)
                     data['flux'] = data['FLUXCAL']
                     data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
                     data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
@@ -3021,17 +3051,15 @@ class SEDmodel(object):
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
                     data['MWEBV'] = meta.get('MWEBV', 0.)
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
-                    data['dist_mod'] = self.cosmo.distmod(row.REDSHIFT_CMB)
+                    data['dist_mod'] = 0.0  # filled in batch after the read loop
                     data['mask'] = 1
                     lc = data[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
                     lc = lc[(lc['t'] > self.tau_knots.min()) & (lc['t'] < self.tau_knots.max())]
-                    if sn_lc is None:
-                        sn_lc = lc.copy()
-                    else:
-                        sn_lc = pd.concat([sn_lc, lc])
+                    sn_lc_parts.append(lc)
+                sn_lc = pd.concat(sn_lc_parts, ignore_index=True)
                 sne.append(sn)
                 peak_mjds.append(peak_mjd)
                 t_ranges.append((lc['t'].min(), lc['t'].max()))
@@ -3075,18 +3103,23 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
+            distmods = self.cosmo.distmod(z_hds).value
+            dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
-            lcplot_data = pd.DataFrame(columns=('CID', 'MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT'))
+            lcplot_rows = []
+            mask_fill = 1.0 / np.sqrt(2 * np.pi)
             for i in tqdm(range(len(all_lcs))):
                 lc = all_lcs[i]
                 save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
                 save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
                 save_lc.insert(loc=0, column='CID', value=sne[i])
-                lcplot_data = pd.concat([lcplot_data, save_lc])
+                lcplot_rows.append(save_lc)
                 lc = lc.iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
-                all_data[i, lc.shape[0]:, 2] = 1 / jnp.sqrt(2 * np.pi)
+                all_data[i, :lc.shape[0], dist_mod_col] = distmods[i]
+                all_data[i, lc.shape[0]:, 2] = mask_fill
                 # all_data[i, lc.shape[0]:, 3] = 10  # Arbitrarily set all masked points to H-band
+            lcplot_data = pd.concat(lcplot_rows, ignore_index=True)
             all_data = all_data.T
             t = all_data[0, ...]
             keep_shape = t.shape
