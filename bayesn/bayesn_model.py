@@ -1787,6 +1787,7 @@ class SEDmodel(object):
         args['zltn_lr'] = args.get('zltn_lr', 0.005)
         args['zltn_lr_final'] = args.get('zltn_lr_final', args['zltn_lr'])
         args['zltn_particles'] = args.get('zltn_particles', 5)
+        args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2021,20 +2022,31 @@ class SEDmodel(object):
                     )
                     # Stage 2: LM on the full VI model from (Stage1 MAP,
                     # eps_tform=0). Lands at the joint MAP where the Hessian
-                    # is PD, enabling the warm-start scale_tril.
+                    # is PD, enabling the warm-start scale_tril. A soft
+                    # Gaussian prior on tmax (centred at Stage 1's MAP) damps
+                    # tmax drift via tmax-eps coupling without breaking the
+                    # Laplace approximation.
                     vi_mi = self._vi_model_info
                     pot_fn_vi = vi_mi.potential_fn(data[..., None], weights[None, ...])
                     post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
+                    if args['stage2_tmax_prior_std'] is not None:
+                        tmax_anchor = z_unc_noeps['tmax']
+                        tmax_var = args['stage2_tmax_prior_std'] ** 2
+                        def pot_fn_stage2(z):
+                            delta = z['tmax'] - tmax_anchor
+                            return pot_fn_vi(z) + 0.5 * jnp.sum(delta * delta) / tmax_var
+                    else:
+                        pot_fn_stage2 = pot_fn_vi
                     laplace_median, _, z_unc_vi = run_lm_laplace(
-                        pot_fn_vi, post_fn_vi, z_start_vi,
+                        pot_fn_stage2, post_fn_vi, z_start_vi,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
                     )
-                    warm_scale_tril = compute_laplace_scale_tril(pot_fn_vi, z_unc_vi)
+                    warm_scale_tril = compute_laplace_scale_tril(pot_fn_stage2, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
@@ -2043,7 +2055,7 @@ class SEDmodel(object):
                     params, losses = svi_result.params, svi_result.losses
                     laplace_median = laplace_guide.median(params)
 
-                # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
+                # Initialize the ZLTN guide loc from the Laplace MAP.
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
                 if 'eps_tform' not in new_init_dict:
                     new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
