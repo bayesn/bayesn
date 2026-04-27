@@ -2442,19 +2442,9 @@ class SEDmodel(object):
             fitprob, fitchi2, ndof = self.compute_fitprob(samples)
 
             # Create lcplot file
-            muhat_err = 5
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            muhat = self.data[-3, 0, :]
-            samples['mu'] = np.random.normal(
-                (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-                np.power(Ds_err, 2),
-                np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
-            samples['delM'] = samples['Ds'] - samples['mu']
-
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
-            bands = []
-            for sn in self.sn_list:
-                bands.append(list(self.lcplot_data[self.lcplot_data.CID == sn].FLT.unique()))
+            bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique()
+            bands = [list(bands_by_cid[sn]) for sn in self.sn_list]
 
             if args['num_lcplot'] is None:
                 num_lcplot = self.data.shape[-1]
@@ -2469,6 +2459,7 @@ class SEDmodel(object):
 
                 self.lcplot_data['DATA_FLAG'] = 1
                 z_hel = self.data[-5, 0, :]
+                fit_dfs = []
                 for i, sn in enumerate(self.lcplot_data.CID.unique()):
                     fit_df = pd.DataFrame()
                     fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
@@ -2477,7 +2468,8 @@ class SEDmodel(object):
                     fit_df['FLT'] = np.tile(bands[i], len(t))
                     fit_df['CID'] = sn
                     fit_df['DATA_FLAG'] = 0
-                    self.lcplot_data = pd.concat([self.lcplot_data, fit_df])
+                    fit_dfs.append(fit_df)
+                self.lcplot_data = pd.concat([self.lcplot_data] + fit_dfs, ignore_index=True)
 
                 self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
                 self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
