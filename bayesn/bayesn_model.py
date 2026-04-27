@@ -22,7 +22,58 @@ import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr
 from .bayesn_io import write_snana_lcfile
-from .lm_optim import run_lm_laplace, compute_laplace_scale_tril
+from .lm_optim import (
+    run_lm_laplace,
+    compute_laplace_scale_tril,
+    run_lm_laplace_gn,
+    compute_gn_scale_tril,
+)
+import functools
+from numpyro.handlers import substitute, trace, block
+from numpyro.infer.util import log_density, _unconstrain_reparam
+
+
+def _make_predict_fn(model):
+    """Factory: build a closure (model_args -> z_unc_dict -> (flux, scale, data, mask))
+    that runs the model with unconstrained-parameter substitution and extracts
+    the obs-site distribution mean (= predicted flux), scale, observed data, and
+    a 0/1 mask (1 for valid obs, 0 for padded/masked). Mirrors numpyro.infer.util.
+    potential_energy's substitute pattern.
+    """
+    def builder(*args, **kwargs):
+        def predict(z_unc):
+            sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+            substituted = substitute(model, substitute_fn=sub_fn)
+            with trace() as tr:
+                substituted(*args, **kwargs)
+            obs_site = tr['obs']
+            obs_fn = obs_site['fn']
+            if isinstance(obs_fn, dist.MaskedDistribution):
+                base = obs_fn.base_dist
+                mask = obs_fn._mask.astype(base.loc.dtype)
+            else:
+                base = obs_fn
+                mask = jnp.ones_like(base.loc)
+            return base.loc, base.scale, obs_site['value'], mask
+        return predict
+    return builder
+
+
+def _make_prior_potential_fn(model):
+    """Factory: build a closure (model_args -> z_unc_dict -> scalar) giving
+    the prior contribution to -log p(z) in unconstrained space (including
+    bijector log-det). Achieved by blocking the obs site so the model's
+    likelihood compute is skipped during log_density.
+    """
+    def builder(*args, **kwargs):
+        def prior_pot(z_unc):
+            sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+            substituted = substitute(model, substitute_fn=sub_fn)
+            blocked = block(substituted, hide_fn=lambda s: s['name'] == 'obs')
+            log_joint, _ = log_density(blocked, args, kwargs, {})
+            return -log_joint
+        return prior_pot
+    return builder
 import pickle
 import pandas as pd
 import jax
@@ -1893,6 +1944,8 @@ class SEDmodel(object):
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
+            self._vi_predict_factory = _make_predict_fn(self.fit_model_globalRV_vi)
+            self._vi_prior_pot_factory = _make_prior_potential_fn(self.fit_model_globalRV_vi)
 
         print(f'Preprocessing time: {time.time() - self.start_time:.2f} seconds')
         # print(self.data.shape)
@@ -2020,33 +2073,34 @@ class SEDmodel(object):
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
                     )
-                    # Stage 2: LM on the full VI model from (Stage1 MAP,
-                    # eps_tform=0). Lands at the joint MAP where the Hessian
-                    # is PD, enabling the warm-start scale_tril. A soft
-                    # Gaussian prior on tmax (centred at Stage 1's MAP) damps
-                    # tmax drift via tmax-eps coupling without breaking the
-                    # Laplace approximation.
+                    # Stage 2: Gauss-Newton LM on the full VI model from
+                    # (Stage1 MAP, eps_tform=0). GN replaces jax.hessian's
+                    # full Hessian with J^T J from a single Jacobian, avoiding
+                    # the autodiff blowup that OOMs on GPU. A soft Gaussian
+                    # prior on tmax (centred at Stage 1's MAP) damps tmax
+                    # drift via tmax-eps coupling.
                     vi_mi = self._vi_model_info
-                    pot_fn_vi = vi_mi.potential_fn(data[..., None], weights[None, ...])
                     post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
+                    predict_fn = self._vi_predict_factory(data[..., None], weights[None, ...])
+                    prior_pot_fn = self._vi_prior_pot_factory(data[..., None], weights[None, ...])
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
                     if args['stage2_tmax_prior_std'] is not None:
                         tmax_anchor = z_unc_noeps['tmax']
                         tmax_var = args['stage2_tmax_prior_std'] ** 2
-                        def pot_fn_stage2(z):
+                        def prior_pot_anchored(z):
                             delta = z['tmax'] - tmax_anchor
-                            return pot_fn_vi(z) + 0.5 * jnp.sum(delta * delta) / tmax_var
+                            return prior_pot_fn(z) + 0.5 * jnp.sum(delta * delta) / tmax_var
                     else:
-                        pot_fn_stage2 = pot_fn_vi
-                    laplace_median, _, z_unc_vi = run_lm_laplace(
-                        pot_fn_stage2, post_fn_vi, z_start_vi,
+                        prior_pot_anchored = prior_pot_fn
+                    laplace_median, _, z_unc_vi = run_lm_laplace_gn(
+                        predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
                     )
-                    warm_scale_tril = compute_laplace_scale_tril(pot_fn_stage2, z_unc_vi)
+                    warm_scale_tril = compute_gn_scale_tril(predict_fn, prior_pot_anchored, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
