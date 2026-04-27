@@ -1777,16 +1777,16 @@ class SEDmodel(object):
         args['num_samples'] = args.get('num_samples', 500)
         args['fit_method'] = args.get('fit_method', 'mcmc')
         args['chain_method'] = args.get('chain_method', 'parallel')
-        args['laplace_method'] = args.get('laplace_method', 'svi').lower()
+        args['laplace_method'] = args.get('laplace_method', 'lm').lower()
         if args['laplace_method'] not in {'svi', 'lm'}:
             raise ValueError(f"laplace_method must be 'svi' or 'lm', got {args['laplace_method']!r}")
         args['lm_maxiter'] = args.get('lm_maxiter', 30)
         args['lm_lam_init'] = args.get('lm_lam_init', 1e-3)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
-        args['num_zltn_iter'] = args.get('num_zltn_iter', 10000)
-        args['zltn_lr'] = args.get('zltn_lr', 0.005)
-        args['zltn_lr_final'] = args.get('zltn_lr_final', args['zltn_lr'])
-        args['zltn_particles'] = args.get('zltn_particles', 5)
+        args['num_zltn_iter'] = args.get('num_zltn_iter', 750)
+        args['zltn_lr'] = args.get('zltn_lr', 0.02)
+        args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
+        args['zltn_particles'] = args.get('zltn_particles', 20)
         args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
@@ -1893,7 +1893,7 @@ class SEDmodel(object):
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
 
-        print(f'Preprocessing time: {time.time() - self.start_time}')
+        print(f'Preprocessing time: {time.time() - self.start_time:.2f} seconds')
         # print(self.data.shape)
         # sys.exit('Quitting after preprocessing, just testing I/O')
         print(f'Current mode: {args["mode"]}')
@@ -2105,7 +2105,7 @@ class SEDmodel(object):
             end = timeit.default_timer()
             mcmc.print_summary()
             samples = mcmc.get_samples(group_by_chain=True)
-        print(f'Total inference runtime: {end - start} seconds')
+        print(f'Total inference runtime: {end - start:.2f} seconds')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
