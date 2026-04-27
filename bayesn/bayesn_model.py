@@ -22,6 +22,7 @@ import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr
 from .bayesn_io import write_snana_lcfile
+from .lm_optim import run_lm_laplace, compute_laplace_scale_tril
 import pickle
 import pandas as pd
 import jax
@@ -2008,7 +2009,6 @@ class SEDmodel(object):
 
                 warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
-                    from .lm_optim import run_lm_laplace, compute_laplace_scale_tril
                     # Stage 1: LM on the noeps model finds a stable MAP for
                     # (AV, theta, tmax, Ds) using the proper Exponential prior.
                     mi = self._lm_model_info
@@ -2443,8 +2443,6 @@ class SEDmodel(object):
 
             # Create lcplot file
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
-            bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique()
-            bands = [list(bands_by_cid[sn]) for sn in self.sn_list]
 
             if args['num_lcplot'] is None:
                 num_lcplot = self.data.shape[-1]
@@ -2452,6 +2450,8 @@ class SEDmodel(object):
                 num_lcplot = args['num_lcplot']
 
             if args['num_lcplot'] > 0:
+                bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique().to_dict()
+                bands = [list(bands_by_cid.get(sn, [])) for sn in self.sn_list]
                 f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
                                               num_samples=None, num_sne=num_lcplot,
                                               mag=False, mean=not args['save_fit_errors'])
