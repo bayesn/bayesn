@@ -1783,6 +1783,10 @@ class SEDmodel(object):
         args['lm_maxiter'] = args.get('lm_maxiter', 30)
         args['lm_lam_init'] = args.get('lm_lam_init', 1e-3)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
+        args['num_zltn_iter'] = args.get('num_zltn_iter', 10000)
+        args['zltn_lr'] = args.get('zltn_lr', 0.005)
+        args['zltn_lr_final'] = args.get('zltn_lr_final', args['zltn_lr'])
+        args['zltn_particles'] = args.get('zltn_particles', 5)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -1879,6 +1883,11 @@ class SEDmodel(object):
             from numpyro.infer.util import initialize_model
             self._lm_model_info = initialize_model(
                 PRNGKey(0), self.fit_model_globalRV_noeps,
+                init_strategy=init_strategy, dynamic_args=True,
+                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+            )
+            self._vi_model_info = initialize_model(
+                PRNGKey(0), self.fit_model_globalRV_vi,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
@@ -1996,17 +2005,36 @@ class SEDmodel(object):
                 model = self.fit_model_globalRV_noeps
                 sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
 
+                warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
-                    from .lm_optim import run_lm_laplace
+                    from .lm_optim import run_lm_laplace, compute_laplace_scale_tril
+                    # Stage 1: LM on the noeps model finds a stable MAP for
+                    # (AV, theta, tmax, Ds) using the proper Exponential prior.
                     mi = self._lm_model_info
-                    pot_fn_sn = mi.potential_fn(data[..., None], weights[None, ...])
-                    post_fn_sn = mi.postprocess_fn(data[..., None], weights[None, ...])
-                    laplace_median, _ = run_lm_laplace(
-                        pot_fn_sn, post_fn_sn, mi.param_info.z,
+                    pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...])
+                    post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...])
+                    noeps_median, _, z_unc_noeps = run_lm_laplace(
+                        pot_fn_noeps, post_fn_noeps, mi.param_info.z,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
                     )
+                    # Stage 2: LM on the full VI model from (Stage1 MAP,
+                    # eps_tform=0). Lands at the joint MAP where the Hessian
+                    # is PD, enabling the warm-start scale_tril.
+                    vi_mi = self._vi_model_info
+                    pot_fn_vi = vi_mi.potential_fn(data[..., None], weights[None, ...])
+                    post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
+                    z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
+                                  'AV': noeps_median['AV']}
+                    z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
+                    laplace_median, _, z_unc_vi = run_lm_laplace(
+                        pot_fn_vi, post_fn_vi, z_start_vi,
+                        maxiter=args['lm_maxiter'],
+                        lam_init=args['lm_lam_init'],
+                        use_linesearch=args['lm_use_linesearch'],
+                    )
+                    warm_scale_tril = compute_laplace_scale_tril(pot_fn_vi, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
@@ -2017,13 +2045,19 @@ class SEDmodel(object):
 
                 # Now initialize the ZLTN guide on the Laplace Approximation median (just for AV, theta, and mu)
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
-                new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
+                if 'eps_tform' not in new_init_dict:
+                    new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
                 model = self.fit_model_globalRV_vi
-                zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
+                zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict),
+                                                init_scale_tril=warm_scale_tril)
 
-                # svi_result = fit_zltn_vmap(model, zltn_guide, data[..., None], weights[None, ...])
-                svi = SVI(model, zltn_guide, Adam(0.005), Trace_ELBO(5))
-                svi_result = svi.run(PRNGKey(123), 10000, data[..., None], weights[None, ...], progress_bar=False)
+                if args['zltn_lr_final'] == args['zltn_lr']:
+                    step_size = args['zltn_lr']
+                else:
+                    decay_base = (args['zltn_lr_final'] / args['zltn_lr']) ** (1.0 / args['num_zltn_iter'])
+                    step_size = lambda t: args['zltn_lr'] * decay_base ** t
+                svi = SVI(model, zltn_guide, Adam(step_size), Trace_ELBO(args['zltn_particles']))
+                svi_result = svi.run(PRNGKey(123), args['num_zltn_iter'], data[..., None], weights[None, ...], progress_bar=False)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
                 samples = predictive(PRNGKey(123), data=None)

@@ -175,17 +175,23 @@ class AutoMultiZLTNGuide(AutoContinuous):
             prefix="auto",
             init_loc_fn=init_to_median,
             init_scale=0.1,
+            init_scale_tril=None,
     ):
         if init_scale <= 0:
             raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
         self._init_scale = init_scale
+        self._init_scale_tril = init_scale_tril
         super().__init__(model, prefix=prefix, init_loc_fn=init_loc_fn)
 
     def _get_posterior(self):
         loc = numpyro.param("{}_loc".format(self.prefix), self._init_latent)
+        if self._init_scale_tril is None:
+            init_scale_tril = jnp.identity(self.latent_dim) * self._init_scale
+        else:
+            init_scale_tril = self._init_scale_tril
         scale_tril = numpyro.param(
             "{}_scale_tril".format(self.prefix),
-            jnp.identity(self.latent_dim) * self._init_scale,
+            init_scale_tril,
             constraint=self.scale_tril_constraint,
         )
         return MultiZLTN(loc, scale_tril=scale_tril)

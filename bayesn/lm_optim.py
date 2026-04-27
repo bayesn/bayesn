@@ -117,10 +117,11 @@ def run_lm_laplace(potential_fn_sn, postprocess_fn_sn, z_template,
             along the Newton direction at every step.
 
     Returns:
-        (median_dict, losses_1d)
+        (median_dict, losses_1d, z_unc_dict)
             ``median_dict`` has the same keys/shapes as
-            ``AutoLaplaceApproximation.median(params)``; ``losses_1d`` is
-            shape ``(maxiter,)`` giving the per-iteration loss value.
+            ``AutoLaplaceApproximation.median(params)`` (constrained space);
+            ``losses_1d`` is shape ``(maxiter,)``; ``z_unc_dict`` is the
+            unconstrained MAP in the same dict layout as ``z_template``.
     """
     flat0, unflatten = ravel_pytree(z_template)
     bounds_hi = jnp.full_like(flat0, jnp.inf)
@@ -134,5 +135,19 @@ def run_lm_laplace(potential_fn_sn, postprocess_fn_sn, z_template,
         maxiter=maxiter, lam_init=lam_init,
         use_linesearch=use_linesearch, debug=True,
     )
-    median_dict = postprocess_fn_sn(unflatten(p_final))
-    return median_dict, diag['f_val']
+    z_unc_dict = unflatten(p_final)
+    median_dict = postprocess_fn_sn(z_unc_dict)
+    return median_dict, diag['f_val'], z_unc_dict
+
+
+def compute_laplace_scale_tril(potential_fn_sn, z_template):
+    """Cholesky of the inverse Hessian of ``potential_fn_sn`` at ``z_template``.
+
+    Returns the lower-Cholesky factor of the Laplace posterior covariance in
+    unconstrained latent space, suitable for initialising a variational
+    guide's ``scale_tril`` parameter.
+    """
+    flat0, unflatten = ravel_pytree(z_template)
+    H = jax.hessian(lambda p: potential_fn_sn(unflatten(p)))(flat0)
+    cov = jnp.linalg.inv(H)
+    return jnp.linalg.cholesky(cov)
