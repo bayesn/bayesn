@@ -31,7 +31,7 @@ from .lm_optim import (
     compute_hvp_scale_tril,
 )
 import functools
-from numpyro.handlers import substitute, trace, block
+from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
 
 
@@ -64,15 +64,17 @@ def _make_predict_fn(model):
 def _make_prior_potential_fn(model):
     """Factory: build a closure (model_args -> z_unc_dict -> scalar) giving
     the prior contribution to -log p(z) in unconstrained space (including
-    bijector log-det). Achieved by blocking the obs site so the model's
-    likelihood compute is skipped during log_density.
+    bijector log-det). Calls the model with ``prior_only=True`` so the
+    model returns after sampling the latent sites and skips the
+    ``get_flux_batch``/obs evaluation. Cheap to evaluate, autodiff-friendly.
     """
     def builder(*args, **kwargs):
         def prior_pot(z_unc):
             sub_fn = functools.partial(_unconstrain_reparam, z_unc)
             substituted = substitute(model, substitute_fn=sub_fn)
-            blocked = block(substituted, hide_fn=lambda s: s['name'] == 'obs')
-            log_joint, _ = log_density(blocked, args, kwargs, {})
+            log_joint, _ = log_density(
+                substituted, args, {**kwargs, 'prior_only': True}, {}
+            )
             return -log_joint
         return prior_pot
     return builder
@@ -1088,7 +1090,7 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_globalRV_vi(self, obs, weights):
+    def fit_model_globalRV_vi(self, obs, weights, prior_only=False):
         """
         Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
         tmax as well as theta, epsilon, Av and distance modulus. This model is slightly modified for ZLTN VI.
@@ -1099,6 +1101,11 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        prior_only: bool, optional
+            If True, return after sampling all latents and skip the data-likelihood
+            (``get_flux_batch`` and the obs sample). Used by ``_make_prior_potential_fn``
+            to compute the prior log-density without the cost or memory footprint of
+            running the model's flux computation.
 
         """
         sample_size = obs.shape[-1]
@@ -1131,6 +1138,8 @@ class SEDmodel(object):
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
 
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            if prior_only:
+                return
             flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):

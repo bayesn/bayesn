@@ -47,6 +47,26 @@ def _jacfwd_lax_map(f, p):
     return cols.T  # shape (n, d)
 
 
+def _hessian_lax_map(f, p):
+    """Memory-efficient Hessian via column-by-column HVPs with ``lax.map``.
+
+    For scalar ``f: R^d -> R``, returns ``H`` of shape ``(d, d)`` matching
+    ``jax.hessian(f)(p)``. Avoids the autodiff vmap multiplier on the
+    per-SN forward intermediate.
+
+    Compute is the same as ``jax.hessian`` (d HVP evaluations, each ~2
+    forward-pass-equivalents).
+    """
+    grad_f = jax.grad(f)
+    d = p.shape[0]
+
+    def col(e):
+        _, Hv = jax.jvp(grad_f, (p,), (e,))
+        return Hv
+
+    return jax.lax.map(col, jnp.eye(d))  # shape (d, d), symmetric
+
+
 def _newton_lm_round(init_p, bounds_lo, bounds_hi, loss_closed, maxiter,
                      lam_init=1e-3, use_linesearch=False, debug=False):
     """Pure LM with gain-ratio acceptance and lambda control.
@@ -441,9 +461,9 @@ def run_lm_laplace_hvp_cg(predict_fn, prior_potential_fn, postprocess_fn_sn,
 
 
 def compute_hvp_scale_tril(predict_fn, prior_potential_fn, z_template):
-    """Build the exact Hessian column-by-column via ``lax.map`` of HVPs,
-    then chol(inv(H)). Memory matches that of one HVP (no d or n
-    multiplier). Same return shape as ``compute_gn_scale_tril``.
+    """Build the exact Hessian via ``_hessian_lax_map``, then chol(inv(H)).
+    Memory matches that of one HVP. Same return shape as
+    ``compute_gn_scale_tril``.
     """
     flat0, unflatten = ravel_pytree(z_template)
 
@@ -456,14 +476,7 @@ def compute_hvp_scale_tril(predict_fn, prior_potential_fn, z_template):
         r = residuals_fn(p)
         return 0.5 * jnp.sum(r * r) + prior_potential_fn(unflatten(p))
 
-    grad_fn = jax.grad(loss_total_fn)
-    d = flat0.shape[0]
-
-    def col(e):
-        _, Hv = jax.jvp(grad_fn, (flat0,), (e,))
-        return Hv
-
-    H = jax.lax.map(col, jnp.eye(d))  # H is symmetric, columns == rows
+    H = _hessian_lax_map(loss_total_fn, flat0)
     cov = jnp.linalg.inv(H)
     return jnp.linalg.cholesky(cov)
 
