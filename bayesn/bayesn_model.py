@@ -27,6 +27,8 @@ from .lm_optim import (
     compute_laplace_scale_tril,
     run_lm_laplace_gn,
     compute_gn_scale_tril,
+    run_lm_laplace_hvp_cg,
+    compute_hvp_scale_tril,
 )
 import functools
 from numpyro.handlers import substitute, trace, block
@@ -1840,6 +1842,9 @@ class SEDmodel(object):
         args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
         args['zltn_particles'] = args.get('zltn_particles', 20)
         args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
+        args['lm_solver'] = args.get('lm_solver', 'gn').lower()
+        if args['lm_solver'] not in {'gn', 'hvp_cg'}:
+            raise ValueError(f"lm_solver must be 'gn' or 'hvp_cg', got {args['lm_solver']!r}")
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2094,13 +2099,24 @@ class SEDmodel(object):
                             return prior_pot_fn(z) + 0.5 * jnp.sum(delta * delta) / tmax_var
                     else:
                         prior_pot_anchored = prior_pot_fn
-                    laplace_median, _, z_unc_vi = run_lm_laplace_gn(
-                        predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
-                        maxiter=args['lm_maxiter'],
-                        lam_init=args['lm_lam_init'],
-                        use_linesearch=args['lm_use_linesearch'],
-                    )
-                    warm_scale_tril = compute_gn_scale_tril(predict_fn, prior_pot_anchored, z_unc_vi)
+                    if args['lm_solver'] == 'gn':
+                        laplace_median, _, z_unc_vi = run_lm_laplace_gn(
+                            predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
+                            maxiter=args['lm_maxiter'],
+                            lam_init=args['lm_lam_init'],
+                            use_linesearch=args['lm_use_linesearch'],
+                        )
+                        warm_scale_tril = compute_gn_scale_tril(
+                            predict_fn, prior_pot_anchored, z_unc_vi)
+                    else:  # hvp_cg
+                        laplace_median, _, z_unc_vi = run_lm_laplace_hvp_cg(
+                            predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
+                            maxiter=args['lm_maxiter'],
+                            lam_init=args['lm_lam_init'],
+                            use_linesearch=args['lm_use_linesearch'],
+                        )
+                        warm_scale_tril = compute_hvp_scale_tril(
+                            predict_fn, prior_pot_anchored, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)

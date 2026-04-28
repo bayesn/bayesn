@@ -1,14 +1,50 @@
-"""Levenberg-Marquardt MAP solver used as an alternative to the Adam-based
-Laplace stage of BayeSN's VI fit.
+"""Levenberg-Marquardt MAP solvers used in BayeSN's VI fit's Stage 2.
+
+Three flavours are provided:
+
+- ``run_lm_laplace`` / ``compute_laplace_scale_tril``: full-Hessian LM via
+  ``jax.hessian``. Used by Stage 1 (small noeps latent — fits in GPU memory).
+- ``run_lm_laplace_gn`` / ``compute_gn_scale_tril``: Gauss-Newton LM with the
+  Jacobian built serially via ``jax.lax.map`` (option 2). Avoids the autodiff
+  vmap multiplier on the per-SN forward intermediate that OOMs on GPU at
+  realistic batch sizes. ~half the compute of full-Hessian LM.
+- ``run_lm_laplace_hvp_cg`` / ``compute_hvp_scale_tril``: exact-Hessian LM
+  via Hessian-vector products and conjugate-gradient linsolve (option 3).
+  Same memory profile as the GN variant; uses the exact Hessian instead of
+  GN; about 2x compute of GN per LM step.
 
 The core ``_newton_lm_round`` routine is copied verbatim from
 ``jax_SNANA_claude/jax_snlc_fit/fitter.py`` (lines 225-332) to avoid pulling
-``jaxopt`` as a dependency.
+``jaxopt`` as a dependency. The GN and HVP-CG variants extend the same
+gain-ratio-with-line-search pattern.
 """
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.sparse.linalg as jsla
 from jax.flatten_util import ravel_pytree
+
+
+def _jacfwd_lax_map(f, p):
+    """Memory-efficient forward-mode Jacobian via serial ``lax.map`` over tangents.
+
+    For ``f: R^d -> R^n``, returns ``J`` of shape ``(n, d)`` matching ``jax.jacfwd``.
+    Unlike ``jax.jacfwd`` (which vmaps tangents in parallel and adds a `d`
+    dimension to every per-SN forward intermediate), ``lax.map`` runs each
+    tangent's forward pass sequentially, so peak memory stays at one
+    forward-pass worth instead of d-times-forward-pass.
+
+    Compute is the same as ``jax.jacfwd`` (d forward passes total) plus a
+    modest per-iter dispatch overhead from the sequential boundary.
+    """
+    d = p.shape[0]
+
+    def col(e):
+        _, Jv = jax.jvp(f, (p,), (e,))
+        return Jv
+
+    cols = jax.lax.map(col, jnp.eye(d))  # shape (d, n)
+    return cols.T  # shape (n, d)
 
 
 def _newton_lm_round(init_p, bounds_lo, bounds_hi, loss_closed, maxiter,
@@ -185,7 +221,7 @@ def _newton_lm_round_gn(init_p, bounds_lo, bounds_hi,
     def newton_step(carry, _):
         p, lam, f_val = carry
         g = jax.grad(loss_total)(p)
-        J = jax.jacfwd(residuals_fn)(p)
+        J = _jacfwd_lax_map(residuals_fn, p)
         H_lik = J.T @ J
         H_prior = jax.hessian(prior_potential_fn)(p)
         H = H_lik + H_prior
@@ -290,6 +326,148 @@ def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_templ
     return median_dict, diag['f_val'], z_unc_dict
 
 
+def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
+                             loss_total_fn, maxiter,
+                             lam_init=1e-3, use_linesearch=False, debug=False,
+                             cg_maxiter=None):
+    """LM with Hessian-vector products and conjugate-gradient linsolve.
+
+    Avoids materialising J or H entirely. Each LM step queries Hv via
+    ``jax.jvp(jax.grad(loss))`` (exact Hessian, no GN approximation) and
+    solves ``(H + lam*I) d = -g`` iteratively with CG. Memory drops to
+    per-SN-fwd × O(1) (no autodiff vmap multiplier). Uses Levenberg
+    damping ``lam*I`` rather than Marquardt's ``lam*diag(H)`` because
+    diag(H) would itself require d Hv evaluations to extract.
+    """
+    ls_alphas = jnp.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0])
+    grad_fn = jax.grad(loss_total_fn)
+    if cg_maxiter is None:
+        cg_maxiter = 2 * init_p.shape[0]
+
+    def newton_step(carry, _):
+        p, lam, f_val = carry
+        g = grad_fn(p)
+
+        def Hv_damped(v):
+            _, Hv = jax.jvp(grad_fn, (p,), (v,))
+            return Hv + lam * v
+
+        d, _ = jsla.cg(Hv_damped, -g, maxiter=cg_maxiter)
+
+        slope = jnp.dot(g, d)
+        is_bad = (slope >= -1e-12) | jnp.any(jnp.isnan(d))
+        # Fallback: gradient descent direction; line search picks magnitude.
+        d = jnp.where(is_bad, -g, d)
+
+        if use_linesearch:
+            def eval_alpha(alpha):
+                tp = jnp.clip(p + alpha * d, bounds_lo, bounds_hi)
+                return loss_total_fn(tp)
+            f_trials = jax.vmap(eval_alpha)(ls_alphas)
+            best_idx = jnp.argmin(f_trials)
+            best_alpha = ls_alphas[best_idx]
+            trial_p = jnp.clip(p + best_alpha * d, bounds_lo, bounds_hi)
+            f_trial = f_trials[best_idx]
+        else:
+            trial_p = jnp.clip(p + d, bounds_lo, bounds_hi)
+            f_trial = loss_total_fn(trial_p)
+
+        s = trial_p - p
+
+        # Predicted reduction needs s^T H s; compute via one extra HVP.
+        _, Hs = jax.jvp(grad_fn, (p,), (s,))
+        actual = f_val - f_trial
+        predicted = -(jnp.dot(g, s) + 0.5 * jnp.dot(s, Hs))
+        predicted = jnp.maximum(predicted, 1e-30)
+        rho = actual / predicted
+
+        accept = rho > 0.01
+        p_out = jnp.where(accept, trial_p, p)
+        f_out = jnp.where(accept, f_trial, f_val)
+
+        lam_out = jnp.where(
+            rho > 0.75, lam * 0.3,
+            jnp.where(rho > 0.25, lam, lam * 3.0),
+        )
+        lam_out = jnp.clip(lam_out, 1e-8, 1e8)
+
+        if debug:
+            diagnostics = {
+                'f_val': f_out,
+                'lam': lam_out,
+                'accept': accept,
+                'rho': rho,
+                'grad_norm': jnp.max(jnp.abs(g)),
+            }
+        else:
+            diagnostics = None
+        return (p_out, lam_out, f_out), diagnostics
+
+    f_init = loss_total_fn(init_p)
+    (p_final, _, f_final), diagnostics = jax.lax.scan(
+        newton_step, (init_p, lam_init, f_init), None, length=maxiter
+    )
+    g_final = grad_fn(p_final)
+    grad_norm = jnp.max(jnp.abs(g_final))
+    return p_final, f_final, grad_norm, diagnostics
+
+
+def run_lm_laplace_hvp_cg(predict_fn, prior_potential_fn, postprocess_fn_sn,
+                           z_template, maxiter=30, lam_init=1e-3,
+                           use_linesearch=True, cg_maxiter=None):
+    """HVP-CG variant of run_lm_laplace_gn. Uses exact Hessian (no GN approx)."""
+    flat0, unflatten = ravel_pytree(z_template)
+    bounds_hi = jnp.full_like(flat0, jnp.inf)
+    bounds_lo = -bounds_hi
+
+    def residuals_fn(p):
+        z = unflatten(p)
+        flux, scale, data, mask = predict_fn(z)
+        return ((data - flux) / scale * mask).ravel()
+
+    def loss_total_fn(p):
+        r = residuals_fn(p)
+        return 0.5 * jnp.sum(r * r) + prior_potential_fn(unflatten(p))
+
+    p_final, _, _, diag = _newton_lm_round_hvp_cg(
+        flat0, bounds_lo, bounds_hi, loss_total_fn,
+        maxiter=maxiter, lam_init=lam_init,
+        use_linesearch=use_linesearch, debug=True,
+        cg_maxiter=cg_maxiter,
+    )
+    z_unc_dict = unflatten(p_final)
+    median_dict = postprocess_fn_sn(z_unc_dict)
+    return median_dict, diag['f_val'], z_unc_dict
+
+
+def compute_hvp_scale_tril(predict_fn, prior_potential_fn, z_template):
+    """Build the exact Hessian column-by-column via ``lax.map`` of HVPs,
+    then chol(inv(H)). Memory matches that of one HVP (no d or n
+    multiplier). Same return shape as ``compute_gn_scale_tril``.
+    """
+    flat0, unflatten = ravel_pytree(z_template)
+
+    def residuals_fn(p):
+        z = unflatten(p)
+        flux, scale, data, mask = predict_fn(z)
+        return ((data - flux) / scale * mask).ravel()
+
+    def loss_total_fn(p):
+        r = residuals_fn(p)
+        return 0.5 * jnp.sum(r * r) + prior_potential_fn(unflatten(p))
+
+    grad_fn = jax.grad(loss_total_fn)
+    d = flat0.shape[0]
+
+    def col(e):
+        _, Hv = jax.jvp(grad_fn, (flat0,), (e,))
+        return Hv
+
+    H = jax.lax.map(col, jnp.eye(d))  # H is symmetric, columns == rows
+    cov = jnp.linalg.inv(H)
+    return jnp.linalg.cholesky(cov)
+
+
 def compute_gn_scale_tril(predict_fn, prior_potential_fn, z_template):
     """Cholesky of inv(J^T J + H_prior) at z_template.
 
@@ -308,7 +486,7 @@ def compute_gn_scale_tril(predict_fn, prior_potential_fn, z_template):
     def prior_pot_flat(p):
         return prior_potential_fn(unflatten(p))
 
-    J = jax.jacfwd(residuals_fn)(flat0)
+    J = _jacfwd_lax_map(residuals_fn, flat0)
     H_lik = J.T @ J
     H_prior = jax.hessian(prior_pot_flat)(flat0)
     H = H_lik + H_prior
