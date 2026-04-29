@@ -2737,6 +2737,7 @@ class SEDmodel(object):
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
                     head_data = fits.getdata(head_file, 1, view=np.ndarray)
+                    head_data = head_data.byteswap().newbyteorder()
                     phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
                     if sn_file_ind == 0:
                         # Check if sim or real data
@@ -3054,7 +3055,7 @@ class SEDmodel(object):
                 raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
                                  'SNIDs in the data?')
             N_obs = np.max(n_obs)
-            N_col = lc.shape[1] - 2
+            N_col = all_lcs[0].shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
