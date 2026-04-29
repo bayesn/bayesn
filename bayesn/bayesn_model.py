@@ -2782,12 +2782,17 @@ class SEDmodel(object):
                     phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
                     phot_df['BAND'] = phot_df['BAND'].str.decode('utf-8').str.strip()
 
-                    # SN index per observation row, from PTROBS bounds.
+                    # SN index per covered observation row, plus a mask dropping
+                    # any PHOT rows not covered by a SN's PTROBS slice (e.g.
+                    # terminator rows between SNe — the original code never saw
+                    # these because it indexed per-SN).
                     ptr_min = head_data['PTROBS_MIN'] - 1
                     ptr_max = head_data['PTROBS_MAX']
-                    sn_idx = np.empty(len(phot_df), dtype=np.int64)
+                    sn_idx = np.repeat(np.arange(n_sne_in_file), ptr_max - ptr_min)
+                    covered = np.zeros(len(phot_df), dtype=bool)
                     for k in range(n_sne_in_file):
-                        sn_idx[ptr_min[k]:ptr_max[k]] = k
+                        covered[ptr_min[k]:ptr_max[k]] = True
+                    phot_df = phot_df.iloc[covered].reset_index(drop=True)
 
                     # File-level: extend map_dict with identity, then map BAND -> FLT.
                     for f in phot_df['BAND'].unique():
