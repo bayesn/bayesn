@@ -2734,9 +2734,9 @@ class SEDmodel(object):
                         head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
                     with fits.open(head_file) as hdu:
                         self.survey = hdu[0].header.get('SURVEY', 'NULL')
+                        head_data = np.array(hdu[1].data).view(np.ndarray)
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
-                    head_data = fits.getdata(head_file, 1, view=np.ndarray)
                     head_data = head_data.byteswap().newbyteorder()
                     phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
                     if sn_file_ind == 0:
@@ -2776,24 +2776,29 @@ class SEDmodel(object):
                     if args['SNID_keep_list'] is not None:
                         job_per_sn &= np.array([s in args['SNID_keep_list'] for s in snid_decoded])
 
-                    # File-level: byte-swap full PHOT, build DataFrame, decode BAND.
-                    phot_data = phot_data.byteswap().newbyteorder()
-                    if 'FLT' in phot_data.dtype.names:
-                        phot_data['FLT'][:] = np.char.strip(phot_data['FLT'])
-                    phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
-                    phot_df['BAND'] = phot_df['BAND'].str.decode('utf-8').str.strip()
-
-                    # SN index per covered observation row, plus a mask dropping
-                    # any PHOT rows not covered by a SN's PTROBS slice (e.g.
-                    # terminator rows between SNe — the original code never saw
-                    # these because it indexed per-SN).
+                    # Per-row keep mask, built from PTROBS bounds of kept SNe only.
+                    # Boolean-indexing the memmap'd phot_data with this lets the OS
+                    # page in only the rows belonging to kept SNe — preserving the
+                    # I/O reduction memmap=True is meant to provide for partitioned
+                    # jobs. Rows not covered by any SN (terminator rows) are
+                    # implicitly excluded.
                     ptr_min = head_data['PTROBS_MIN'] - 1
                     ptr_max = head_data['PTROBS_MAX']
-                    sn_idx = np.repeat(np.arange(n_sne_in_file), ptr_max - ptr_min)
-                    covered = np.zeros(len(phot_df), dtype=bool)
-                    for k in range(n_sne_in_file):
-                        covered[ptr_min[k]:ptr_max[k]] = True
-                    phot_df = phot_df.iloc[covered].reset_index(drop=True)
+                    row_keep = np.zeros(len(phot_data), dtype=bool)
+                    for k in np.where(job_per_sn)[0]:
+                        row_keep[ptr_min[k]:ptr_max[k]] = True
+                    sn_idx = np.full(len(phot_data), -1, dtype=np.int64)
+                    for k in np.where(job_per_sn)[0]:
+                        sn_idx[ptr_min[k]:ptr_max[k]] = k
+                    sn_idx = sn_idx[row_keep]
+
+                    # Materialise only kept rows from memmap, restricted to the
+                    # PHOT columns we actually use. Then byte-swap and build the
+                    # per-file DataFrame.
+                    phot_data = phot_data[row_keep][['MJD', 'BAND', 'FLUXCAL', 'FLUXCALERR']]
+                    phot_data = phot_data.byteswap().newbyteorder()
+                    phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
+                    phot_df['BAND'] = phot_df['BAND'].str.decode('utf-8').str.strip()
 
                     # File-level: extend map_dict with identity, then map BAND -> FLT.
                     for f in phot_df['BAND'].unique():
@@ -2809,8 +2814,9 @@ class SEDmodel(object):
                         phot_df['FLUXCALERR'].values,
                         args['error_floor'] * (np.log(10) / 2.5) * phot_df['flux'].values)
 
-                    # Combined keep mask: job/keep_list + redshift coverage + dropna + t-range.
-                    keep = job_per_sn[sn_idx]
+                    # Combined keep mask: redshift coverage + dropna + t-range.
+                    # (job/keep_list filtering already happened at the row level.)
+                    keep = np.ones(len(phot_df), dtype=bool)
                     flt_arr = phot_df['FLT'].values
                     band_z_lims = {f: (self.band_lim_dict[f][0] / l_min - 1,
                                        self.band_lim_dict[f][1] / l_max - 1)
@@ -2863,34 +2869,39 @@ class SEDmodel(object):
                     n_kept = int(keep_mask.sum())
                     sn_lengths = (sn_ends[keep_mask] - sn_starts[keep_mask]).tolist()
 
-                    # Bulk-extract FITRES metadata via the keep-mask.
+                    # Bulk-extract FITRES metadata via the keep-mask. Numerical
+                    # extends pass the numpy array directly so list.extend yields
+                    # numpy scalars and the source FITS dtype (often float32) is
+                    # preserved when these lists are later converted with np.array.
+                    # Only SNID is .tolist()-converted, matching the original code
+                    # which explicitly built Python str via str(...).
                     sne.extend(snid_decoded[keep_mask].tolist())
-                    peak_mjds.extend(peakmjd_arr[keep_mask].tolist())
-                    sn_type.extend(type_arr[keep_mask].tolist())
-                    field.extend(field_arr[keep_mask].tolist())
-                    z_hels.extend(zhel_arr[keep_mask].tolist())
-                    z_hel_errs.extend(zhel_err_arr[keep_mask].tolist())
-                    z_hds.extend(zhd_arr[keep_mask].tolist())
-                    z_hd_errs.extend(zcmb_err_arr[keep_mask].tolist())
-                    vpecs.extend(vpec_arr[keep_mask].tolist())
-                    vpec_errs.extend(vpec_err_arr[keep_mask].tolist())
-                    mwebvs.extend(mwebv_arr[keep_mask].tolist())
-                    host_logmasses.extend(mass_arr[keep_mask].tolist())
-                    host_logmass_errs.extend(mass_err_arr[keep_mask].tolist())
+                    peak_mjds.extend(peakmjd_arr[keep_mask])
+                    sn_type.extend(type_arr[keep_mask])
+                    field.extend(field_arr[keep_mask])
+                    z_hels.extend(zhel_arr[keep_mask])
+                    z_hel_errs.extend(zhel_err_arr[keep_mask])
+                    z_hds.extend(zhd_arr[keep_mask])
+                    z_hd_errs.extend(zcmb_err_arr[keep_mask])
+                    vpecs.extend(vpec_arr[keep_mask])
+                    vpec_errs.extend(vpec_err_arr[keep_mask])
+                    mwebvs.extend(mwebv_arr[keep_mask])
+                    host_logmasses.extend(mass_arr[keep_mask])
+                    host_logmass_errs.extend(mass_err_arr[keep_mask])
                     n_obs.extend(sn_lengths)
                     nepoch.extend(sn_lengths)
                     if self.sim:
-                        sim_gentypes.extend(head_data['SIM_GENTYPE'][keep_mask].tolist())
-                        sim_template_ids.extend(head_data['SIM_TEMPLATE_INDEX'][keep_mask].tolist())
-                        sim_libids.extend(head_data['SIM_LIBID'][keep_mask].tolist())
-                        sim_zcmbs.extend(head_data['SIM_REDSHIFT_CMB'][keep_mask].tolist())
-                        sim_vpecs.extend(head_data['SIM_VPEC'][keep_mask].tolist())
-                        sim_dlmags.extend(head_data['SIM_DLMU'][keep_mask].tolist())
-                        sim_pkmjds.extend(head_data['SIM_PEAKMJD'][keep_mask].tolist())
+                        sim_gentypes.extend(head_data['SIM_GENTYPE'][keep_mask])
+                        sim_template_ids.extend(head_data['SIM_TEMPLATE_INDEX'][keep_mask])
+                        sim_libids.extend(head_data['SIM_LIBID'][keep_mask])
+                        sim_zcmbs.extend(head_data['SIM_REDSHIFT_CMB'][keep_mask])
+                        sim_vpecs.extend(head_data['SIM_VPEC'][keep_mask])
+                        sim_dlmags.extend(head_data['SIM_DLMU'][keep_mask])
+                        sim_pkmjds.extend(head_data['SIM_PEAKMJD'][keep_mask])
                     if self.bayesn_sim:
-                        sim_thetas.extend(head_data['SIM_THETA'][keep_mask].tolist())
-                        sim_AVs.extend(head_data['SIM_AV'][keep_mask].tolist())
-                        sim_RVs.extend(head_data['SIM_RV'][keep_mask].tolist())
+                        sim_thetas.extend(head_data['SIM_THETA'][keep_mask])
+                        sim_AVs.extend(head_data['SIM_AV'][keep_mask])
+                        sim_RVs.extend(head_data['SIM_RV'][keep_mask])
                     else:
                         sim_thetas.extend([-9.] * n_kept)
                         sim_AVs.extend([-9.] * n_kept)
