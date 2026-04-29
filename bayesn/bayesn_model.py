@@ -35,49 +35,38 @@ from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
 
 
-def _make_predict_fn(model):
-    """Factory: build a closure (model_args -> z_unc_dict -> (flux, scale, data, mask))
-    that runs the model with unconstrained-parameter substitution and extracts
-    the obs-site distribution mean (= predicted flux), scale, observed data, and
-    a 0/1 mask (1 for valid obs, 0 for padded/masked). Mirrors numpyro.infer.util.
-    potential_energy's substitute pattern.
+def _predict(model, args, kwargs, z_unc):
+    """Run ``model`` with unconstrained latents ``z_unc`` substituted in and
+    return the obs-site distribution loc (predicted flux), scale, observed
+    value, and a 0/1 mask (1 for valid obs, 0 for padded/masked). Mirrors
+    numpyro.infer.util.potential_energy's substitute pattern.
     """
-    def builder(*args, **kwargs):
-        def predict(z_unc):
-            sub_fn = functools.partial(_unconstrain_reparam, z_unc)
-            substituted = substitute(model, substitute_fn=sub_fn)
-            with trace() as tr:
-                substituted(*args, **kwargs)
-            obs_site = tr['obs']
-            obs_fn = obs_site['fn']
-            if isinstance(obs_fn, dist.MaskedDistribution):
-                base = obs_fn.base_dist
-                mask = obs_fn._mask.astype(base.loc.dtype)
-            else:
-                base = obs_fn
-                mask = jnp.ones_like(base.loc)
-            return base.loc, base.scale, obs_site['value'], mask
-        return predict
-    return builder
+    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+    substituted = substitute(model, substitute_fn=sub_fn)
+    with trace() as tr:
+        substituted(*args, **kwargs)
+    obs_site = tr['obs']
+    obs_fn = obs_site['fn']
+    if isinstance(obs_fn, dist.MaskedDistribution):
+        base = obs_fn.base_dist
+        mask = obs_fn._mask.astype(base.loc.dtype)
+    else:
+        base = obs_fn
+        mask = jnp.ones_like(base.loc)
+    return base.loc, base.scale, obs_site['value'], mask
 
 
-def _make_prior_potential_fn(model):
-    """Factory: build a closure (model_args -> z_unc_dict -> scalar) giving
-    the prior contribution to -log p(z) in unconstrained space (including
-    bijector log-det). Calls the model with ``prior_only=True`` so the
-    model returns after sampling the latent sites and skips the
-    ``get_flux_batch``/obs evaluation. Cheap to evaluate, autodiff-friendly.
+def _prior_pot(model, args, kwargs, z_unc):
+    """Prior contribution to ``-log p(z)`` in unconstrained space (incl.
+    bijector log-det). ``model`` is called with ``prior_only=True`` so it
+    returns after sampling the latent sites and skips the obs evaluation.
     """
-    def builder(*args, **kwargs):
-        def prior_pot(z_unc):
-            sub_fn = functools.partial(_unconstrain_reparam, z_unc)
-            substituted = substitute(model, substitute_fn=sub_fn)
-            log_joint, _ = log_density(
-                substituted, args, {**kwargs, 'prior_only': True}, {}
-            )
-            return -log_joint
-        return prior_pot
-    return builder
+    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+    substituted = substitute(model, substitute_fn=sub_fn)
+    log_joint, _ = log_density(
+        substituted, args, {**kwargs, 'prior_only': True}, {}
+    )
+    return -log_joint
 import pickle
 import pandas as pd
 import jax
@@ -1104,9 +1093,9 @@ class SEDmodel(object):
             Band-weights to calculate photometry
         prior_only: bool, optional
             If True, return after sampling all latents and skip the data-likelihood
-            (``get_flux_batch`` and the obs sample). Used by ``_make_prior_potential_fn``
-            to compute the prior log-density without the cost or memory footprint of
-            running the model's flux computation.
+            (``get_flux_batch`` and the obs sample). Used by ``_prior_pot`` to
+            compute the prior log-density without the cost or memory footprint
+            of running the model's flux computation.
 
         """
         sample_size = obs.shape[-1]
@@ -1959,8 +1948,6 @@ class SEDmodel(object):
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
-            self._vi_predict_factory = _make_predict_fn(self.fit_model_globalRV_vi)
-            self._vi_prior_pot_factory = _make_prior_potential_fn(self.fit_model_globalRV_vi)
 
         print(f'Preprocessing time: {time.time() - self.start_time:.2f} seconds')
         # print(self.data.shape)
@@ -2096,8 +2083,9 @@ class SEDmodel(object):
                     # drift via tmax-eps coupling.
                     vi_mi = self._vi_model_info
                     post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
-                    predict_fn = self._vi_predict_factory(data[..., None], weights[None, ...])
-                    prior_pot_fn = self._vi_prior_pot_factory(data[..., None], weights[None, ...])
+                    vi_args = (data[..., None], weights[None, ...])
+                    predict_fn = lambda z: _predict(self.fit_model_globalRV_vi, vi_args, {}, z)
+                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_globalRV_vi, vi_args, {}, z)
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
