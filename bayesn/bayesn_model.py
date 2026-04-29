@@ -20,7 +20,7 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiagonalNormal, AutoLaplaceApproximation
 import h5py
 import sncosmo
-from .spline_utils import invKD_irr, spline_coeffs_irr
+from .spline_utils import invKD_irr, spline_coeffs_irr, spline_coeffs_irr_vec
 from .bayesn_io import write_snana_lcfile
 from .lm_optim import (
     run_lm_laplace,
@@ -570,19 +570,22 @@ class SEDmodel(object):
             Array containing observer-frame band weights
 
         """
+        redshifts = np.asarray(redshifts)
+        ebv = np.asarray(ebv)
+        band_interp_locs = np.asarray(self.band_interpolate_locations)
+        model_wave = np.asarray(self.model_wave)
+
         # Figure out the locations to sample at for each redshift.
-        locs = (
-                self.band_interpolate_locations
-                + jnp.log10(1 + redshifts)[:, None] / self.band_interpolate_spacing
-        )
+        locs = band_interp_locs + np.log10(1 + redshifts)[:, None] / self.band_interpolate_spacing
 
         flat_locs = locs.flatten()
 
         # Linear interpolation
-        int_locs = flat_locs.astype(jnp.int32)
+        int_locs = flat_locs.astype(np.int32)
         remainders = flat_locs - int_locs
 
-        self.band_interpolate_weights = self.band_interpolate_weights[self.used_band_inds, ...]
+        self.band_interpolate_weights = np.asarray(self.band_interpolate_weights)[
+            np.asarray(self.used_band_inds), ...]
 
         start = self.band_interpolate_weights[..., int_locs]
         end = self.band_interpolate_weights[..., int_locs + 1]
@@ -590,17 +593,15 @@ class SEDmodel(object):
         flat_result = remainders * end + (1 - remainders) * start
         weights = flat_result.reshape((-1,) + locs.shape).transpose(1, 2, 0)
         # Normalise so max transmission = 1
-        sum = jnp.sum(weights, axis=1)
-        weights /= sum[:, None, :]
+        weights /= np.sum(weights, axis=1)[:, None, :]
 
         # Apply MW extinction
         av = self.RV_MW * ebv
-        all_lam = np.array(self.model_wave[None, :] * (1 + redshifts[:, None]))
-        all_lam = all_lam.flatten(order='F')
+        all_lam = (model_wave[None, :] * (1 + redshifts[:, None])).flatten(order='F')
         mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
         mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order='F')
         mw_ext = mw_ext * av[:, None]
-        mw_ext = jnp.power(10, -0.4 * mw_ext)
+        mw_ext = np.power(10, -0.4 * mw_ext)
 
         weights = weights * mw_ext[..., None]
 
@@ -2670,8 +2671,6 @@ class SEDmodel(object):
                              'paths in data_table are defined with respect to)')
         survey_dict = {}
         c = 299792.458
-        # Cache knot scalars as Python floats so the per-SN comparison loops
-        # below stay pure-numpy (no JAX dispatches inside the read loop).
         tau_min = float(np.asarray(self.tau_knots).min())
         tau_max = float(np.asarray(self.tau_knots).max())
         l_min = float(np.asarray(self.l_knots)[0])
@@ -2777,11 +2776,8 @@ class SEDmodel(object):
                         job_per_sn &= np.array([s in args['SNID_keep_list'] for s in snid_decoded])
 
                     # Per-row keep mask, built from PTROBS bounds of kept SNe only.
-                    # Boolean-indexing the memmap'd phot_data with this lets the OS
-                    # page in only the rows belonging to kept SNe — preserving the
-                    # I/O reduction memmap=True is meant to provide for partitioned
-                    # jobs. Rows not covered by any SN (terminator rows) are
-                    # implicitly excluded.
+                    # Boolean-indexing the memmap'd phot_data lets the OS page in
+                    # only those rows for partitioned jobs.
                     ptr_min = head_data['PTROBS_MIN'] - 1
                     ptr_max = head_data['PTROBS_MAX']
                     row_keep = np.zeros(len(phot_data), dtype=bool)
@@ -2792,21 +2788,16 @@ class SEDmodel(object):
                         sn_idx[ptr_min[k]:ptr_max[k]] = k
                     sn_idx = sn_idx[row_keep]
 
-                    # Materialise only kept rows from memmap, restricted to the
-                    # PHOT columns we actually use. Then byte-swap and build the
-                    # per-file DataFrame.
                     phot_data = phot_data[row_keep][['MJD', 'BAND', 'FLUXCAL', 'FLUXCALERR']]
                     phot_data = phot_data.byteswap().newbyteorder()
                     phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
                     phot_df['BAND'] = phot_df['BAND'].str.decode('utf-8').str.strip()
 
-                    # File-level: extend map_dict with identity, then map BAND -> FLT.
                     for f in phot_df['BAND'].unique():
                         if f not in map_dict:
                             map_dict[f] = f
                     phot_df['FLT'] = phot_df['BAND'].map(map_dict)
 
-                    # Per-obs values needed for the row-keep mask (t, flux, flux_err).
                     zhel_per_obs = zhel_arr[sn_idx]
                     phot_df['t'] = (phot_df['MJD'].values - peakmjd_arr[sn_idx]) / (1 + zhel_per_obs)
                     phot_df['flux'] = phot_df['FLUXCAL'].values
@@ -2814,8 +2805,7 @@ class SEDmodel(object):
                         phot_df['FLUXCALERR'].values,
                         args['error_floor'] * (np.log(10) / 2.5) * phot_df['flux'].values)
 
-                    # Combined keep mask: redshift coverage + dropna + t-range.
-                    # (job/keep_list filtering already happened at the row level.)
+                    # Per-row keep: redshift coverage, dropna, t-range.
                     keep = np.ones(len(phot_df), dtype=bool)
                     flt_arr = phot_df['FLT'].values
                     band_z_lims = {f: (self.band_lim_dict[f][0] / l_min - 1,
@@ -2829,9 +2819,6 @@ class SEDmodel(object):
                     phot_df = phot_df.iloc[keep].reset_index(drop=True)
                     sn_idx = sn_idx[keep]
 
-                    # Build used_bands from surviving rows only, in row order. Matches
-                    # original semantics where used_bands only ever contains filters
-                    # that some kept SN actually uses post-filter.
                     for f in phot_df['FLT'].unique():
                         if f not in used_bands:
                             used_bands.append(f)
@@ -2843,7 +2830,6 @@ class SEDmodel(object):
                     phot_df['band_indices'] = phot_df['FLT'].map(self.band_dict).map(used_band_dict)
                     phot_df['zp'] = phot_df['FLT'].map(self.zp_dict)
 
-                    # Remaining per-obs columns (post-filter — no wasted work).
                     phot_df['MAG'] = 27.5 - 2.5 * np.log10(phot_df['flux'].values)
                     phot_df['MAGERR'] = (2.5 / np.log(10)) * phot_df['flux_err'].values / phot_df['flux'].values
                     phot_df['redshift'] = zhel_arr[sn_idx]
@@ -2853,28 +2839,17 @@ class SEDmodel(object):
                     phot_df['dist_mod'] = 0.0
                     phot_df['mask'] = 1
 
-                    # Per-SN slice boundaries via searchsorted on the sorted sn_idx.
                     sn_starts = np.searchsorted(sn_idx, np.arange(n_sne_in_file), side='left')
                     sn_ends = np.searchsorted(sn_idx, np.arange(n_sne_in_file), side='right')
 
-                    # Restrict columns to what downstream needs.
                     phot_df = phot_df[
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
                          'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
 
-                    # Final per-SN keep mask: only SNe with surviving observations
-                    # (job/keep_list filter already applied at row level, so excluded
-                    # SNe have zero surviving rows).
                     keep_mask = sn_ends > sn_starts
                     n_kept = int(keep_mask.sum())
                     sn_lengths = (sn_ends[keep_mask] - sn_starts[keep_mask]).tolist()
 
-                    # Bulk-extract FITRES metadata via the keep-mask. Numerical
-                    # extends pass the numpy array directly so list.extend yields
-                    # numpy scalars and the source FITS dtype (often float32) is
-                    # preserved when these lists are later converted with np.array.
-                    # Only SNID is .tolist()-converted, matching the original code
-                    # which explicitly built Python str via str(...).
                     sne.extend(snid_decoded[keep_mask].tolist())
                     peak_mjds.extend(peakmjd_arr[keep_mask])
                     sn_type.extend(type_arr[keep_mask])
@@ -2907,12 +2882,10 @@ class SEDmodel(object):
                         sim_AVs.extend([-9.] * n_kept)
                         sim_RVs.extend([-9.] * n_kept)
 
-                    # Per-obs SNR vector for the SNR top-3 calc below.
                     snr_per_obs = phot_df['flux'].values / phot_df['flux_err'].values
                     band_idx_per_obs = phot_df['band_indices'].values
                     t_per_obs = phot_df['t'].values
 
-                    # Minimal per-SN tail: per-SN slice + t-range + SNR top-3.
                     for sn_ind in np.where(keep_mask)[0]:
                         j0, j1 = sn_starts[sn_ind], sn_ends[sn_ind]
                         all_lcs.append(phot_df.iloc[j0:j1])
@@ -3141,8 +3114,8 @@ class SEDmodel(object):
             t = all_data[0, ...]
             keep_shape = t.shape
             t = t.flatten(order='F')
-            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
-                                                                     order='F').transpose(1, 2, 0)
+            J_t = spline_coeffs_irr_vec(t, np.asarray(self.tau_knots), np.asarray(self.KD_t)).reshape(
+                (*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1, 2, 0)
             flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             if 'training' in args['mode'].lower():
@@ -3308,8 +3281,8 @@ class SEDmodel(object):
             t = all_data[0, ...]
             keep_shape = t.shape
             t = t.flatten(order='F')
-            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
-                                                                     order='F').transpose(1, 2, 0)
+            J_t = spline_coeffs_irr_vec(t, np.asarray(self.tau_knots), np.asarray(self.KD_t)).reshape(
+                (*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1, 2, 0)
             flux_data = all_data[[0, 1, 2, 5, 6, 7, 8, 9, 10, 11], ...]
             mag_data = all_data[[0, 3, 4, 5, 6, 7, 8, 9, 10, 11], ...]
             # Mask out negative fluxes, only for mag data--------------------------
