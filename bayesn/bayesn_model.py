@@ -1844,6 +1844,7 @@ class SEDmodel(object):
         args['lm_solver'] = args.get('lm_solver', 'gn').lower()
         if args['lm_solver'] not in {'gn', 'hvp_cg'}:
             raise ValueError(f"lm_solver must be 'gn' or 'hvp_cg', got {args['lm_solver']!r}")
+        args['save_lm_trace'] = args.get('save_lm_trace', False)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2069,7 +2070,7 @@ class SEDmodel(object):
                     mi = self._lm_model_info
                     pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...])
                     post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...])
-                    noeps_median, _, z_unc_noeps = run_lm_laplace(
+                    noeps_median, s1_diag, z_unc_noeps = run_lm_laplace(
                         pot_fn_noeps, post_fn_noeps, mi.param_info.z,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
@@ -2098,7 +2099,7 @@ class SEDmodel(object):
                     else:
                         prior_pot_anchored = prior_pot_fn
                     if args['lm_solver'] == 'gn':
-                        laplace_median, _, z_unc_vi = run_lm_laplace_gn(
+                        laplace_median, s2_diag, z_unc_vi = run_lm_laplace_gn(
                             predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
                             maxiter=args['lm_maxiter'],
                             lam_init=args['lm_lam_init'],
@@ -2107,7 +2108,7 @@ class SEDmodel(object):
                         warm_scale_tril = compute_gn_scale_tril(
                             predict_fn, prior_pot_anchored, z_unc_vi)
                     else:  # hvp_cg
-                        laplace_median, _, z_unc_vi = run_lm_laplace_hvp_cg(
+                        laplace_median, s2_diag, z_unc_vi = run_lm_laplace_hvp_cg(
                             predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
                             maxiter=args['lm_maxiter'],
                             lam_init=args['lm_lam_init'],
@@ -2116,6 +2117,8 @@ class SEDmodel(object):
                         warm_scale_tril = compute_hvp_scale_tril(
                             predict_fn, prior_pot_anchored, z_unc_vi)
                 else:
+                    s1_diag = None
+                    s2_diag = None
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
                     svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
@@ -2143,12 +2146,30 @@ class SEDmodel(object):
                 samples = predictive(PRNGKey(123), data=None)
                 samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
+                if args['save_lm_trace'] and s1_diag is not None:
+                    for k, v in s1_diag.items():
+                        samples[f'_lm_diag_s1_{k}'] = v
+                    for k, v in s2_diag.items():
+                        samples[f'_lm_diag_s2_{k}'] = v
                 return {**samples}
 
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
             del samples['_auto_latent']
+            if args['save_lm_trace']:
+                lm_trace = {k: np.asarray(samples.pop(k))
+                            for k in list(samples.keys())
+                            if k.startswith('_lm_diag_')}
+                if lm_trace:
+                    if not os.path.exists(args['outputdir']):
+                        os.mkdir(args['outputdir'])
+                    cids = np.asarray(getattr(self, 'sn_list', np.arange(next(iter(lm_trace.values())).shape[0])))
+                    np.savez(
+                        os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LM_TRACE.npz'),
+                        cids=cids,
+                        **lm_trace,
+                    )
             expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
