@@ -135,7 +135,6 @@ def _newton_lm_round(init_p, bounds_lo, bounds_hi, loss_closed, maxiter,
 
         if debug:
             diagnostics = {
-                'p': p_out,
                 'f_val': f_out,
                 'lam': lam_out,
                 'accept': accept,
@@ -194,7 +193,7 @@ def run_lm_laplace(potential_fn_sn, postprocess_fn_sn, z_template,
     )
     z_unc_dict = unflatten(p_final)
     median_dict = postprocess_fn_sn(z_unc_dict)
-    return median_dict, diag, z_unc_dict
+    return median_dict, diag['f_val'], z_unc_dict
 
 
 def compute_laplace_scale_tril(potential_fn_sn, z_template):
@@ -290,7 +289,6 @@ def _newton_lm_round_gn(init_p, bounds_lo, bounds_hi,
 
         if debug:
             diagnostics = {
-                'p': p_out,
                 'f_val': f_out,
                 'lam': lam_out,
                 'accept': accept,
@@ -345,7 +343,7 @@ def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_templ
     )
     z_unc_dict = unflatten(p_final)
     median_dict = postprocess_fn_sn(z_unc_dict)
-    return median_dict, diag, z_unc_dict
+    return median_dict, diag['f_val'], z_unc_dict
 
 
 def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
@@ -415,7 +413,6 @@ def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
 
         if debug:
             diagnostics = {
-                'p': p_out,
                 'f_val': f_out,
                 'lam': lam_out,
                 'accept': accept,
@@ -460,7 +457,7 @@ def run_lm_laplace_hvp_cg(predict_fn, prior_potential_fn, postprocess_fn_sn,
     )
     z_unc_dict = unflatten(p_final)
     median_dict = postprocess_fn_sn(z_unc_dict)
-    return median_dict, diag, z_unc_dict
+    return median_dict, diag['f_val'], z_unc_dict
 
 
 def compute_hvp_scale_tril(predict_fn, prior_potential_fn, z_template):
