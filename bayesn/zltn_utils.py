@@ -17,7 +17,6 @@ class _FirstPositive(_SingletonConstraint):
     event_dim = 1
 
     def __call__(self, x):
-        print("Constraint is being called")
         return (x[0] >= 0)
 
     def feasible_like(self, prototype):
@@ -60,7 +59,6 @@ class MultiZLTN(Distribution):
     ):
         if jnp.ndim(loc) == 0:
             (loc,) = promote_shapes(loc, shape=(1,))
-        # temporary append a new axis to loc
         loc = loc[..., jnp.newaxis]
         if covariance_matrix is not None:
             loc, self.covariance_matrix = promote_shapes(loc, covariance_matrix)
@@ -70,7 +68,6 @@ class MultiZLTN(Distribution):
             self.scale_tril = cholesky_of_inverse(self.precision_matrix)
         elif scale_tril is not None:
             loc, self.scale_tril = promote_shapes(loc, scale_tril)
-            self.covariance_matrix = jnp.matmul(self.scale_tril, self.scale_tril.T)
         else:
             raise ValueError(
                 "One of `covariance_matrix`, `precision_matrix`, `scale_tril`"
@@ -80,21 +77,25 @@ class MultiZLTN(Distribution):
             jnp.shape(loc)[:-2], jnp.shape(self.scale_tril)[:-2]
         )
         event_shape = jnp.shape(self.scale_tril)[-1:]
-        # self.loc = loc[..., 0]
         self.mu = loc
         self.mu_1 = self.mu[0]
-        # print("Distribution mean:", self.mu_1)
         self.mu_2 = jnp.squeeze(self.mu[1:])
-        # print("input mu 2", self.mu_2)
 
-        self.sigma = self.covariance_matrix
-        self.sigma_11 = self.sigma[0][0]
-        self.sigma_22 = self.sigma[1:, 1:]
-        self.sigma_21 = self.sigma[1:, :1]
-        self.sigma_12 = self.sigma[:1, 1:]
+        L = self.scale_tril
+        self.sigma_11 = L[0, 0] * L[0, 0]
+        self.sigma_21 = L[1:, 0:1] * L[0, 0]
+        self.sigma_12 = self.sigma_21.T
+        self.sigma_22 = jnp.matmul(L[1:, :], L[1:, :].T)
+
+        self._sigma_11_inv = 1.0 / self.sigma_11
+        self._sigma_hat = (
+            self.sigma_22
+            - jnp.matmul(self.sigma_21 * self._sigma_11_inv, self.sigma_12)
+            + 1.0e-9 * jnp.eye(event_shape[0] - 1)
+        )
+        self._chol_sigma_hat = jnp.linalg.cholesky(self._sigma_hat)
 
         self.zltn_dist = TruncatedNormal(self.mu_1, self.scale_tril[0][0], low=0.)
-        # print("batch shape: ", batch_shape)
         super(MultiZLTN, self).__init__(
             batch_shape=batch_shape,
             event_shape=event_shape,
@@ -103,53 +104,34 @@ class MultiZLTN(Distribution):
 
     def sample(self, key, sample_shape=()):
         assert is_prng_key(key)
-
         first_samples = self.zltn_dist.sample(key, sample_shape)
-        sigma_11_inverse = 1. / self.sigma_11
-
         if sample_shape == ():
-            mu_hat = self.mu_2 + jnp.matmul(self.sigma_21, ((1.0 / self.sigma_11) * (first_samples - self.mu_1)).T)
-            sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-            sigma_hat += 1.e-9 * jnp.eye(self.event_shape[0] - 1)
-
-            eps = normal(
-                key, shape=sample_shape + self.batch_shape + (self.event_shape[0] - 1,)
-            )
-            second_samples = mu_hat.T + jnp.squeeze(
-                jnp.matmul(jnp.linalg.cholesky(sigma_hat), eps[..., jnp.newaxis]), axis=-1
-            )
-            return jnp.concatenate((first_samples, second_samples), axis=0)
-
-        mu_hat = self.mu_2[:, None] + jnp.matmul(self.sigma_21, ((1.0 / self.sigma_11) * (first_samples - self.mu_1)).T)
-        # print("mu hat", mu_hat)
-        sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-        sigma_hat += 1.e-9 * jnp.eye(self.event_shape[0] - 1)
-
+            mu_2_b = self.mu_2
+            concat_axis = 0
+        else:
+            mu_2_b = self.mu_2[:, None]
+            concat_axis = 1
+        mu_hat = mu_2_b + jnp.matmul(
+            self.sigma_21,
+            (self._sigma_11_inv * (first_samples - self.mu_1)).T,
+        )
         eps = normal(
             key, shape=sample_shape + self.batch_shape + (self.event_shape[0] - 1,)
         )
         second_samples = mu_hat.T + jnp.squeeze(
-            jnp.matmul(jnp.linalg.cholesky(sigma_hat), eps[..., jnp.newaxis]), axis=-1
+            jnp.matmul(self._chol_sigma_hat, eps[..., jnp.newaxis]), axis=-1
         )
-        return jnp.concatenate((first_samples, second_samples), axis=1)
+        return jnp.concatenate((first_samples, second_samples), axis=concat_axis)
 
     def log_prob(self, value):
         log_prob_x = self.zltn_dist.log_prob(value[..., 0])
-        sigma_11_inverse = 1. / self.sigma_11
-        # mu_hat = self.mu_2 + self.sigma_21*sigma_11_inverse*(value[0]- self.mu_1)
-        # print(self.mu_1.shape)
-        # print(value)
-        # print(value[...,0].shape)
-        # print(value[0][0].shape)
-
-        mu_hat = self.mu_2[..., None] + jnp.matmul(self.sigma_21,
-                                                   sigma_11_inverse * (value[..., 0] - self.mu_1[None, ...]))
-        sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-        # print(mu_hat.shape, sigma_hat.shape, value[...,1:].shape)
-        m = MultivariateNormal(mu_hat.T, sigma_hat)
-
-        log_prob_y_given_x = MultivariateNormal(mu_hat.T, sigma_hat).log_prob(value[..., 1:])
-        # print(log_prob_x + log_prob_y_given_x)
+        mu_hat = self.mu_2[..., None] + jnp.matmul(
+            self.sigma_21,
+            self._sigma_11_inv * (value[..., 0] - self.mu_1[None, ...]),
+        )
+        log_prob_y_given_x = MultivariateNormal(
+            mu_hat.T, scale_tril=self._chol_sigma_hat
+        ).log_prob(value[..., 1:])
         return log_prob_x + log_prob_y_given_x
 
     # old method without vectorization
@@ -231,7 +213,10 @@ class My_Exponential(Distribution):
 
     @validate_sample
     def log_prob(self, value):
-        return jnp.log(self.rate) - self.rate * value
+        # One-sided quadratic barrier: zero (and zero gradient) on the support.
+        base = jnp.log(self.rate) - self.rate * value
+        neg = jnp.where(value < 0, value, 0.0)
+        return base - 1.0e2 * neg * neg
 
     @property
     def mean(self):
