@@ -2070,8 +2070,16 @@ class SEDmodel(object):
                     mi = self._lm_model_info
                     pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...])
                     post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...])
+                    # Per-SN init: prior medians for AV/theta/tmax (data-independent,
+                    # constant in unconstrained space) and this SN's muhat for Ds.
+                    z_template_s1 = {
+                        'AV': jnp.array([jnp.log(self.tauA * jnp.log(2.0))]),
+                        'Ds': data[-3, 0:1],
+                        'theta': jnp.array([0.0]),
+                        'tmax': jnp.array([0.0]),
+                    }
                     noeps_median, s1_diag, z_unc_noeps = run_lm_laplace(
-                        pot_fn_noeps, post_fn_noeps, mi.param_info.z,
+                        pot_fn_noeps, post_fn_noeps, z_template_s1,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
