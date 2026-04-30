@@ -1834,12 +1834,12 @@ class SEDmodel(object):
         if args['laplace_method'] not in {'svi', 'lm'}:
             raise ValueError(f"laplace_method must be 'svi' or 'lm', got {args['laplace_method']!r}")
         args['lm_maxiter'] = args.get('lm_maxiter', 30)
-        args['lm_lam_init'] = args.get('lm_lam_init', 1e-3)
+        args['lm_lam_init'] = args.get('lm_lam_init', 1.0)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
-        args['num_zltn_iter'] = args.get('num_zltn_iter', 750)
+        args['num_zltn_iter'] = args.get('num_zltn_iter', 1500)
         args['zltn_lr'] = args.get('zltn_lr', 0.02)
         args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
-        args['zltn_particles'] = args.get('zltn_particles', 20)
+        args['zltn_particles'] = args.get('zltn_particles', 10)
         args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
         args['lm_solver'] = args.get('lm_solver', 'gn').lower()
         if args['lm_solver'] not in {'gn', 'hvp_cg'}:
