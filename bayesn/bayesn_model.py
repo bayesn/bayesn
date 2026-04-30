@@ -754,7 +754,7 @@ class SEDmodel(object):
         model_flux *= mask
         return model_flux
 
-    def compute_fitprob(self, samples):
+    def compute_fitprob(self, samples, batch_size=None):
         """
         Compute FITPROB for each SN using posterior mean parameters.
 
@@ -817,11 +817,21 @@ class SEDmodel(object):
         band_indices = self.data[4, :, :].astype(int)
         mask = self.data[9, :, :].astype(bool)
 
-        # --- 4. Model flux — single vectorized JAX call ---
-        model_flux = self.get_flux_batch(
-            self.M0, theta_mean, AV_mean, self.W0, self.W1, eps_full,
-            Ds_mean, RV, band_indices, mask, J_t, hsiao_interp, self.band_weights
-        )
+        # --- 4. Model flux — batched over SN axis to keep peak memory bounded ---
+        bs = batch_size if batch_size is not None else n_sne
+        rv_is_array = isinstance(RV, (np.ndarray, jnp.ndarray)) and getattr(RV, 'ndim', 0) > 0
+        chunks = []
+        for lo in range(0, n_sne, bs):
+            hi = min(lo + bs, n_sne)
+            chunk = self.get_flux_batch(
+                self.M0, theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1,
+                eps_full[lo:hi], Ds_mean[lo:hi],
+                RV[lo:hi] if rv_is_array else RV,
+                band_indices[:, lo:hi], mask[:, lo:hi],
+                J_t[lo:hi], hsiao_interp[:, :, lo:hi], self.band_weights[lo:hi],
+            )
+            chunks.append(np.asarray(chunk))
+        model_flux = np.concatenate(chunks, axis=-1)
 
         # --- 5. chi2_data ---
         obs_flux = self.data[1, :, :]
@@ -2541,7 +2551,7 @@ class SEDmodel(object):
                             1 + z_HEL[None, None, :])
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
-            fitprob, fitchi2, ndof = self.compute_fitprob(samples)
+            fitprob, fitchi2, ndof = self.compute_fitprob(samples, batch_size=args.get('batch_size'))
 
             # Create lcplot file
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
