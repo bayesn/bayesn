@@ -1844,6 +1844,7 @@ class SEDmodel(object):
         args['lm_solver'] = args.get('lm_solver', 'gn').lower()
         if args['lm_solver'] not in {'gn', 'hvp_cg'}:
             raise ValueError(f"lm_solver must be 'gn' or 'hvp_cg', got {args['lm_solver']!r}")
+        args['batch_size'] = args.get('batch_size', None)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2154,8 +2155,33 @@ class SEDmodel(object):
                 return {**samples}
 
             start = timeit.default_timer()
-            map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
-            samples = map(self.data, self.band_weights)
+            batched_map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
+            n_sne = self.data.shape[-1]
+            batch_size = args['batch_size'] if args['batch_size'] is not None else n_sne
+            n_batches = (n_sne + batch_size - 1) // batch_size
+
+            chunks = []
+            for b in tqdm(range(n_batches), desc='VI batches', disable=n_batches == 1):
+                lo, hi = b * batch_size, min((b + 1) * batch_size, n_sne)
+                n_real = hi - lo
+                if n_real == batch_size:
+                    batch_data = self.data[..., lo:hi]
+                    batch_weights = self.band_weights[lo:hi]
+                else:
+                    # Pad final batch by replicating SN 0; padded outputs discarded.
+                    batch_data = np.empty(
+                        (*self.data.shape[:-1], batch_size), dtype=self.data.dtype)
+                    batch_weights = np.empty(
+                        (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
+                    batch_data[..., :n_real] = self.data[..., lo:hi]
+                    batch_data[..., n_real:] = self.data[..., 0:1]
+                    batch_weights[:n_real] = self.band_weights[lo:hi]
+                    batch_weights[n_real:] = self.band_weights[0:1]
+                chunk = batched_map(batch_data, batch_weights)
+                chunks.append({k: np.asarray(v)[:n_real] for k, v in chunk.items()})
+
+            samples = {k: np.concatenate([c[k] for c in chunks], axis=0)
+                       for k in chunks[0]}
             del samples['_auto_latent']
             expand_dim = False
             for key, val in samples.items():
