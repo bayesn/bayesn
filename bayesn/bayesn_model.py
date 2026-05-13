@@ -2773,7 +2773,6 @@ class SEDmodel(object):
                     if sn_file_ind == 0:
                         # Check if sim or real data
                         self.sim = 'SIM_REDSHIFT_HELIO' in head_data.dtype.names
-                        self.bayesn_sim = 'SIM_THETA' in head_data.dtype.names
                         if not self.sim:
                             args['njobtot'] = args['jobsplit'][1]
                     n_sne_in_file = head_data.shape[0]
@@ -2905,7 +2904,7 @@ class SEDmodel(object):
                         sim_vpecs.extend(head_data['SIM_VPEC'][keep_mask])
                         sim_dlmags.extend(head_data['SIM_DLMU'][keep_mask])
                         sim_pkmjds.extend(head_data['SIM_PEAKMJD'][keep_mask])
-                    if self.bayesn_sim:
+                    if 'SIM_THETA' in head_data.dtype.names:
                         sim_thetas.extend(head_data['SIM_THETA'][keep_mask])
                         sim_AVs.extend(head_data['SIM_AV'][keep_mask])
                         sim_RVs.extend(head_data['SIM_RV'][keep_mask])
