@@ -1961,8 +1961,10 @@ class SEDmodel(object):
             )
 
         print(f'Preprocessing time: {time.time() - self.start_time:.2f} seconds')
-        # print(self.data.shape)
-        # sys.exit('Quitting after preprocessing, just testing I/O')
+        print(f'self.data shape: {self.data.shape} dtype: {self.data.dtype} '
+              f'size: {self.data.nbytes / 1024**2:.1f} MiB')
+        print(f'self.band_weights shape: {self.band_weights.shape} dtype: {self.band_weights.dtype} '
+              f'size: {self.band_weights.nbytes / 1024**2:.1f} MiB')
         print(f'Current mode: {args["mode"]}')
         print('Running...')
 
