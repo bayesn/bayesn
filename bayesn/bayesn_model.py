@@ -3,6 +3,7 @@ BayeSN SED Model. Defines a class which allows you to fit or simulate from the
 BayeSN Optical+NIR SED model.
 """
 
+import gzip
 import os
 import subprocess
 import sys
@@ -54,6 +55,12 @@ jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
 # jax.config.update('jax_platform_name', 'cpu')  # Forces CPU
+
+
+def _read_snana_ascii(path):
+    """Read an SNANA ASCII light-curve file, transparently handling .gz inputs."""
+    with (gzip.open if path.endswith('.gz') else open)(path, 'rt') as fh:
+        return sncosmo.read_snana_ascii(fh, default_tablename='OBS')
 
 
 class SEDmodel(object):
@@ -2497,7 +2504,7 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in memory when making plots
 
         """
-        meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename='OBS')
+        meta, lcdata = _read_snana_ascii(path)
         lcdata = lcdata['OBS'].to_pandas()
 
         t = lcdata.MJD.values
@@ -2966,7 +2973,7 @@ class SEDmodel(object):
                 elif len(found_in) > 1:
                     raise ValueError(f'Requested photometry {data_dir} was found in multiple locations, please remove '
                                      f'duplicates and ensure the one you want to use remains')
-                data_dir = found_in[0]
+                data_dir = str(found_in[0])
                 # Load up SNANA survey definitions file
                 survey_def_path = os.path.join(os.environ.get('SNDATA_ROOT'), 'SURVEY.DEF')
                 with open(survey_def_path) as fp:
@@ -3152,7 +3159,12 @@ class SEDmodel(object):
                         snrmax3s.append(snrmax3)
             else:  # If not FITS, assume text format
                 sn_list = np.atleast_1d(np.loadtxt(list_files[0], dtype='str'))
-                meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, dir_list[0], sn_list[0][:-3]), default_tablename='OBS')
+                probe = os.path.join(data_dir, dir_list[0], sn_list[0])
+                if not os.path.exists(probe) and os.path.exists(probe + '.gz'):
+                    sn_list = np.char.add(sn_list, '.gz')
+                elif not os.path.exists(probe) and sn_list[0].endswith('.gz') and os.path.exists(probe[:-3]):
+                    sn_list = np.array([f[:-3] for f in sn_list])
+                meta, lcdata = _read_snana_ascii(os.path.join(data_dir, dir_list[0], sn_list[0]))
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in meta.keys()
                 masses = []
@@ -3162,13 +3174,18 @@ class SEDmodel(object):
                 for dir_ind, list_file in enumerate(list_files):
                     print(list_file)
                     sn_list = np.atleast_1d(np.loadtxt(list_file, dtype='str'))
+                    probe = os.path.join(data_dir, dir_list[dir_ind], sn_list[0])
+                    if not os.path.exists(probe) and os.path.exists(probe + '.gz'):
+                        sn_list = np.char.add(sn_list, '.gz')
+                    elif not os.path.exists(probe) and sn_list[0].endswith('.gz') and os.path.exists(probe[:-3]):
+                        sn_list = np.array([f[:-3] for f in sn_list])
                     survey_zs = []
                     for sn_ind, sn_file in tqdm(enumerate(sn_list), total=len(sn_list)):
                         if (sn_ind + 1 - args['jobid']) % args['njobtot'] != 0:
                             continue
                         # if sn_ind > 0:
                         #     break
-                        meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_dir, dir_list[dir_ind], sn_file[:-3]), default_tablename='OBS')
+                        meta, lcdata = _read_snana_ascii(os.path.join(data_dir, dir_list[dir_ind], sn_file))
                         sn_name = meta['SNID']
                         if sn_name in ['2006bh', '2007af']:
                             continue
@@ -3419,7 +3436,7 @@ class SEDmodel(object):
                 sn = row.SNID
                 data_root = args['data_root']
                 for file in sn_files:
-                    meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
+                    meta, lcdata = _read_snana_ascii(os.path.join(data_root, file))
                     data = lcdata['OBS'].to_pandas()
                     if 'SEARCH_PEAKMJD' in sn_list.columns:
                         peak_mjd = row.SEARCH_PEAKMJD
