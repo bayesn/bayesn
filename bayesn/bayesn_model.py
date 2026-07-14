@@ -2301,7 +2301,7 @@ class SEDmodel(object):
         # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
-            def fit_vmap_mcmc(data, weights):
+            def fit_vmap_mcmc(data, weights, z_icdf):
                 """
                 Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
                 device
@@ -2323,12 +2323,17 @@ class SEDmodel(object):
                 rng_key = PRNGKey(0)
                 mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
                             num_chains=args['num_chains'], chain_method=args['chain_method'], progress_bar=False)
-                mcmc.run(rng_key, data[..., None], weights[None, ...])
+                # per-SN host photo-z quantiles threaded in for the quantile prior (else the shared table is misindexed)
+                mc_kwargs = {'z_icdf': z_icdf} if (args['photoz'] and self.z_icdf_grid is not None) else {}
+                mcmc.run(rng_key, data[..., None], weights[None, ...], **mc_kwargs)
                 return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
 
             start = timeit.default_timer()
-            map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
-            samples = map(self.data, self.band_weights)
+            map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0, 0))
+            n_sne = self.data.shape[-1]
+            z_icdf_all = np.asarray(self.z_icdf_grid) if (args['photoz'] and self.z_icdf_grid is not None) \
+                else np.zeros((n_sne, 1))
+            samples = map(self.data, self.band_weights, z_icdf_all)
             for key, val in samples.items():
                 val = np.asarray(val)
                 # drop the size-1 SNe-plate dim from the event axes (>=3), keeping n_sne/chains/draws (0/1/2)
