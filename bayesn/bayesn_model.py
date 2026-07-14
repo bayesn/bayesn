@@ -2329,17 +2329,14 @@ class SEDmodel(object):
             start = timeit.default_timer()
             map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
             samples = map(self.data, self.band_weights)
-            expand_dim = False
             for key, val in samples.items():
-                val = np.squeeze(val)
-                if len(val.shape) == 2:  # In case fitting only one object
-                    expand_dim = True
-                if expand_dim:
-                    val = val[None, ...]
-                if len(val.shape) == 4:
-                    samples[key] = val.transpose(1, 2, 3, 0)
-                else:
-                    samples[key] = val.transpose(1, 2, 0)
+                val = np.asarray(val)
+                # drop the size-1 SNe-plate dim from the event axes (>=3), keeping n_sne/chains/draws (0/1/2)
+                squeeze_axes = tuple(ax for ax in range(3, val.ndim) if val.shape[ax] == 1)
+                if squeeze_axes:
+                    val = np.squeeze(val, axis=squeeze_axes)
+                # vmap adds n_sne as axis 0; move it last to the (chains, draws, [event], n_sne) layout
+                samples[key] = np.moveaxis(val, 0, -1)
             end = timeit.default_timer()
         elif args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi':
             def fit_vmap_vi(data, weights, z_icdf):
