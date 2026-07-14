@@ -1284,10 +1284,12 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_photoz_vi(self, obs, weights, z_icdf=None):
+    def fit_model_photoz_noeps(self, obs, weights, z_icdf=None):
         """
-        Photo-z model modified for ZLTN VI: AV sampled first with real support so the guide's
-        first-positive dimension handles it, and no fix_* pins.
+        Photo-z model without epsilon, for Stage-1 LM of the VI fit. Same latent set as
+        fit_model_photoz (AV, theta, tmax, redshift, Ds) minus the eps residuals, with the
+        redshift sampled cosmology-independently and the phase time-dilated at the sampled z.
+        Mirrors fit_model_globalRV_noeps.
 
         Parameters
         ----------
@@ -1295,14 +1297,15 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
+        z_icdf: array-like, optional
+            Single per-SN host photo-z quantile row, passed through the vmap for the quantile prior
 
         """
         sample_size = obs.shape[-1]
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
-            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
-            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = numpyro.sample('theta', dist.Normal(0, 1.0))
+            AV = numpyro.sample('AV', dist.Exponential(1 / self.tauA))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             band_indices = obs[-6, :, sn_index].astype(int).T
             zhat = obs[-5, 0, sn_index]
@@ -1324,20 +1327,80 @@ class SEDmodel(object):
             t = t.flatten(order='F')
             J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
                                                                      order='F').transpose(1, 2, 0)
-            eps_mu = jnp.zeros(N_knots_sig)
-            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
-            eps_tform = eps_tform.T
-            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
-            eps = eps.T
-            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
-            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            eps = eps_full.at[:, 1:-1, :].set(eps)
+            eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             muhat = obs[-3, 0, sn_index]
             weights = self._calculate_band_weights_jax(z)
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample('obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
+    def fit_model_photoz_vi(self, obs, weights, z_icdf=None, prior_only=False):
+        """
+        Photo-z model modified for ZLTN VI: AV sampled first with real support so the guide's
+        first-positive dimension handles it, and no fix_* pins.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+        z_icdf: array-like, optional
+            Single per-SN host photo-z quantile row, passed through the vmap for the quantile prior
+        prior_only: bool, optional
+            If True, return after sampling all latents and skip the data-likelihood (the band-weight
+            recompute, get_flux_batch and the obs sample). Used by _prior_pot in the LM Stage-2 solve.
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            zhat = obs[-5, 0, sn_index]
+            zhat_err = obs[-4, 0, sn_index]
+            if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
+                u = numpyro.sample('u', dist.Uniform(self.z_u_grid[0], self.z_u_grid[-1]))
+                if z_icdf is not None:  # single per-SN row passed in (VI vmaps over SNe)
+                    z = numpyro.deterministic('z', jnp.interp(u, self.z_u_grid, z_icdf))
+                else:  # MCMC: one plate over all SNe, index the shared table
+                    z = numpyro.deterministic('z', jax.vmap(jnp.interp, in_axes=(0, None, 0))(
+                        u, self.z_u_grid, self.z_icdf_grid[sn_index]))
+            else:  # Gaussian catalog prior
+                ztform = numpyro.sample('ztform', dist.Normal(0, 1))
+                z = numpyro.deterministic('z', zhat + zhat_err * ztform)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            muhat = obs[-3, 0, sn_index]
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
+            if prior_only:
+                return
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            # Rest-frame phase from the observer frame at the sampled z (time dilation)
+            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            weights = self._calculate_band_weights_jax(z)
+            mask = obs[-1, :, sn_index].T.astype(bool)
             flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):
@@ -2148,13 +2211,15 @@ class SEDmodel(object):
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi' \
                 and args['laplace_method'] == 'lm':
             from numpyro.infer.util import initialize_model
+            noeps_model = self.fit_model_photoz_noeps if args['photoz'] else self.fit_model_globalRV_noeps
+            vi_model = self.fit_model_photoz_vi if args['photoz'] else self.fit_model_globalRV_vi
             self._lm_model_info = initialize_model(
-                PRNGKey(0), self.fit_model_globalRV_noeps,
+                PRNGKey(0), noeps_model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
             self._vi_model_info = initialize_model(
-                PRNGKey(0), self.fit_model_globalRV_vi,
+                PRNGKey(0), vi_model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
             )
@@ -2276,41 +2341,28 @@ class SEDmodel(object):
 
                 """
                 if args['photoz']:
-                    # Photo-z VI keeps the Adam Laplace -> ZLTN path (LM migration is a follow-up)
-                    optimizer = Adam(0.01)
-                    model = self.fit_model_photoz
+                    noeps_model = self.fit_model_photoz_noeps
+                    vi_model = self.fit_model_photoz_vi
                     z_loc = 'u' if self.z_icdf_grid is not None else 'ztform'
                     sample_locs = ['AV', 'theta', 'tmax', z_loc, 'eps_tform', 'Ds']
-                    # per-SN host photo-z quantiles passed through the vmap (empty for the Gaussian case)
-                    vi_kwargs = {'z_icdf': z_icdf} if self.z_icdf_grid is not None else {}
-                    laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
-                    svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
-                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False, **vi_kwargs)
-                    laplace_median = laplace_guide.median(svi_result.params)
-                    new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
-                    model = self.fit_model_photoz_vi
-                    zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict))
-                    svi = SVI(model, zltn_guide, Adam(0.005), Trace_ELBO(5))
-                    svi_result = svi.run(PRNGKey(123), 10000, data[..., None], weights[None, ...], progress_bar=False, **vi_kwargs)
-                    predictive = Predictive(zltn_guide, params=svi_result.params, num_samples=4 * args['num_samples'])
-                    samples = predictive(PRNGKey(123), data=None)
-                    if self.z_icdf_grid is not None:  # surface z (a deterministic, so not in the guide samples)
-                        samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
-                    else:
-                        samples['z'] = data[-5, 0] + data[-4, 0] * samples['ztform']
-                    samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
-                    return {**samples}
-
-                model = self.fit_model_globalRV_noeps
-                sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
+                    # per-SN host photo-z quantiles threaded through the vmap (empty for the Gaussian case)
+                    z_kwargs = {'z_icdf': z_icdf} if self.z_icdf_grid is not None else {}
+                    # z-latent starts at unconstrained 0 (Normal mean / Uniform prior midpoint)
+                    extra_template = {z_loc: jnp.array([0.0])}
+                else:
+                    noeps_model = self.fit_model_globalRV_noeps
+                    vi_model = self.fit_model_globalRV_vi
+                    sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
+                    z_kwargs = {}
+                    extra_template = {}
 
                 warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
                     # Stage 1: LM on the noeps model finds a stable MAP for
-                    # (AV, theta, tmax, Ds) using the proper Exponential prior.
+                    # (AV, theta, tmax, [redshift], Ds) using the proper Exponential prior.
                     mi = self._lm_model_info
-                    pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...])
-                    post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...])
+                    pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...], **z_kwargs)
+                    post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...], **z_kwargs)
                     # Per-SN init: prior medians for AV/theta/tmax (data-independent,
                     # constant in unconstrained space) and this SN's muhat for Ds.
                     z_template_s1 = {
@@ -2318,6 +2370,7 @@ class SEDmodel(object):
                         'Ds': data[-3, 0:1],
                         'theta': jnp.array([0.0]),
                         'tmax': jnp.array([0.0]),
+                        **extra_template,
                     }
                     noeps_median, _, z_unc_noeps = run_lm_laplace(
                         pot_fn_noeps, post_fn_noeps, z_template_s1,
@@ -2332,10 +2385,10 @@ class SEDmodel(object):
                     # prior on tmax (centred at Stage 1's MAP) damps tmax
                     # drift via tmax-eps coupling.
                     vi_mi = self._vi_model_info
-                    post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
+                    post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...], **z_kwargs)
                     vi_args = (data[..., None], weights[None, ...])
-                    predict_fn = lambda z: _predict(self.fit_model_globalRV_vi, vi_args, {}, z)
-                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_globalRV_vi, vi_args, {}, z)
+                    predict_fn = lambda z: _predict(vi_model, vi_args, z_kwargs, z)
+                    prior_pot_fn = lambda z: _prior_pot(vi_model, vi_args, z_kwargs, z)
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
@@ -2367,9 +2420,9 @@ class SEDmodel(object):
                             predict_fn, prior_pot_anchored, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
-                    laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
-                    svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
-                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False)
+                    laplace_guide = AutoLaplaceApproximation(noeps_model, init_loc_fn=init_strategy)
+                    svi = SVI(noeps_model, laplace_guide, optimizer, loss=Trace_ELBO(5))
+                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False, **z_kwargs)
                     params, losses = svi_result.params, svi_result.losses
                     laplace_median = laplace_guide.median(params)
 
@@ -2377,8 +2430,7 @@ class SEDmodel(object):
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
                 if 'eps_tform' not in new_init_dict:
                     new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
-                model = self.fit_model_globalRV_vi
-                zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict),
+                zltn_guide = AutoMultiZLTNGuide(vi_model, init_loc_fn=init_to_value(values=new_init_dict),
                                                 init_scale_tril=warm_scale_tril)
 
                 if args['zltn_lr_final'] == args['zltn_lr']:
@@ -2386,11 +2438,16 @@ class SEDmodel(object):
                 else:
                     decay_base = (args['zltn_lr_final'] / args['zltn_lr']) ** (1.0 / args['num_zltn_iter'])
                     step_size = lambda t: args['zltn_lr'] * decay_base ** t
-                svi = SVI(model, zltn_guide, Adam(step_size), Trace_ELBO(args['zltn_particles']))
-                svi_result = svi.run(PRNGKey(123), args['num_zltn_iter'], data[..., None], weights[None, ...], progress_bar=False)
+                svi = SVI(vi_model, zltn_guide, Adam(step_size), Trace_ELBO(args['zltn_particles']))
+                svi_result = svi.run(PRNGKey(123), args['num_zltn_iter'], data[..., None], weights[None, ...], progress_bar=False, **z_kwargs)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
                 samples = predictive(PRNGKey(123), data=None)
+                if args['photoz']:  # surface z (a deterministic, so not in the guide samples)
+                    if self.z_icdf_grid is not None:
+                        samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
+                    else:
+                        samples['z'] = data[-5, 0] + data[-4, 0] * samples['ztform']
                 samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
                 return {**samples}
