@@ -855,7 +855,7 @@ class SEDmodel(object):
 
         n_sne = self.data.shape[-1]
 
-        # --- 1. Posterior means ---
+        # Posterior means
         theta_mean = np.array(samples['theta'].mean(axis=(0, 1)))
         AV_mean = np.array(samples['AV'].mean(axis=(0, 1)))
         tmax_mean = np.array(samples['tmax'].mean(axis=(0, 1)))
@@ -878,9 +878,16 @@ class SEDmodel(object):
         else:
             RV = self.RV
 
-        # --- 2. Rebuild J_t and hsiao_interp at posterior mean tmax ---
+        # Rebuild J_t and hsiao_interp at the posterior-mean tmax
         obs_times = self.data[0, ...]
-        t = obs_times - tmax_mean[None, :]
+        if self.photoz:  # evaluate the model at the fitted redshift (band weights + time dilation)
+            z_mean = np.array(samples['z'].mean(axis=(0, 1)))
+            zhat = np.asarray(self.data[-5, 0, :])
+            t = obs_times * (1 + zhat[None, :]) / (1 + z_mean[None, :]) - tmax_mean[None, :]
+            weights = self._calculate_band_weights_jax(z_mean)
+        else:
+            t = obs_times - tmax_mean[None, :]
+            weights = self.band_weights
         hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t_flat = t.flatten(order='F')
@@ -888,11 +895,11 @@ class SEDmodel(object):
             (*keep_shape, self.tau_knots.shape[0]), order='F'
         ).transpose(1, 2, 0)
 
-        # --- 3. Inputs in (N_obs, n_sne) convention ---
+        # Inputs in (N_obs, n_sne) convention
         band_indices = self.data[4, :, :].astype(int)
         mask = self.data[9, :, :].astype(bool)
 
-        # --- 4. Model flux — batched over SN axis to keep peak memory bounded ---
+        # Model flux, batched over the SN axis to bound peak memory
         bs = batch_size if batch_size is not None else n_sne
         rv_is_array = isinstance(RV, (np.ndarray, jnp.ndarray)) and getattr(RV, 'ndim', 0) > 0
         chunks = []
@@ -903,29 +910,43 @@ class SEDmodel(object):
                 eps_full[lo:hi], Ds_mean[lo:hi],
                 RV[lo:hi] if rv_is_array else RV,
                 band_indices[:, lo:hi], mask[:, lo:hi],
-                J_t[lo:hi], hsiao_interp[:, :, lo:hi], self.band_weights[lo:hi],
+                J_t[lo:hi], hsiao_interp[:, :, lo:hi], weights[lo:hi],
             )
             chunks.append(np.asarray(chunk))
         model_flux = np.concatenate(chunks, axis=-1)
 
-        # --- 5. chi2_data ---
         obs_flux = self.data[1, :, :]
         obs_err = self.data[2, :, :]
         residuals_sq = (obs_flux - model_flux) ** 2
         chi2_per_obs = jnp.where(mask, residuals_sq / obs_err ** 2, 0.0)
         chi2_data = jnp.sum(chi2_per_obs, axis=0)
 
-        # --- 6. chi2_epsilon: sum of squared whitened epsilon ---
+        # Whitened-epsilon prior chi2
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
         chi2_epsilon = np.sum(eps_tform_mean ** 2, axis=0)
 
-        # --- 7. Joint statistic, NDOF, FITPROB ---
-        T_joint = np.array(chi2_data) + chi2_epsilon
+        # Host photo-z prior term -2 ln p_host(z), added to the joint chi2 (matches SNANA)
+        chi2_z = 0.0
+        if self.photoz:
+            if self.z_icdf_grid is None:  # Gaussian prior: pull^2 (drop the log-norm const, as SNANA does)
+                zhat_err = np.asarray(self.data[-4, 0, :])
+                chi2_z = ((z_mean - zhat) / zhat_err) ** 2
+            else:  # quantile prior: p_host is dCDF/dz, the finite-difference slope of the quantiles
+                zq, pl = np.asarray(self.z_icdf_grid), np.asarray(self.z_u_grid)
+                slopes = np.diff(pl) / np.diff(zq, axis=1)  # dP/dz per quantile bin
+                k = np.clip(np.sum(zq <= z_mean[:, None], axis=1) - 1, 0, pl.shape[0] - 2)
+                p_host = slopes[np.arange(len(z_mean)), k]
+                chi2_z = np.where(p_host > 0, -2.0 * np.log(p_host), 1000.0)
+
+        # Joint statistic, NDOF, FITPROB
+        T_joint = np.array(chi2_data) + chi2_epsilon + chi2_z
         # NDOF = N_obs + alpha*N_eps - N_params.
         # Physical params (tmax, theta, AV, Ds, +RV) consume DOF from data.
         # Epsilon knots are prior-constrained, so their effective DOF is
         # between 0 (fully free) and N_knots_sig (fully prior-determined).
         # alpha=0.75 calibrated on Foundation DR1 sample.
+        # Photo-z z is net-zero DOF: the host-z prior adds one prior point while the
+        # floated z consumes one parameter (as SNANA does), leaving ndof unchanged.
         alpha = 0.75
         n_params = 4 + (1 if 'RV' in samples else 0)
         ndof = (np.sum(np.array(mask), axis=0) + alpha * N_knots_sig - n_params).astype(int)
@@ -2143,7 +2164,7 @@ class SEDmodel(object):
                     keep_list = keep_list.CID.values
                 elif 'SNID' in keep_list.columns:
                     keep_list = keep_list.SNID.values
-            args['SNID_keep_list'] = keep_list.astype(str)
+            args['SNID_keep_list'] = keep_list.astype(str).tolist()  # list stays yaml-serialisable for input.yaml
         else:
             args['SNID_keep_list'] = None
         args['error_floor'] = args.get('error_floor', 0.0)
@@ -2871,14 +2892,21 @@ class SEDmodel(object):
         if args['mode'] == 'fitting':
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            samples['mu'] = np.random.normal(
-                (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-                np.power(Ds_err, 2),
-                np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
-            samples['delM'] = samples['Ds'] - samples['mu']
+            if args['photoz']:
+                # Cosmology-independent: report the fitted light-curve distance Ds directly,
+                # without the muhat (catalog-z distmod) shrinkage that would inject a fiducial cosmology
+                samples['mu'] = samples['Ds']
+                samples['delM'] = np.zeros_like(samples['Ds'])
+            else:
+                samples['mu'] = np.random.normal(
+                    (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
+                    np.power(Ds_err, 2),
+                    np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+                samples['delM'] = samples['Ds'] - samples['mu']
             if 'tmax' in samples.keys():  # Convert tmax samples into peak_MJD samples
-                samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (
-                            1 + z_HEL[None, None, :])
+                # Time dilation at the fitted z for photo-z, else the fixed catalog z
+                z_dilation = samples['z'] if args['photoz'] else z_HEL[None, None, :]
+                samples['peak_MJD'] = self.peak_mjds[None, None, :] + samples['tmax'] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
             fitprob, fitchi2, ndof = self.compute_fitprob(samples, batch_size=args.get('batch_size'))
@@ -2954,6 +2982,9 @@ class SEDmodel(object):
             self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
             self.fitres_table['PEAKMJD'] = samples['peak_MJD'].mean(axis=(0, 1))
             self.fitres_table['PEAKMJDERR'] = samples['peak_MJD'].std(axis=(0, 1))
+            if args['photoz']:  # fitted photo-z posterior (catalog zHEL/zHD columns keep the host prior)
+                self.fitres_table['ZPHOT_FIT'] = samples['z'].mean(axis=(0, 1))
+                self.fitres_table['ZPHOT_FITERR'] = samples['z'].std(axis=(0, 1))
             self.fitres_table['FITCHI2'] = np.array(fitchi2)
             self.fitres_table['NDOF'] = ndof
             self.fitres_table['FITPROB'] = fitprob
