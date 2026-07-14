@@ -2,8 +2,7 @@
 
 Hierarchical Bayesian SED modelling of type Ia supernova light curves
 
-Developed and maintained by: Matt Grayling (@mattgrayling), Stephen Thorp (@stevet40), Gautham Narayan (@gnarayan), and 
-Kaisey S. Mandel (@CambridgeAstroStat) on behalf of the BayeSN Team (@bayesn).
+Developed and maintained by: Matt Grayling (@mattgrayling), Stephen Thorp (@stevet40), Ana Sofia Uzsoy (@asmuzsoy), Gautham Narayan (@gnarayan), and Kaisey S. Mandel (@CambridgeAstroStat) on behalf of the BayeSN Team (@bayesn).
 
 ## About
 BayeSN is a probabilistic optical-NIR SED model for type Ia supernovae, allowing for hierarchical analysis of the

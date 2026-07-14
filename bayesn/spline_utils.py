@@ -26,6 +26,7 @@ def invKD_irr(x):
 		y independednt matrix whose product can be taken with y to
 		obtain a vector of second derivatives of y.
 	"""
+	x = np.asarray(x)
 	n = len(x)
 
 	K = np.zeros((n-2,n-2))
@@ -94,6 +95,9 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 		y independednt matrix whose product can be taken with y to evaluate
 		the spline at x_int.
 	"""
+	x_int = np.asarray(x_int)
+	x = np.asarray(x)
+	invkd = np.asarray(invkd)
 	n_x_int = len(x_int)
 	n_x = len(x)
 	X = np.zeros((n_x_int,n_x))
@@ -133,6 +137,57 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 			X[i,q] = a
 			X[i,q+1] = b
 			X[i,:] = X[i,:] + c*invkd[q,:] + d*invkd[q+1,:]
+
+	return X
+
+
+def spline_coeffs_irr_vec(x_int, x, invkd):
+	"""
+	Vectorised numpy spline coefficient matrix builder. Returns an
+	(n_x_int, n_x) matrix that, when multiplied by knot values y, evaluates
+	the cubic spline at each x_int. Linear extrapolation past the knot range.
+	"""
+	x_int = np.asarray(x_int)
+	x = np.asarray(x)
+	invkd = np.asarray(invkd)
+	n_x_int, n_x = len(x_int), len(x)
+	X = np.zeros((n_x_int, n_x))
+
+	up = x_int > x[-1]
+	down = x_int < x[0]
+	interp = ~(up | down)
+
+	if up.any():
+		h = x[-1] - x[-2]
+		a = (x[-1] - x_int[up]) / h
+		f = (x_int[up] - x[-1]) * h / 6.0
+		i = np.where(up)[0]
+		X[i, -2] += a
+		X[i, -1] += 1 - a
+		X[i, :] += f[:, None] * invkd[-2, :]
+
+	if down.any():
+		h = x[1] - x[0]
+		b = (x_int[down] - x[0]) / h
+		f = (x_int[down] - x[0]) * h / 6.0
+		i = np.where(down)[0]
+		X[i, 0] += 1 - b
+		X[i, 1] += b
+		X[i, :] -= f[:, None] * invkd[1, :]
+
+	if interp.any():
+		i = np.where(interp)[0]
+		xi = x_int[i]
+		# bracket index q so x[q] <= xi < x[q+1]; clip handles xi == x[-1]
+		q = np.minimum(np.searchsorted(x, xi, side='right') - 1, n_x - 2)
+		h = x[q + 1] - x[q]
+		a = (x[q + 1] - xi) / h
+		b = 1 - a
+		c = ((a ** 3 - a) / 6) * h ** 2
+		d = ((b ** 3 - b) / 6) * h ** 2
+		X[i, q] += a
+		X[i, q + 1] += b
+		X[i, :] += c[:, None] * invkd[q, :] + d[:, None] * invkd[q + 1, :]
 
 	return X
 
