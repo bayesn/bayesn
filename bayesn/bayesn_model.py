@@ -881,7 +881,7 @@ class SEDmodel(object):
         # --- 2. Rebuild J_t and hsiao_interp at posterior mean tmax ---
         obs_times = self.data[0, ...]
         t = obs_times - tmax_mean[None, :]
-        hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+        hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
         keep_shape = t.shape
         t_flat = t.flatten(order='F')
         J_t = self.J_t_map(t_flat, self.tau_knots, self.KD_t).reshape(
@@ -1146,7 +1146,7 @@ class SEDmodel(object):
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
             t = obs[0, ...] - tmax[None, sn_index]
-            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
             J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
