@@ -2128,7 +2128,7 @@ class SEDmodel(object):
         args['lm_maxiter'] = args.get('lm_maxiter', 30)
         args['lm_lam_init'] = args.get('lm_lam_init', 1.0)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
-        args['num_zltn_iter'] = args.get('num_zltn_iter', 1500)
+        args['num_zltn_iter'] = args.get('num_zltn_iter', 4000 if args['photoz'] else 1500)
         args['zltn_lr'] = args.get('zltn_lr', 0.02)
         args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
         args['zltn_particles'] = args.get('zltn_particles', 10)
