@@ -13,7 +13,7 @@ import jax.random as jr
 import jax.numpy as jnp
 from numpyro.distributions.util import is_prng_key
 
-class NoName1():
+class ChebyshevICDF():
     """
     No Name distribution of the 1st kind.
     
