@@ -2540,7 +2540,7 @@ class SEDmodel(object):
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
                       drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
-                      mag=False, photoz=False, z_prior_err=None, z_pdf=None, chain_method='parallel'):
+                      mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel'):
         """
         Method to fit light curve contained in SNANA-format text file using BayeSN model
 
@@ -2605,13 +2605,13 @@ class SEDmodel(object):
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
                                      fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, RV=RV, mu_R=mu_R,
                                      sigma_R=sigma_R, mag=mag, photoz=photoz, z_prior_err=z_prior_err,
-                                     z_pdf=z_pdf, chain_method=chain_method)
+                                     z_pdf=z_pdf, z_quantiles=z_quantiles, chain_method=chain_method)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
-            sigma_R=False, mag=False, photoz=False, z_prior_err=None, z_pdf=None, chain_method='parallel'):
+            sigma_R=False, mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel'):
         """
         Method to fit light curve data loaded into memory with BayeSN model
 
@@ -2686,12 +2686,17 @@ class SEDmodel(object):
             t = (t - peak_mjd) / (1 + z)
         self.photoz = photoz
         self.z_icdf_grid = None
-        if photoz and z_pdf is not None:
+        if photoz and z_quantiles is not None:  # (probs, vals), or bare z-values with even 0..1 levels
+            zq = z_quantiles
+            probs, vals = zq if (len(zq) == 2 and np.ndim(zq[0]) > 0) else (np.linspace(0., 1., len(zq)), zq)
+            self.z_u_grid = jnp.asarray(probs)
+            self.z_icdf_grid = jnp.atleast_2d(jnp.asarray(vals))
+        elif photoz and z_pdf is not None:
             self.z_u_grid = jnp.linspace(0., 1., 101)
             self.z_icdf_grid = jnp.atleast_2d(jnp.asarray(z_pdf.icdf(self.z_u_grid)))
         if photoz:
             # Loose cut: drop epochs pre-explosion across the +/-3 sigma prior z and tmax range
-            if z_pdf is not None:
+            if self.z_icdf_grid is not None:
                 z_lo, z_hi = float(self.z_icdf_grid[0, 0]), float(self.z_icdf_grid[0, -1])
             else:
                 z_lo, z_hi = z - 3 * z_prior_err, z + 3 * z_prior_err
