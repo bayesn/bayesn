@@ -1,0 +1,31 @@
+DOCUMENTATION:
+    PURPOSE:  BayeSN model for simulations and light-curve fitting
+    REF:
+    - AUTHOR: Grayling et al., 2026 (this model version; BayeSN-TD)
+      ADS:    https://ui.adsabs.harvard.edu/abs/2025arXiv251011719G/abstract
+    - AUTHOR: Mandel et al., 2022 (BayeSN model)
+      ADS:    https://ui.adsabs.harvard.edu/abs/2022MNRAS.510.3939M/abstract
+    INTENT: Alternative
+    USAGE_KEY: GENMODEL, FITMODEL_NAME
+    USAGE_CODE: snlc_sim.exe snlc_fit.exe
+    VALIDATE_SCIENCE: Grayling+26, Mandel+22
+    NOTES:
+    - Phase-extended optical+NIR BayeSN model presented in BayeSN-TD
+    - Trained on 278 SNe Ia from Avelino+19 low-z compilation, Foundation DR1, and CSP-I
+    - Training data includes UBgVrizYJH
+    - Phase coverage extended to +85 days (vs +40 in prior models)
+    - Population R_V distribution (truncated Gaussian)
+    - Milky Way extinction based on SF11
+    VERSION:
+    - DATE: 2026-06-24
+    - TIME: 12:00:00
+    - AUTHOR: M. Grayling
+DOCUMENTATION_END:
+
+RESTLAMBDA_RANGE: 2800 18500
+
+# Nominal population parameter values from model training
+M0: -19.5      # Normalisation factor
+SIGMA0: 0.109  # Grey residual scatter
+MU_R: 2.19     # Mean of host galaxy R_V population (F99); sigma_R = 0.66
+TAUA: 0.316    # Mean host galaxy dust extinction
