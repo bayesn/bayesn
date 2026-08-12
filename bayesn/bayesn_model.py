@@ -75,17 +75,28 @@ class SEDmodel(object):
         valid model can be constructed. Currently implemented default models
         are listed below - default is T21.
 
+        ``G26_model``: Grayling+26 BayeSN model (arXiv:2606.19429).
+                        Covers rest wavelength range of 2800-10800A (ugriz). Intended for cosmology; jointly fits
+                        filter wavelength and zero-point cross-calibration shifts alongside the SED, using Dovekie
+                        as an informative prior. Population RV distribution. Trained on 1024 SNe Ia from the
+                        Kenworthy+21 compilation with Dovekie calibration updates (Foundation, CfA3, CfA4, CSP,
+                        SDSS, PS1, DES, SNLS).
+        ``G25_model``: Grayling+26 phase-extended optical+NIR BayeSN model (MNRAS 548, stag340; arXiv:2510.11719;
+                        BayeSN-TD). Covers rest wavelength range of 2800-18500A (UBgVrizYJH) and phase range
+                        -10 to +85 days, motivated by fitting late-time observations of strongly-lensed SNe Ia.
+                        Population RV distribution. Trained on 278 SNe Ia combining Avelino+19 low-z compilation,
+                        Foundation DR1 (Foley+18, Jones+19), and CSP-I.
+        ``W22_model``: Ward+22 No-Split BayeSN model (ApJ 956, 111; arXiv:2209.10558).
+                        Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects.
+                        Global RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19) and low-z Avelino+19
+                        (ApJ, 887, 106) compilation of CfA, CSP and others.
+        ``T21_model``: Thorp+21 No-Split BayeSN model (arXiv:2102:05678).
+                        Covers rest wavelength range of 3500-9500A (griz). No treatment of host mass effects.
+                        Global RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19).
         ``M20_model``: Mandel+20 BayeSN model (arXiv:2008.07538).
                         Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects.
                         Global RV assumed. Trained on low-z Avelino+19 (ApJ, 887, 106) compilation of CfA, CSP and
                         others.
-        ``T21_model``: Thorp+21 No-Split BayeSN model (arXiv:2102:05678).
-                        Covers rest wavelength range of 3500-9500A (griz). No treatment of host mass effects. Global RV
-                        assumed. Trained on Foundation DR1 (Foley+18, Jones+19).
-        ``W22_model``: Ward+22 No-Split BayeSN model (arXiv:2209.10558).
-                        Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects. Global
-                        RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19) and low-z Avelino+19 (ApJ, 887, 106)
-                        compilation of CfA, CSP and others.
     fiducial_cosmology :  dict, optional
         Dictionary containg kwargs ``{H0, Om0}`` for initialising an ``astropy.cosmology.FlatLambdaCDM`` instance.
         Defaults to Riess+16 (ApJ, 826, 56) cosmology:
