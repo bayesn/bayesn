@@ -1,41 +1,24 @@
-"""Levenberg-Marquardt MAP solvers used in BayeSN's VI fit's Stage 2.
+"""
+Gauss-Newton Levenberg-Marquardt MAP solver used to warm-start BayeSN's VI fits
 
-Three flavours are provided:
-
-- ``run_lm_laplace`` / ``compute_laplace_scale_tril``: full-Hessian LM via
-  ``jax.hessian``. Used by Stage 1 (small noeps latent — fits in GPU memory).
-- ``run_lm_laplace_gn`` / ``compute_gn_scale_tril``: Gauss-Newton LM with the
-  Jacobian built serially via ``jax.lax.map`` (option 2). Avoids the autodiff
-  vmap multiplier on the per-SN forward intermediate that OOMs on GPU at
-  realistic batch sizes. ~half the compute of full-Hessian LM.
-- ``run_lm_laplace_hvp_cg`` / ``compute_hvp_scale_tril``: exact-Hessian LM
-  via Hessian-vector products and conjugate-gradient linsolve (option 3).
-  Same memory profile as the GN variant; uses the exact Hessian instead of
-  GN; about 2x compute of GN per LM step.
-
-The core ``_newton_lm_round`` routine is copied verbatim from
-``jax_SNANA_claude/jax_snlc_fit/fitter.py`` (lines 225-332) to avoid pulling
-``jaxopt`` as a dependency. The GN and HVP-CG variants extend the same
-gain-ratio-with-line-search pattern.
+run_lm_laplace_gn finds the MAP and compute_gn_scale_tril builds the Laplace
+covariance Cholesky factor for initialising a variational guide. Both use the
+Gauss-Newton approximation H = J^T J + H_prior, with the Jacobian built one column
+at a time to keep memory low.
 """
 
 import jax
 import jax.numpy as jnp
-import jax.scipy.sparse.linalg as jsla
 from jax.flatten_util import ravel_pytree
 
 
 def _jacfwd_lax_map(f, p):
-    """Memory-efficient forward-mode Jacobian via serial ``lax.map`` over tangents.
+    """
+    Forward-mode Jacobian built one column at a time with lax.map
 
-    For ``f: R^d -> R^n``, returns ``J`` of shape ``(n, d)`` matching ``jax.jacfwd``.
-    Unlike ``jax.jacfwd`` (which vmaps tangents in parallel and adds a `d`
-    dimension to every per-SN forward intermediate), ``lax.map`` runs each
-    tangent's forward pass sequentially, so peak memory stays at one
-    forward-pass worth instead of d-times-forward-pass.
-
-    Compute is the same as ``jax.jacfwd`` (d forward passes total) plus a
-    modest per-iter dispatch overhead from the sequential boundary.
+    For f: R^d -> R^n, returns J of shape (n, d) matching jax.jacfwd, but runs
+    each tangent's forward pass sequentially rather than as a parallel vmap, so
+    peak memory stays at a single forward pass. Total compute matches jax.jacfwd.
     """
     d = p.shape[0]
 
@@ -47,342 +30,83 @@ def _jacfwd_lax_map(f, p):
     return cols.T  # shape (n, d)
 
 
-def _hessian_lax_map(f, p):
-    """Memory-efficient Hessian via column-by-column HVPs with ``lax.map``.
-
-    For scalar ``f: R^d -> R``, returns ``H`` of shape ``(d, d)`` matching
-    ``jax.hessian(f)(p)``. Avoids the autodiff vmap multiplier on the
-    per-SN forward intermediate.
-
-    Compute is the same as ``jax.hessian`` (d HVP evaluations, each ~2
-    forward-pass-equivalents).
+def _make_residuals_fn(predict_fn, unflatten):
     """
-    grad_f = jax.grad(f)
-    d = p.shape[0]
-
-    def col(e):
-        _, Hv = jax.jvp(grad_f, (p,), (e,))
-        return Hv
-
-    return jax.lax.map(col, jnp.eye(d))  # shape (d, d), symmetric
-
-
-def _newton_lm_round(init_p, bounds_lo, bounds_hi, loss_closed, maxiter,
-                     lam_init=1e-3, use_linesearch=False, debug=False):
-    """Pure LM with gain-ratio acceptance and lambda control.
-
-    Args:
-        init_p: 1-D initial parameter vector (unconstrained).
-        bounds_lo, bounds_hi: same shape as init_p; pass ``-jnp.inf``/``+jnp.inf``
-            when optimising in unconstrained space.
-        loss_closed: callable ``p -> scalar``, the objective to minimise.
-        maxiter: number of LM steps (lax.scan length).
-        lam_init: initial LM damping parameter.
-        use_linesearch: if True, try multiple step sizes along the Newton direction.
-        debug: if True, per-iteration diagnostics are returned as a dict.
-
-    Returns:
-        (p_final, f_final, grad_norm, diagnostics)
+    Build the residual function r(p) = ((data - flux) / scale * mask).ravel() used by
+    the solver, closing over predict_fn and the flat-vector unflattener
     """
-
-    ls_alphas = jnp.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0])
-
-    def newton_step(carry, _):
-        p, lam, f_val = carry
-        g = jax.grad(loss_closed)(p)
-        H = jax.hessian(loss_closed)(p)
-
-        diag_H = jnp.maximum(jnp.abs(jnp.diag(H)), 1e-6)
-        H_reg = H + lam * jnp.diag(diag_H)
-
-        d = -jnp.linalg.solve(H_reg, g)
-        slope = jnp.dot(g, d)
-
-        is_bad = (slope >= -1e-12) | jnp.any(jnp.isnan(d))
-        abs_diag = jnp.abs(jnp.diag(H))
-        scale_guess = 1.0 / (jnp.mean(abs_diag) + 1e-8)
-        d = jnp.where(is_bad, -g * scale_guess, d)
-
-        if use_linesearch:
-            def eval_alpha(alpha):
-                tp = jnp.clip(p + alpha * d, bounds_lo, bounds_hi)
-                return loss_closed(tp)
-            f_trials = jax.vmap(eval_alpha)(ls_alphas)
-            best_idx = jnp.argmin(f_trials)
-            best_alpha = ls_alphas[best_idx]
-            trial_p = jnp.clip(p + best_alpha * d, bounds_lo, bounds_hi)
-            f_trial = f_trials[best_idx]
-        else:
-            trial_p = jnp.clip(p + d, bounds_lo, bounds_hi)
-            f_trial = loss_closed(trial_p)
-
-        s = trial_p - p
-
-        actual = f_val - f_trial
-        predicted = -(jnp.dot(g, s) + 0.5 * s @ H @ s)
-        predicted = jnp.maximum(predicted, 1e-30)
-        rho = actual / predicted
-
-        accept = rho > 0.01
-        p_out = jnp.where(accept, trial_p, p)
-        f_out = jnp.where(accept, f_trial, f_val)
-
-        lam_out = jnp.where(
-            rho > 0.75, lam * 0.3,
-            jnp.where(rho > 0.25, lam, lam * 3.0),
-        )
-        lam_out = jnp.clip(lam_out, 1e-8, 1e8)
-
-        if debug:
-            diagnostics = {
-                'f_val': f_out,
-                'lam': lam_out,
-                'accept': accept,
-                'rho': rho,
-                'grad_norm': jnp.max(jnp.abs(g)),
-            }
-        else:
-            diagnostics = None
-        return (p_out, lam_out, f_out), diagnostics
-
-    f_init = loss_closed(init_p)
-    (p_final, _, f_final), diagnostics = jax.lax.scan(
-        newton_step, (init_p, lam_init, f_init), None, length=maxiter
-    )
-    g_final = jax.grad(loss_closed)(p_final)
-    grad_norm = jnp.max(jnp.abs(g_final))
-    return p_final, f_final, grad_norm, diagnostics
-
-
-def run_lm_laplace(potential_fn_sn, postprocess_fn_sn, z_template,
-                   maxiter=30, lam_init=1e-3, use_linesearch=True):
-    """Find the MAP of ``potential_fn_sn`` using LM and return the constrained
-    median dict plus per-iteration loss history.
-
-    Args:
-        potential_fn_sn: callable ``params_unc_dict -> scalar`` giving
-            ``-log p(data, z)`` for one SN (typically built from
-            ``numpyro.infer.util.initialize_model(dynamic_args=True)``).
-        postprocess_fn_sn: callable ``params_unc_dict -> constrained_dict``
-            that applies the bijectors back to constrained parameter space.
-        z_template: dict of unconstrained init values (matching the model's
-            sample-site names). Shape/dtype define the flat vector layout.
-        maxiter: LM iteration budget.
-        lam_init: initial LM damping.
-        use_linesearch: if True, perform a 7-point backtracking line search
-            along the Newton direction at every step.
-
-    Returns:
-        (median_dict, losses_1d, z_unc_dict)
-            ``median_dict`` has the same keys/shapes as
-            ``AutoLaplaceApproximation.median(params)`` (constrained space);
-            ``losses_1d`` is shape ``(maxiter,)``; ``z_unc_dict`` is the
-            unconstrained MAP in the same dict layout as ``z_template``.
-    """
-    flat0, unflatten = ravel_pytree(z_template)
-    bounds_hi = jnp.full_like(flat0, jnp.inf)
-    bounds_lo = -bounds_hi
-
-    def loss_closed(p):
-        return potential_fn_sn(unflatten(p))
-
-    p_final, _, _, diag = _newton_lm_round(
-        flat0, bounds_lo, bounds_hi, loss_closed,
-        maxiter=maxiter, lam_init=lam_init,
-        use_linesearch=use_linesearch, debug=True,
-    )
-    z_unc_dict = unflatten(p_final)
-    median_dict = postprocess_fn_sn(z_unc_dict)
-    return median_dict, diag['f_val'], z_unc_dict
-
-
-def compute_laplace_scale_tril(potential_fn_sn, z_template):
-    """Cholesky of the inverse Hessian of ``potential_fn_sn`` at ``z_template``.
-
-    Returns the lower-Cholesky factor of the Laplace posterior covariance in
-    unconstrained latent space, suitable for initialising a variational
-    guide's ``scale_tril`` parameter.
-    """
-    flat0, unflatten = ravel_pytree(z_template)
-    H = jax.hessian(lambda p: potential_fn_sn(unflatten(p)))(flat0)
-    cov = jnp.linalg.inv(H)
-    return jnp.linalg.cholesky(cov)
-
-
-def _newton_lm_round_gn(init_p, bounds_lo, bounds_hi,
-                        residuals_fn, prior_potential_fn, maxiter,
-                        lam_init=1e-3, use_linesearch=False, debug=False):
-    """LM with the Gauss-Newton approximation to the Hessian.
-
-    The full-Hessian variant ``_newton_lm_round`` builds ``H = jax.hessian(loss)``,
-    which materialises an O(per-SN forward × N_lat^2) intermediate during
-    autodiff. This GN variant builds ``H = J^T J + H_prior`` where ``J`` is the
-    Jacobian of the residuals and ``H_prior`` is the Hessian of the prior
-    potential alone (no model intermediates). Memory drops by a factor of ~N_lat
-    on the dominant intermediate; compute halves (one autodiff pass instead of
-    two). Mathematically valid at a stationary point of a Gaussian likelihood;
-    see Approach in plan.
-
-    Args:
-        residuals_fn: callable ``p -> 1-D residuals vector r(p)``. Defines the
-            data-likelihood part of the loss as ``0.5 * sum(r^2)``.
-        prior_potential_fn: callable ``p -> scalar``, the prior contribution
-            to ``-log p(z)`` (including bijector log-det).
-
-    Other args match ``_newton_lm_round``.
-    """
-
-    ls_alphas = jnp.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0])
-
-    def loss_total(p):
-        r = residuals_fn(p)
-        return 0.5 * jnp.sum(r * r) + prior_potential_fn(p)
-
-    def newton_step(carry, _):
-        p, lam, f_val = carry
-        g = jax.grad(loss_total)(p)
-        J = _jacfwd_lax_map(residuals_fn, p)
-        H_lik = J.T @ J
-        H_prior = jax.hessian(prior_potential_fn)(p)
-        H = H_lik + H_prior
-
-        diag_H = jnp.maximum(jnp.abs(jnp.diag(H)), 1e-6)
-        H_reg = H + lam * jnp.diag(diag_H)
-
-        d = -jnp.linalg.solve(H_reg, g)
-        slope = jnp.dot(g, d)
-
-        is_bad = (slope >= -1e-12) | jnp.any(jnp.isnan(d))
-        abs_diag = jnp.abs(jnp.diag(H))
-        scale_guess = 1.0 / (jnp.mean(abs_diag) + 1e-8)
-        d = jnp.where(is_bad, -g * scale_guess, d)
-
-        if use_linesearch:
-            def eval_alpha(alpha):
-                tp = jnp.clip(p + alpha * d, bounds_lo, bounds_hi)
-                return loss_total(tp)
-            f_trials = jax.vmap(eval_alpha)(ls_alphas)
-            best_idx = jnp.argmin(f_trials)
-            best_alpha = ls_alphas[best_idx]
-            trial_p = jnp.clip(p + best_alpha * d, bounds_lo, bounds_hi)
-            f_trial = f_trials[best_idx]
-        else:
-            trial_p = jnp.clip(p + d, bounds_lo, bounds_hi)
-            f_trial = loss_total(trial_p)
-
-        s = trial_p - p
-
-        actual = f_val - f_trial
-        predicted = -(jnp.dot(g, s) + 0.5 * s @ H @ s)
-        predicted = jnp.maximum(predicted, 1e-30)
-        rho = actual / predicted
-
-        accept = rho > 0.01
-        p_out = jnp.where(accept, trial_p, p)
-        f_out = jnp.where(accept, f_trial, f_val)
-
-        lam_out = jnp.where(
-            rho > 0.75, lam * 0.3,
-            jnp.where(rho > 0.25, lam, lam * 3.0),
-        )
-        lam_out = jnp.clip(lam_out, 1e-8, 1e8)
-
-        if debug:
-            diagnostics = {
-                'f_val': f_out,
-                'lam': lam_out,
-                'accept': accept,
-                'rho': rho,
-                'grad_norm': jnp.max(jnp.abs(g)),
-            }
-        else:
-            diagnostics = None
-        return (p_out, lam_out, f_out), diagnostics
-
-    f_init = loss_total(init_p)
-    (p_final, _, f_final), diagnostics = jax.lax.scan(
-        newton_step, (init_p, lam_init, f_init), None, length=maxiter
-    )
-    g_final = jax.grad(loss_total)(p_final)
-    grad_norm = jnp.max(jnp.abs(g_final))
-    return p_final, f_final, grad_norm, diagnostics
-
-
-def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_template,
-                     maxiter=30, lam_init=1e-3, use_linesearch=True):
-    """Like ``run_lm_laplace`` but uses Gauss-Newton.
-
-    Args:
-        predict_fn: callable ``z_constrained_dict -> (flux, scale, data)`` that
-            runs the model and returns the predicted obs, the per-obs noise
-            scale, and the observed data. Built via numpyro handlers in
-            ``bayesn_model.make_predict_fn``.
-        prior_potential_fn: callable ``z_unc_dict -> scalar`` giving the
-            negative log prior in unconstrained space (with bijector log-det).
-            Built in ``bayesn_model.make_prior_potential_fn``.
-
-    Note: the residuals function is constructed internally as
-    ``r(p) = ((data - flux) / scale).ravel()``.
-    """
-    flat0, unflatten = ravel_pytree(z_template)
-    bounds_hi = jnp.full_like(flat0, jnp.inf)
-    bounds_lo = -bounds_hi
-
     def residuals_fn(p):
-        z = unflatten(p)
-        flux, scale, data, mask = predict_fn(z)
+        flux, scale, data, mask = predict_fn(unflatten(p))
         return ((data - flux) / scale * mask).ravel()
-
-    def prior_pot_flat(p):
-        return prior_potential_fn(unflatten(p))
-
-    p_final, _, _, diag = _newton_lm_round_gn(
-        flat0, bounds_lo, bounds_hi, residuals_fn, prior_pot_flat,
-        maxiter=maxiter, lam_init=lam_init,
-        use_linesearch=use_linesearch, debug=True,
-    )
-    z_unc_dict = unflatten(p_final)
-    median_dict = postprocess_fn_sn(z_unc_dict)
-    return median_dict, diag['f_val'], z_unc_dict
+    return residuals_fn
 
 
-def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
-                             loss_total_fn, maxiter,
-                             lam_init=1e-3, use_linesearch=False, debug=False,
-                             cg_maxiter=None):
-    """LM with Hessian-vector products and conjugate-gradient linsolve.
+def _gn_hessian(residuals_fn, prior_fn, p):
+    """
+    Gauss-Newton Hessian H = J^T J + H_prior at p, where J is the Jacobian of the
+    residuals and H_prior is the Hessian of the prior potential
+    """
+    J = _jacfwd_lax_map(residuals_fn, p)
+    return J.T @ J + jax.hessian(prior_fn)(p)
 
-    Avoids materialising J or H entirely. Each LM step queries Hv via
-    ``jax.jvp(jax.grad(loss))`` (exact Hessian, no GN approximation) and
-    solves ``(H + lam*I) d = -g`` iteratively with CG. Memory drops to
-    per-SN-fwd × O(1) (no autodiff vmap multiplier). Uses Levenberg
-    damping ``lam*I`` rather than Marquardt's ``lam*diag(H)`` because
-    diag(H) would itself require d Hv evaluations to extract.
+
+def _lm_minimise(init_p, bounds_lo, bounds_hi, residuals_fn, prior_fn, maxiter,
+                 lam_init=1e-3, use_linesearch=False):
+    """
+    Gauss-Newton Levenberg-Marquardt minimisation of 0.5 * sum(residuals^2) + prior
+
+    Damped-Newton loop with gain-ratio acceptance and lambda control. Each step forms
+    the Gauss-Newton Hessian H = J^T J + H_prior and solves (H + lam * diag(H)) d = -g,
+    which avoids the full model Hessian and stays positive-definite.
+
+    Parameters
+    ----------
+    init_p: array-like
+        1D initial parameter vector in unconstrained space
+    bounds_lo, bounds_hi: array-like
+        Parameter bounds, same shape as init_p; use -inf/+inf in unconstrained space
+    residuals_fn: callable
+        Residual vector r(p); the data term of the loss is 0.5 * sum(r^2)
+    prior_fn: callable
+        Prior potential p -> scalar, -log p(z) including bijector log-det
+    maxiter: int
+        Number of LM steps, the length of the lax.scan
+    lam_init: float
+        Initial LM damping parameter
+    use_linesearch: Boolean
+        If True, try multiple step sizes along the Newton direction
+
+    Returns
+    -------
+
+    p_final: array-like
+        Unconstrained minimiser
+    diagnostics: dict
+        Per-iteration f_val, lam, accept, rho and grad_norm
     """
     ls_alphas = jnp.array([0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0])
-    grad_fn = jax.grad(loss_total_fn)
-    if cg_maxiter is None:
-        cg_maxiter = 2 * init_p.shape[0]
+
+    def loss_fn(p):
+        r = residuals_fn(p)
+        return 0.5 * jnp.sum(r * r) + prior_fn(p)
+
+    grad_fn = jax.grad(loss_fn)
 
     def newton_step(carry, _):
         p, lam, f_val = carry
         g = grad_fn(p)
+        H = _gn_hessian(residuals_fn, prior_fn, p)
 
-        def Hv_damped(v):
-            _, Hv = jax.jvp(grad_fn, (p,), (v,))
-            return Hv + lam * v
-
-        d, _ = jsla.cg(Hv_damped, -g, maxiter=cg_maxiter)
-
-        slope = jnp.dot(g, d)
-        is_bad = (slope >= -1e-12) | jnp.any(jnp.isnan(d))
-        # Fallback: gradient descent direction; line search picks magnitude.
-        d = jnp.where(is_bad, -g, d)
+        diag_H = jnp.maximum(jnp.abs(jnp.diag(H)), 1e-6)
+        d = -jnp.linalg.solve(H + lam * jnp.diag(diag_H), g)
+        is_bad = (jnp.dot(g, d) >= -1e-12) | jnp.any(jnp.isnan(d))
+        scale_guess = 1.0 / (jnp.mean(jnp.abs(jnp.diag(H))) + 1e-8)
+        d = jnp.where(is_bad, -g * scale_guess, d)
 
         if use_linesearch:
             def eval_alpha(alpha):
                 tp = jnp.clip(p + alpha * d, bounds_lo, bounds_hi)
-                return loss_total_fn(tp)
+                return loss_fn(tp)
             f_trials = jax.vmap(eval_alpha)(ls_alphas)
             best_idx = jnp.argmin(f_trials)
             best_alpha = ls_alphas[best_idx]
@@ -390,14 +114,12 @@ def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
             f_trial = f_trials[best_idx]
         else:
             trial_p = jnp.clip(p + d, bounds_lo, bounds_hi)
-            f_trial = loss_total_fn(trial_p)
+            f_trial = loss_fn(trial_p)
 
         s = trial_p - p
 
-        # Predicted reduction needs s^T H s; compute via one extra HVP.
-        _, Hs = jax.jvp(grad_fn, (p,), (s,))
         actual = f_val - f_trial
-        predicted = -(jnp.dot(g, s) + 0.5 * jnp.dot(s, Hs))
+        predicted = -(jnp.dot(g, s) + 0.5 * s @ H @ s)
         predicted = jnp.maximum(predicted, 1e-30)
         rho = actual / predicted
 
@@ -411,97 +133,86 @@ def _newton_lm_round_hvp_cg(init_p, bounds_lo, bounds_hi,
         )
         lam_out = jnp.clip(lam_out, 1e-8, 1e8)
 
-        if debug:
-            diagnostics = {
-                'f_val': f_out,
-                'lam': lam_out,
-                'accept': accept,
-                'rho': rho,
-                'grad_norm': jnp.max(jnp.abs(g)),
-            }
-        else:
-            diagnostics = None
+        diagnostics = {'f_val': f_out, 'lam': lam_out, 'accept': accept,
+                       'rho': rho, 'grad_norm': jnp.max(jnp.abs(g))}
         return (p_out, lam_out, f_out), diagnostics
 
-    f_init = loss_total_fn(init_p)
-    (p_final, _, f_final), diagnostics = jax.lax.scan(
+    f_init = loss_fn(init_p)
+    (p_final, _, _), diagnostics = jax.lax.scan(
         newton_step, (init_p, lam_init, f_init), None, length=maxiter
     )
-    g_final = grad_fn(p_final)
-    grad_norm = jnp.max(jnp.abs(g_final))
-    return p_final, f_final, grad_norm, diagnostics
+    return p_final, diagnostics
 
 
-def run_lm_laplace_hvp_cg(predict_fn, prior_potential_fn, postprocess_fn_sn,
-                           z_template, maxiter=30, lam_init=1e-3,
-                           use_linesearch=True, cg_maxiter=None):
-    """HVP-CG variant of run_lm_laplace_gn. Uses exact Hessian (no GN approx)."""
+def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_template,
+                     maxiter=30, lam_init=1e-3, use_linesearch=True):
+    """
+    Find the MAP using Gauss-Newton Levenberg-Marquardt
+
+    Parameters
+    ----------
+    predict_fn: callable
+        Maps a constrained parameter dict to (flux, scale, data, mask) by running
+        the model, giving the predicted photometry, per-observation noise scale,
+        observed data and validity mask
+    prior_potential_fn: callable
+        Maps an unconstrained parameter dict to the negative log prior in
+        unconstrained space, including bijector log-det
+    postprocess_fn_sn: callable
+        Maps the unconstrained MAP back to constrained space via the model bijectors
+    z_template: dict
+        Unconstrained initial values keyed by sample-site name; shapes and dtypes
+        define the flat vector layout
+    maxiter: int
+        LM iteration budget
+    lam_init: float
+        Initial LM damping
+    use_linesearch: Boolean
+        If True, perform a line search along the Newton direction at every step
+
+    Returns
+    -------
+
+    median_dict: dict
+        Constrained MAP, same keys/shapes as AutoLaplaceApproximation.median
+    losses: array-like
+        Loss at each iteration, shape (maxiter,)
+    z_unc_dict: dict
+        Unconstrained MAP in the same layout as z_template
+    """
     flat0, unflatten = ravel_pytree(z_template)
     bounds_hi = jnp.full_like(flat0, jnp.inf)
     bounds_lo = -bounds_hi
 
-    def residuals_fn(p):
-        z = unflatten(p)
-        flux, scale, data, mask = predict_fn(z)
-        return ((data - flux) / scale * mask).ravel()
+    residuals_fn = _make_residuals_fn(predict_fn, unflatten)
 
-    def loss_total_fn(p):
-        r = residuals_fn(p)
-        return 0.5 * jnp.sum(r * r) + prior_potential_fn(unflatten(p))
+    def prior_fn(p):
+        return prior_potential_fn(unflatten(p))
 
-    p_final, _, _, diag = _newton_lm_round_hvp_cg(
-        flat0, bounds_lo, bounds_hi, loss_total_fn,
-        maxiter=maxiter, lam_init=lam_init,
-        use_linesearch=use_linesearch, debug=True,
-        cg_maxiter=cg_maxiter,
+    p_final, diag = _lm_minimise(
+        flat0, bounds_lo, bounds_hi, residuals_fn, prior_fn, maxiter,
+        lam_init=lam_init, use_linesearch=use_linesearch,
     )
     z_unc_dict = unflatten(p_final)
     median_dict = postprocess_fn_sn(z_unc_dict)
     return median_dict, diag['f_val'], z_unc_dict
 
 
-def compute_hvp_scale_tril(predict_fn, prior_potential_fn, z_template):
-    """Build the exact Hessian via ``_hessian_lax_map``, then chol(inv(H)).
-    Memory matches that of one HVP. Same return shape as
-    ``compute_gn_scale_tril``.
-    """
-    flat0, unflatten = ravel_pytree(z_template)
-
-    def residuals_fn(p):
-        z = unflatten(p)
-        flux, scale, data, mask = predict_fn(z)
-        return ((data - flux) / scale * mask).ravel()
-
-    def loss_total_fn(p):
-        r = residuals_fn(p)
-        return 0.5 * jnp.sum(r * r) + prior_potential_fn(unflatten(p))
-
-    H = _hessian_lax_map(loss_total_fn, flat0)
-    cov = jnp.linalg.inv(H)
-    return jnp.linalg.cholesky(cov)
-
-
 def compute_gn_scale_tril(predict_fn, prior_potential_fn, z_template):
-    """Cholesky of inv(J^T J + H_prior) at z_template.
+    """
+    Cholesky factor of inv(J^T J + H_prior) at z_template
 
-    Memory-cheap GN replacement for ``compute_laplace_scale_tril``. Same
-    return shape and semantics (Cholesky factor of the Laplace posterior
-    covariance in unconstrained latent space) but avoids the
-    ``jax.hessian`` autodiff blowup over the model.
+    Gauss-Newton estimate of the Laplace posterior covariance in unconstrained
+    latent space (returned as its lower-Cholesky factor), avoiding the full model
+    Hessian.
     """
     flat0, unflatten = ravel_pytree(z_template)
 
-    def residuals_fn(p):
-        z = unflatten(p)
-        flux, scale, data, mask = predict_fn(z)
-        return ((data - flux) / scale * mask).ravel()
+    residuals_fn = _make_residuals_fn(predict_fn, unflatten)
 
-    def prior_pot_flat(p):
+    def prior_fn(p):
         return prior_potential_fn(unflatten(p))
 
-    J = _jacfwd_lax_map(residuals_fn, flat0)
-    H_lik = J.T @ J
-    H_prior = jax.hessian(prior_pot_flat)(flat0)
-    H = H_lik + H_prior
+    H = _gn_hessian(residuals_fn, prior_fn, flat0)
     cov = jnp.linalg.inv(H)
     return jnp.linalg.cholesky(cov)

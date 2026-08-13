@@ -22,51 +22,10 @@ import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr, spline_coeffs_irr_vec
 from .bayesn_io import write_snana_lcfile
-from .lm_optim import (
-    run_lm_laplace,
-    compute_laplace_scale_tril,
-    run_lm_laplace_gn,
-    compute_gn_scale_tril,
-    run_lm_laplace_hvp_cg,
-    compute_hvp_scale_tril,
-)
+from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 import functools
 from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
-
-
-def _predict(model, args, kwargs, z_unc):
-    """Run ``model`` with unconstrained latents ``z_unc`` substituted in and
-    return the obs-site distribution loc (predicted flux), scale, observed
-    value, and a 0/1 mask (1 for valid obs, 0 for padded/masked). Mirrors
-    numpyro.infer.util.potential_energy's substitute pattern.
-    """
-    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
-    substituted = substitute(model, substitute_fn=sub_fn)
-    with trace() as tr:
-        substituted(*args, **kwargs)
-    obs_site = tr['obs']
-    obs_fn = obs_site['fn']
-    if isinstance(obs_fn, dist.MaskedDistribution):
-        base = obs_fn.base_dist
-        mask = obs_fn._mask.astype(base.loc.dtype)
-    else:
-        base = obs_fn
-        mask = jnp.ones_like(base.loc)
-    return base.loc, base.scale, obs_site['value'], mask
-
-
-def _prior_pot(model, args, kwargs, z_unc):
-    """Prior contribution to ``-log p(z)`` in unconstrained space (incl.
-    bijector log-det). ``model`` is called with ``prior_only=True`` so it
-    returns after sampling the latent sites and skips the obs evaluation.
-    """
-    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
-    substituted = substitute(model, substitute_fn=sub_fn)
-    log_joint, _ = log_density(
-        substituted, args, {**kwargs, 'prior_only': True}, {}
-    )
-    return -log_joint
 import pickle
 import pandas as pd
 import jax
@@ -101,6 +60,41 @@ jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
 # jax.config.update('jax_platform_name', 'cpu')  # Forces CPU
+
+
+def _predict(model, args, kwargs, z_unc):
+    """
+    Run model at unconstrained latents z_unc and return the obs-site distribution loc
+    (predicted flux), scale, observed value, and a 0/1 mask (1 for valid observations,
+    0 for padded/masked). The Gauss-Newton solver builds its residuals from these.
+    """
+    # map the unconstrained latents z_unc into the model's constrained parameters
+    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+    substituted = substitute(model, substitute_fn=sub_fn)
+    with trace() as tr:  # record every sample site so the obs site can be read back out
+        substituted(*args, **kwargs)
+    obs_site = tr['obs']
+    obs_fn = obs_site['fn']
+    # obs is wrapped in a MaskedDistribution when padded epochs are masked; unwrap it
+    if isinstance(obs_fn, dist.MaskedDistribution):
+        base = obs_fn.base_dist
+        mask = obs_fn._mask.astype(base.loc.dtype)
+    else:
+        base = obs_fn
+        mask = jnp.ones_like(base.loc)
+    return base.loc, base.scale, obs_site['value'], mask
+
+
+def _prior_pot(model, args, kwargs, z_unc):
+    """
+    Prior contribution to -log p(z) in unconstrained space, including the bijector
+    log-det. Used by the Gauss-Newton solver for the prior parts of H and the gradient.
+    """
+    sub_fn = functools.partial(_unconstrain_reparam, z_unc)
+    substituted = substitute(model, substitute_fn=sub_fn)
+    # prior_only=True makes the model skip the likelihood, so log_density is the prior alone
+    log_joint, _ = log_density(substituted, args, {**kwargs, 'prior_only': True}, {})
+    return -log_joint
 
 
 class SEDmodel(object):
@@ -1034,7 +1028,7 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0, prior_only=False):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -1055,6 +1049,10 @@ class SEDmodel(object):
             If True, AV will be fixed to value specified by theta_AV. Defaults to False.
         AV_val: float or array-like, optional
             Value to fix AV to, if fix_AV=True. Defaults to 0
+        prior_only: Boolean, optional
+            If True, return after sampling all latents and skip the data-likelihood. Used by
+            _prior_pot to compute the prior log-density without running the flux computation.
+            Defaults to False.
 
         Returns
         -------
@@ -1084,6 +1082,8 @@ class SEDmodel(object):
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            if prior_only:
+                return
             flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):
@@ -1101,11 +1101,10 @@ class SEDmodel(object):
             Data to fit, from output of process_dataset
         weights: array-like
             Band-weights to calculate photometry
-        prior_only: bool, optional
-            If True, return after sampling all latents and skip the data-likelihood
-            (``get_flux_batch`` and the obs sample). Used by ``_prior_pot`` to
-            compute the prior log-density without the cost or memory footprint
-            of running the model's flux computation.
+        prior_only: Boolean, optional
+            If True, return after sampling all latents and skip the data-likelihood, i.e. the
+            get_flux_batch call and the obs sample. Used by _prior_pot to compute the prior
+            log-density without running the model's flux computation. Defaults to False.
 
         """
         sample_size = obs.shape[-1]
@@ -1851,9 +1850,6 @@ class SEDmodel(object):
         args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
         args['zltn_particles'] = args.get('zltn_particles', 10)
         args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
-        args['lm_solver'] = args.get('lm_solver', 'gn').lower()
-        if args['lm_solver'] not in {'gn', 'hvp_cg'}:
-            raise ValueError(f"lm_solver must be 'gn' or 'hvp_cg', got {args['lm_solver']!r}")
         args['batch_size'] = args.get('batch_size', None)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
@@ -2077,36 +2073,30 @@ class SEDmodel(object):
 
                 warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
-                    # Stage 1: LM on the noeps model finds a stable MAP for
-                    # (AV, theta, tmax, Ds) using the proper Exponential prior.
+                    model_args = (data[..., None], weights[None, ...])
+                    # Stage 1: Gauss-Newton LM MAP for (AV, theta, tmax, Ds) under the Exponential prior
                     mi = self._lm_model_info
-                    pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...])
-                    post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...])
-                    # Per-SN init: prior medians for AV/theta/tmax (data-independent,
-                    # constant in unconstrained space) and this SN's muhat for Ds.
+                    post_fn_noeps = mi.postprocess_fn(*model_args)
+                    predict_fn_noeps = lambda z: _predict(self.fit_model_globalRV_noeps, model_args, {}, z)
+                    prior_pot_fn_noeps = lambda z: _prior_pot(self.fit_model_globalRV_noeps, model_args, {}, z)
+                    # Per-SN init: prior medians for AV/theta/tmax, this SN's muhat for Ds
                     z_template_s1 = {
                         'AV': jnp.array([jnp.log(self.tauA * jnp.log(2.0))]),
                         'Ds': data[-3, 0:1],
                         'theta': jnp.array([0.0]),
                         'tmax': jnp.array([0.0]),
                     }
-                    noeps_median, _, z_unc_noeps = run_lm_laplace(
-                        pot_fn_noeps, post_fn_noeps, z_template_s1,
+                    noeps_median, _, z_unc_noeps = run_lm_laplace_gn(
+                        predict_fn_noeps, prior_pot_fn_noeps, post_fn_noeps, z_template_s1,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
                     )
-                    # Stage 2: Gauss-Newton LM on the full VI model from
-                    # (Stage1 MAP, eps_tform=0). GN replaces jax.hessian's
-                    # full Hessian with J^T J from a single Jacobian, avoiding
-                    # the autodiff blowup that OOMs on GPU. A soft Gaussian
-                    # prior on tmax (centred at Stage 1's MAP) damps tmax
-                    # drift via tmax-eps coupling.
+                    # Stage 2: Gauss-Newton LM on the full VI model, warm-started from the Stage 1 MAP
                     vi_mi = self._vi_model_info
-                    post_fn_vi = vi_mi.postprocess_fn(data[..., None], weights[None, ...])
-                    vi_args = (data[..., None], weights[None, ...])
-                    predict_fn = lambda z: _predict(self.fit_model_globalRV_vi, vi_args, {}, z)
-                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_globalRV_vi, vi_args, {}, z)
+                    post_fn_vi = vi_mi.postprocess_fn(*model_args)
+                    predict_fn = lambda z: _predict(self.fit_model_globalRV_vi, model_args, {}, z)
+                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_globalRV_vi, model_args, {}, z)
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
@@ -2118,24 +2108,14 @@ class SEDmodel(object):
                             return prior_pot_fn(z) + 0.5 * jnp.sum(delta * delta) / tmax_var
                     else:
                         prior_pot_anchored = prior_pot_fn
-                    if args['lm_solver'] == 'gn':
-                        laplace_median, _, z_unc_vi = run_lm_laplace_gn(
-                            predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
-                            maxiter=args['lm_maxiter'],
-                            lam_init=args['lm_lam_init'],
-                            use_linesearch=args['lm_use_linesearch'],
-                        )
-                        warm_scale_tril = compute_gn_scale_tril(
-                            predict_fn, prior_pot_anchored, z_unc_vi)
-                    else:  # hvp_cg
-                        laplace_median, _, z_unc_vi = run_lm_laplace_hvp_cg(
-                            predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
-                            maxiter=args['lm_maxiter'],
-                            lam_init=args['lm_lam_init'],
-                            use_linesearch=args['lm_use_linesearch'],
-                        )
-                        warm_scale_tril = compute_hvp_scale_tril(
-                            predict_fn, prior_pot_anchored, z_unc_vi)
+                    laplace_median, _, z_unc_vi = run_lm_laplace_gn(
+                        predict_fn, prior_pot_anchored, post_fn_vi, z_start_vi,
+                        maxiter=args['lm_maxiter'],
+                        lam_init=args['lm_lam_init'],
+                        use_linesearch=args['lm_use_linesearch'],
+                    )
+                    warm_scale_tril = compute_gn_scale_tril(
+                        predict_fn, prior_pot_anchored, z_unc_vi)
                 else:
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
@@ -2144,7 +2124,7 @@ class SEDmodel(object):
                     params, losses = svi_result.params, svi_result.losses
                     laplace_median = laplace_guide.median(params)
 
-                # Initialize the ZLTN guide loc from the Laplace MAP.
+                # Initialise the ZLTN guide loc from the Laplace MAP
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
                 if 'eps_tform' not in new_init_dict:
                     new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
