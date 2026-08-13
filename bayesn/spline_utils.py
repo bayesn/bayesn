@@ -66,7 +66,7 @@ def cartesian_prod(x, y):
 	n_y = len(y)
 	return np.array([np.repeat(x,n_y),np.tile(y,n_x)]).T
 
-def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
+def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True, extrap=0):
 	"""
 	Compute a matrix of spline coefficients.
 
@@ -86,9 +86,12 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 		from the output of ``invKD_irr``.
 	allow_extrap : bool
 		Flag permitting extrapolation. If True, the returned matrix will be
-		configured to extrapolate linearly beyond the outer knots. If False,
+		configured to extrapolate beyond the outer knots. If False,
 		values which fall out of bounds will raise ValueError.
-	
+	extrap : int
+		Extrapolation mode beyond the outer knots: 0 linear, 1 smooth reversion
+		to zero, 2 smooth flattening. Defaults to 0.
+
 	Returns
 	-------
 	J : :py:class:`numpy.array`
@@ -109,23 +112,51 @@ def spline_coeffs_irr(x_int, x, invkd, allow_extrap=True):
 	for i in range(n_x_int):
 		x_now = x_int[i]
 		if x_now > max(x):
-			h = x[-1] - x[-2]
-			a = (x[-1] - x_now)/h
-			b = 1 - a
-			f = (x_now - x[-1])*h/6.0
+			if extrap == 0:
+				h = x[-1] - x[-2]
+				a = (x[-1] - x_now)/h
+				b = 1 - a
+				f = (x_now - x[-1])*h/6.0
 
-			X[i,-2] = a
-			X[i,-1] = b
-			X[i,:] = X[i,:] + f*invkd[-2,:]
+				X[i,-2] = a
+				X[i,-1] = b
+				X[i,:] = X[i,:] + f*invkd[-2,:]
+			else:
+				xu = 2*x[-1] - x[-2]  # Hermite transition ends one knot spacing out
+				if x_now < xu:
+					h = x[-1] - x[-2]
+					t = (x_now - x[-1])/h
+					h0 = 1.0 if extrap == 2 else 2*t**3 - 3*t**2 + 1
+					h1 = t**3 - 2*t**2 + t
+
+					X[i,-1] = h0 + h1
+					X[i,-2] = -h1
+					X[i,:] = X[i,:] + h1*h*h/6.0*invkd[-2,:]
+				elif extrap == 2:
+					X[i,-1] = 1.0
 		elif x_now < min(x):
-			h = x[1] - x[0]
-			b = (x_now - x[0])/h
-			a = 1 - b
-			f = (x_now - x[0])*h/6.0
+			if extrap == 0:
+				h = x[1] - x[0]
+				b = (x_now - x[0])/h
+				a = 1 - b
+				f = (x_now - x[0])*h/6.0
 
-			X[i,0] = a
-			X[i,1] = b
-			X[i,:] = X[i,:] - f*invkd[1,:]
+				X[i,0] = a
+				X[i,1] = b
+				X[i,:] = X[i,:] - f*invkd[1,:]
+			else:
+				xl = 2*x[0] - x[1]  # Hermite transition ends one knot spacing out
+				if x_now > xl:
+					h = x[1] - x[0]
+					t = (x_now - xl)/h
+					h0 = 1.0 if extrap == 2 else -2*t**3 + 3*t**2
+					h1 = t**3 - t**2
+
+					X[i,0] = h0 - h1
+					X[i,1] = h1
+					X[i,:] = X[i,:] + h1*h*h/6.0*invkd[1,:]
+				elif extrap == 2:
+					X[i,0] = 1.0
 		else:
 			q = np.where(x[0:-1] <= x_now)[0][-1]
 			h = x[q+1] - x[q]

@@ -262,6 +262,7 @@ class SEDmodel(object):
         self.z_u_grid = None      # CDF probability levels of the host photo-z quantiles
         self.z_icdf_grid = None   # (N_sn, len(z_u_grid)) per-SN z at those levels, or None
         self.photoz = False       # gate phase extrapolation (only needed when z floats)
+        self._warp_modes = (0, 0)  # (wave, phase) extrapolation modes the warp bases are built for
         self.RV_MW = device_put(jnp.array(3.1))
         self.sigma_pec = device_put(jnp.array(150 / 3e5))
         self.sn_list = None
@@ -581,11 +582,11 @@ class SEDmodel(object):
         int_locs = flat_locs.astype(np.int32)
         remainders = flat_locs - int_locs
 
-        self.band_interpolate_weights = np.asarray(self.band_interpolate_weights)[
+        band_interpolate_weights = np.asarray(self.band_interpolate_weights)[
             np.asarray(self.used_band_inds), ...]
 
-        start = self.band_interpolate_weights[..., int_locs]
-        end = self.band_interpolate_weights[..., int_locs + 1]
+        start = band_interpolate_weights[..., int_locs]
+        end = band_interpolate_weights[..., int_locs + 1]
 
         flat_result = remainders * end + (1 - remainders) * start
         weights = flat_result.reshape((-1,) + locs.shape).transpose(1, 2, 0)
@@ -605,7 +606,7 @@ class SEDmodel(object):
         # We need an extra term of 1 + z from the filter contraction.
         weights /= (1 + redshifts)[:, None, None]
 
-        return weights
+        return device_put(weights)  # jax array so it can be indexed under tracing in single-object fits
 
     def _calculate_band_weights_jax(self, redshifts):
         """
@@ -1010,7 +1011,7 @@ class SEDmodel(object):
         return model_mag
 
     @staticmethod
-    def spline_coeffs_irr_step(x_now, x, invkd):
+    def spline_coeffs_irr_step(x_now, x, invkd, extrap=0):
         """
         Vectorized version of cubic spline coefficient calculator found in spline_utils
 
@@ -1023,6 +1024,9 @@ class SEDmodel(object):
         invkd: array-like
             Precomputed matrix for generating second derivatives. Can be obtained
             from the output of ``spline_utils.invKD_irr``.
+        extrap: int
+            Extrapolation mode beyond the outer knots: 0 linear, 1 smooth reversion
+            to zero, 2 smooth flattening. Defaults to 0.
 
         Returns
         -------
@@ -1035,23 +1039,50 @@ class SEDmodel(object):
         down_extrap = x_now < x[0]
         interp = 1 - up_extrap - down_extrap
 
-        h = x[-1] - x[-2]
-        a = (x[-1] - x_now) / h
-        b = 1 - a
-        f = (x_now - x[-1]) * h / 6.0
+        if extrap == 0:
+            h = x[-1] - x[-2]
+            a = (x[-1] - x_now) / h
+            b = 1 - a
+            f = (x_now - x[-1]) * h / 6.0
 
-        X = X.at[-2].set(X[-2] + a * up_extrap)
-        X = X.at[-1].set(X[-1] + b * up_extrap)
-        X = X.at[:].set(X[:] + f * invkd[-2, :] * up_extrap)
+            X = X.at[-2].set(X[-2] + a * up_extrap)
+            X = X.at[-1].set(X[-1] + b * up_extrap)
+            X = X.at[:].set(X[:] + f * invkd[-2, :] * up_extrap)
 
-        h = x[1] - x[0]
-        b = (x_now - x[0]) / h
-        a = 1 - b
-        f = (x_now - x[0]) * h / 6.0
+            h = x[1] - x[0]
+            b = (x_now - x[0]) / h
+            a = 1 - b
+            f = (x_now - x[0]) * h / 6.0
 
-        X = X.at[0].set(X[0] + a * down_extrap)
-        X = X.at[1].set(X[1] + b * down_extrap)
-        X = X.at[:].set(X[:] - f * invkd[1, :] * down_extrap)
+            X = X.at[0].set(X[0] + a * down_extrap)
+            X = X.at[1].set(X[1] + b * down_extrap)
+            X = X.at[:].set(X[:] - f * invkd[1, :] * down_extrap)
+        else:
+            xu = 2 * x[-1] - x[-2]  # Hermite transition ends one knot spacing out
+            h = x[-1] - x[-2]
+            t = (x_now - x[-1]) / h
+            h0 = 1.0 if extrap == 2 else 2 * t ** 3 - 3 * t ** 2 + 1
+            h1 = t ** 3 - 2 * t ** 2 + t
+            trans = up_extrap & (x_now < xu)
+
+            X = X.at[-1].set(X[-1] + (h0 + h1) * trans)
+            X = X.at[-2].set(X[-2] - h1 * trans)
+            X = X.at[:].set(X[:] + h1 * h * h / 6.0 * invkd[-2, :] * trans)
+            if extrap == 2:
+                X = X.at[-1].set(X[-1] + (up_extrap & (x_now >= xu)))
+
+            xl = 2 * x[0] - x[1]  # Hermite transition ends one knot spacing out
+            h = x[1] - x[0]
+            t = (x_now - xl) / h
+            h0 = 1.0 if extrap == 2 else -2 * t ** 3 + 3 * t ** 2
+            h1 = t ** 3 - t ** 2
+            trans = down_extrap & (x_now > xl)
+
+            X = X.at[0].set(X[0] + (h0 - h1) * trans)
+            X = X.at[1].set(X[1] + h1 * trans)
+            X = X.at[:].set(X[:] + h1 * h * h / 6.0 * invkd[1, :] * trans)
+            if extrap == 2:
+                X = X.at[0].set(X[0] + (down_extrap & (x_now <= xl)))
 
         q = jnp.argmax(x_now < x) - 1
         h = x[q + 1] - x[q]
@@ -1065,6 +1096,20 @@ class SEDmodel(object):
         X = X.at[:].set(X[:] + c * invkd[q, :] * interp + d * invkd[q + 1, :] * interp)
 
         return X
+
+    def _set_warp_extrap(self, wave_extrap=1, phase_extrap=2):
+        """
+        Rebuild the warp bases in the requested extrapolation mode for a photo-z fit, where the
+        warp is extended past the knots as z floats. wave_extrap sets the behaviour past l_knots
+        and phase_extrap past tau_knots (0 linear, 1 revert to zero, 2 flatten). Fixed-z fits keep
+        the default linear extrapolation.
+        """
+        modes = (wave_extrap, phase_extrap) if self.photoz else (0, 0)
+        if modes == self._warp_modes:
+            return
+        self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, invKD_irr(self.l_knots), extrap=modes[0]))
+        self.J_t_map = jax.jit(jax.vmap(functools.partial(self.spline_coeffs_irr_step, extrap=modes[1]), in_axes=(0, None, None)))
+        self._warp_modes = modes
 
     def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
@@ -2128,6 +2173,9 @@ class SEDmodel(object):
         args['lm_maxiter'] = args.get('lm_maxiter', 30)
         args['lm_lam_init'] = args.get('lm_lam_init', 1.0)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
+        args['photoz'] = args.get('photoz', False)
+        args['wave_extrap'] = args.get('wave_extrap', 1)
+        args['phase_extrap'] = args.get('phase_extrap', 2)
         args['num_zltn_iter'] = args.get('num_zltn_iter', 4000 if args['photoz'] else 1500)
         args['zltn_lr'] = args.get('zltn_lr', 0.02)
         args['zltn_lr_final'] = args.get('zltn_lr_final', 0.002)
@@ -2148,7 +2196,6 @@ class SEDmodel(object):
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
         args['sim_prescale'] = args.get('sim_prescale', 1)
-        args['photoz'] = args.get('photoz', False)
         args['peakmjd_key'] = args.get('peakmjd_key', 'PEAKMJD')
         args['jobsplit'] = args.get('jobsplit')
         args['save_fit_errors'] = args.get('save_fit_errors', False)
@@ -2285,6 +2332,7 @@ class SEDmodel(object):
                                step_size=0.1)
         elif args['mode'].lower() == 'fitting':
             self.photoz = args['photoz']
+            self._set_warp_extrap(args['wave_extrap'], args['phase_extrap'])
             if args['photoz']:
                 nuts_kernel = NUTS(self.fit_model_photoz, adapt_step_size=True, init_strategy=init_strategy,
                                    max_tree_depth=10)
@@ -2540,7 +2588,8 @@ class SEDmodel(object):
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
                       drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False, sigma_R=False,
-                      mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel'):
+                      mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel',
+                      wave_extrap=1, phase_extrap=2):
         """
         Method to fit light curve contained in SNANA-format text file using BayeSN model
 
@@ -2605,13 +2654,15 @@ class SEDmodel(object):
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
                                      fix_tmax=fix_tmax, fix_theta=fix_theta, fix_AV=fix_AV, RV=RV, mu_R=mu_R,
                                      sigma_R=sigma_R, mag=mag, photoz=photoz, z_prior_err=z_prior_err,
-                                     z_pdf=z_pdf, z_quantiles=z_quantiles, chain_method=chain_method)
+                                     z_pdf=z_pdf, z_quantiles=z_quantiles, chain_method=chain_method,
+                                     wave_extrap=wave_extrap, phase_extrap=phase_extrap)
 
         return samples, sn_props
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
-            sigma_R=False, mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel'):
+            sigma_R=False, mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel',
+            wave_extrap=1, phase_extrap=2):
         """
         Method to fit light curve data loaded into memory with BayeSN model
 
@@ -2685,6 +2736,7 @@ class SEDmodel(object):
         if peak_mjd is not None:
             t = (t - peak_mjd) / (1 + z)
         self.photoz = photoz
+        self._set_warp_extrap(wave_extrap, phase_extrap)
         self.z_icdf_grid = None
         if photoz and z_quantiles is not None:  # (probs, vals), or bare z-values with even 0..1 levels
             zq = z_quantiles
