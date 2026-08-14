@@ -56,5 +56,6 @@ if 'load_model' not in args.keys() and cmd_args.load_model is None:
 if 'filters' not in args.keys():
     args['filters'] = cmd_args.filters
 
-model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'])
+model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'],
+                 fluxcal_zpt=args.get('fluxcal_zpt', 27.5))
 model.run(args, cmd_args)

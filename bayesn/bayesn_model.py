@@ -238,7 +238,7 @@ class SEDmodel(object):
     """
 
     def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
-                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}):
+                 fiducial_cosmology={"H0": 73.24, "Om0": 0.28}, fluxcal_zpt=27.5):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
         self.start_time = time.time()
@@ -294,6 +294,7 @@ class SEDmodel(object):
 
         self.used_band_inds = None
         self.band_weights = None
+        self.ZPT = fluxcal_zpt  # FLUXCAL zeropoint default; a file's ZP_FLUXCAL overrides it when present
         self._setup_band_weights()
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
@@ -525,7 +526,6 @@ class SEDmodel(object):
         self._load_hsiao_template()
         self.sim = False  # Keep track of whether data is simulated
 
-        self.ZPT = 27.5  # Zero point
         self.J_l_T = device_put(self.J_l_T)
         self.hsiao_flux = device_put(self.hsiao_flux)
         self.J_l_T_hsiao = device_put(self.J_l_T_hsiao)
@@ -744,7 +744,7 @@ class SEDmodel(object):
         zps = self.zps[band_indices]
         offsets = self.offsets[band_indices]
         zp_flux = 10 ** (zps / 2.5)
-        model_flux = (model_flux / zp_flux) * 10 ** (0.4 * (27.5 - offsets))  # Convert to FLUXCAL
+        model_flux = (model_flux / zp_flux) * 10 ** (0.4 * (self.ZPT - offsets))  # Convert to FLUXCAL
         model_flux *= mask
         return model_flux
 
@@ -902,7 +902,7 @@ class SEDmodel(object):
         model_flux = model_flux + (1 - mask) * 0.01  # Masked data points are set to 0, set them to a small value
         # to avoid nans when logging
 
-        model_mag = - 2.5 * jnp.log10(model_flux) + 27.5
+        model_mag = - 2.5 * jnp.log10(model_flux) + self.ZPT
         model_mag *= mask  # Re-apply mask
 
         return model_mag
@@ -2262,6 +2262,10 @@ class SEDmodel(object):
         peak_mjd = meta[peak_mjd_key]
         z = meta['REDSHIFT_HELIO']
         ebv_mw = meta['MWEBV']
+        zpt = meta.get('ZP_FLUXCAL', self.ZPT)  # header ZP overrides the configured default
+        if zpt != self.ZPT:
+            print(f'Using ZP_FLUXCAL={zpt} from data header')
+        self.ZPT = zpt
 
         samples, sn_props = self.fit(t, flux, flux_err, filters, z, ebv_mw=ebv_mw, peak_mjd=peak_mjd, filt_map=filt_map,
                                      print_summary=print_summary, file_prefix=file_prefix, drop_bands=drop_bands,
@@ -2272,7 +2276,7 @@ class SEDmodel(object):
 
     def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
-            sigma_R=False, mag=False):
+            sigma_R=False, mag=False, zpt=None):
         """
         Method to fit light curve data loaded into memory with BayeSN model
 
@@ -2339,9 +2343,11 @@ class SEDmodel(object):
         """
         if type(drop_bands) == str:
             drop_bands = [drop_bands]
+        if zpt is not None:
+            self.ZPT = zpt  # caller-supplied FLUXCAL zeropoint for raw arrays
         t, flux, flux_err, filters = np.array(t), np.array(flux), np.array(flux_err), np.array(filters)
         if mag:  # Convert data from mag into FLUXCAL
-            flux = np.power(10, (27.5 - flux) / 2.5)
+            flux = np.power(10, (self.ZPT - flux) / 2.5)
             flux_err = (np.log(10) / 2.5) * flux * flux_err
         if peak_mjd is not None:
             t = (t - peak_mjd) / (1 + z)
@@ -2747,7 +2753,13 @@ class SEDmodel(object):
                         head_file = os.path.join(data_dir, f'{sn_file}.gz')  # Look for .fits.gz if .fits not found
                     with fits.open(head_file) as hdu:
                         self.survey = hdu[0].header.get('SURVEY', 'NULL')
+                        zpt = hdu[0].header.get('ZP_FLUXCAL', self.ZPT)  # header ZP overrides the configured default
                         head_data = np.array(hdu[1].data).view(np.ndarray)
+                    if sn_file_ind > 0 and zpt != self.ZPT:
+                        raise ValueError(f'ZP_FLUXCAL differs across files ({self.ZPT} vs {zpt}); one zeropoint per run')
+                    if zpt != self.ZPT:
+                        print(f'Using ZP_FLUXCAL={zpt} from data header')
+                    self.ZPT = zpt
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
                     head_data = head_data.byteswap().newbyteorder()
@@ -2843,7 +2855,7 @@ class SEDmodel(object):
                     phot_df['band_indices'] = phot_df['FLT'].map(self.band_dict).map(used_band_dict)
                     phot_df['zp'] = phot_df['FLT'].map(self.zp_dict)
 
-                    phot_df['MAG'] = 27.5 - 2.5 * np.log10(phot_df['flux'].values)
+                    phot_df['MAG'] = self.ZPT - 2.5 * np.log10(phot_df['flux'].values)
                     phot_df['MAGERR'] = (2.5 / np.log(10)) * phot_df['flux_err'].values / phot_df['flux'].values
                     phot_df['redshift'] = zhel_arr[sn_idx]
                     phot_df['redshift_error'] = zhel_err_arr[sn_idx]
@@ -2928,6 +2940,10 @@ class SEDmodel(object):
                 # Check if sim or real data
                 self.sim = 'SIM_REDSHIFT_HELIO' in meta.keys()
                 self.bayesn_sim = 'SIM_THETA' in meta.keys()
+                zpt = meta.get('ZP_FLUXCAL', self.ZPT)  # header ZP overrides the configured default
+                if zpt != self.ZPT:
+                    print(f'Using ZP_FLUXCAL={zpt} from data header')
+                self.ZPT = zpt
                 # If real data, ignore sim_prescale
                 if not self.sim:
                     args['njobtot'] = args['jobsplit'][1]
@@ -2979,7 +2995,7 @@ class SEDmodel(object):
                     data['flux'] = data['FLUXCAL']
                     data['flux_err'] = np.max(
                         np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAG'] = self.ZPT - 2.5 * np.log10(data['flux'])
                     data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = zhel_err
@@ -3165,6 +3181,7 @@ class SEDmodel(object):
             # --------
             used_bands, used_band_dict = ['NULL_BAND'], {0: 0}
             sne, peak_mjds = [], []
+            zpt_seen = None
             print('Reading light curves...')
             for i in tqdm(range(sn_list.shape[0])):
                 row = sn_list.iloc[i]
@@ -3179,6 +3196,11 @@ class SEDmodel(object):
                 data_root = args['data_root']
                 for file in sn_files:
                     meta, lcdata = sncosmo.read_snana_ascii(os.path.join(data_root, file), default_tablename='OBS')
+                    if zpt_seen is None:  # read the FLUXCAL zeropoint once, from the first file's header
+                        zpt = meta.get('ZP_FLUXCAL', self.ZPT)
+                        if zpt != self.ZPT:
+                            print(f'Using ZP_FLUXCAL={zpt} from data header')
+                        zpt_seen = self.ZPT = zpt
                     data = lcdata['OBS'].to_pandas()
                     if 'SEARCH_PEAKMJD' in sn_list.columns:
                         peak_mjd = row.SEARCH_PEAKMJD
@@ -3215,7 +3237,7 @@ class SEDmodel(object):
                     data['zp'] = data.FLT.map(self.zp_dict)
                     data['flux'] = data['FLUXCAL']
                     data['flux_err'] = np.max(np.array([data['FLUXCALERR'], args['error_floor'] * (np.log(10) / 2.5) * data['flux']]), axis=0)
-                    data['MAG'] = 27.5 - 2.5 * np.log10(data['flux'])
+                    data['MAG'] = self.ZPT - 2.5 * np.log10(data['flux'])
                     data['MAGERR'] = (2.5 / np.log(10)) * data['flux_err'] / data['flux']
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
