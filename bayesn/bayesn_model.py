@@ -608,7 +608,7 @@ class SEDmodel(object):
 
         return device_put(weights)  # jax array so it can be indexed under tracing in single-object fits
 
-    def _calculate_band_weights_jax(self, redshifts):
+    def _calculate_band_weights_jax(self, redshifts, ebv=None):
         """
         Differentiable (JAX) band weights for photo-z fitting: recomputed each sampler step from the sampled
         redshifts, with Milky Way extinction evaluated at those redshifts (using self.ebv), for each SN
@@ -653,7 +653,7 @@ class SEDmodel(object):
         # MW extinction at sampled z: gather the F99 curve on the same band_wave locations
         mw_a99 = (remainders * self.mw_a99_grid[int_locs + 1]
                   + (1 - remainders) * self.mw_a99_grid[int_locs]).reshape(locs.shape)
-        av = self.RV_MW * self.ebv
+        av = self.RV_MW * (self.ebv if ebv is None else ebv)
         mw_ext = jnp.power(10., -0.4 * av[:, None] * mw_a99)
         weights = weights * mw_ext[..., None]
 
@@ -2991,23 +2991,35 @@ class SEDmodel(object):
             if args['num_lcplot'] > 0:
                 bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique().to_dict()
                 bands = [list(bands_by_cid.get(sn, [])) for sn in self.sn_list]
-                f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
-                                              num_samples=None, num_sne=num_lcplot,
-                                              mag=False, mean=not args['save_fit_errors'])
-                f, ferr = f.mean(axis=1), f.std(axis=1)
-
                 self.lcplot_data['DATA_FLAG'] = 1
-                z_hel = self.data[-5, 0, :]
                 fit_dfs = []
-                for i, sn in enumerate(self.lcplot_data.CID.unique()):
-                    fit_df = pd.DataFrame()
-                    fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
-                    fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
-                    fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
-                    fit_df['FLT'] = np.tile(bands[i], len(t))
-                    fit_df['CID'] = sn
-                    fit_df['DATA_FLAG'] = 0
-                    fit_dfs.append(fit_df)
+                if args['photoz']:
+                    # Observer-frame posterior predictive: each draw's z sets both K-correction and the MJD axis
+                    mjd_grids, f, ferr = self.get_flux_from_chains_photoz(samples, bands, num_lcplot)
+                    for i, sn in enumerate(self.lcplot_data.CID.unique()):
+                        fit_df = pd.DataFrame()
+                        fit_df['MJD'] = mjd_grids[i].repeat(len(bands[i]))
+                        fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
+                        fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
+                        fit_df['FLT'] = np.tile(bands[i], mjd_grids.shape[1])
+                        fit_df['CID'] = sn
+                        fit_df['DATA_FLAG'] = 0
+                        fit_dfs.append(fit_df)
+                else:
+                    f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
+                                                  num_samples=None, num_sne=num_lcplot,
+                                                  mag=False, mean=not args['save_fit_errors'])
+                    f, ferr = f.mean(axis=1), f.std(axis=1)
+                    z_hel = self.data[-5, 0, :]
+                    for i, sn in enumerate(self.lcplot_data.CID.unique()):
+                        fit_df = pd.DataFrame()
+                        fit_df['MJD'] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(len(bands[i]))
+                        fit_df['FLUXCAL'] = f[i, :len(bands[i]), :].flatten(order='F')
+                        fit_df['FLUXCALERR'] = ferr[i, :len(bands[i]), :].flatten(order='F')
+                        fit_df['FLT'] = np.tile(bands[i], len(t))
+                        fit_df['CID'] = sn
+                        fit_df['DATA_FLAG'] = 0
+                        fit_dfs.append(fit_df)
                 self.lcplot_data = pd.concat([self.lcplot_data] + fit_dfs, ignore_index=True)
 
                 self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
@@ -3554,20 +3566,12 @@ class SEDmodel(object):
                 num_lcplot = len(all_lcs)
             else:
                 num_lcplot = args['num_lcplot']
-            lcplot_rows = []
             mask_fill = 1.0 / np.sqrt(2 * np.pi)
             for i in tqdm(range(len(all_lcs))):
-                lc = all_lcs[i]
-                if i < num_lcplot:
-                    save_lc = lc[['MJD', 'flux', 'flux_err', 'FLT']].copy()
-                    save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
-                    save_lc.insert(loc=0, column='CID', value=sne[i])
-                    lcplot_rows.append(save_lc)
-                lc = lc.iloc[:, :-2]
+                lc = all_lcs[i].iloc[:, :-2]
                 all_data[i, :lc.shape[0], :] = lc.values
                 all_data[i, :lc.shape[0], dist_mod_col] = distmods[i]
                 all_data[i, lc.shape[0]:, 2] = mask_fill
-            lcplot_data = pd.concat(lcplot_rows, ignore_index=True) if lcplot_rows else pd.DataFrame()
             all_data = all_data.T
             # Prep FITRES table
             varlist = ["SN:"] * len(sne)
@@ -3594,6 +3598,7 @@ class SEDmodel(object):
                                       'zHD', 'zHDERR', 'VPEC', 'VPECERR', 'MWEBV', 'HOST_LOGMASS', 'HOST_LOGMASS_ERR',
                                       'SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX'])
             cut_dict = {}
+            kept = np.arange(len(all_lcs))  # surviving SN indices, kept aligned with all_data through the cuts
             full_table = table.copy().to_pandas()
             full_table['DROP'] = ''
             param_convert_dict = {'REDSHIFT': 'zHD', 'SNRMAX': 'SNRMAX1'}
@@ -3612,6 +3617,7 @@ class SEDmodel(object):
                 full_table.loc[full_table['CID'].isin(table[~keep]['CID']), 'DROP'] = param_cut
                 all_data = all_data[..., keep]
                 table = table[keep]
+                kept = kept[np.asarray(keep)]
                 if args['photoz'] and zphot_probs is not None:  # keep the per-SN redshift grid aligned with the cuts
                     zphot_quantiles = np.asarray(zphot_quantiles)[np.asarray(keep)]
                 cut_dict[param_cut] = drop
@@ -3637,7 +3643,7 @@ class SEDmodel(object):
                 self.data = device_put(mag_data)
             else:
                 self.data = device_put(flux_data)
-            self.sn_list = sne
+            self.sn_list = [sne[j] for j in kept]
             self.J_t = device_put(J_t)
             self.used_band_inds = jnp.array([self.band_dict[f] for f in used_bands])
             self.used_band_dict = used_band_dict
@@ -3651,7 +3657,14 @@ class SEDmodel(object):
             if args['photoz'] and zphot_probs is not None:
                 self.z_u_grid, self.z_icdf_grid = jnp.array(zphot_probs), jnp.array(zphot_quantiles)
             self.peak_mjds = self.fitres_table['SEARCH_PEAKMJD']
-            self.lcplot_data = lcplot_data
+            # LC-plot data for the first num_lcplot surviving SNe, aligned with the post-cut fit order
+            lcplot_rows = []
+            for j in kept[:num_lcplot]:
+                save_lc = all_lcs[j][['MJD', 'flux', 'flux_err', 'FLT']].copy()
+                save_lc.columns = ['MJD', 'FLUXCAL', 'FLUXCALERR', 'FLT']
+                save_lc.insert(loc=0, column='CID', value=sne[j])
+                lcplot_rows.append(save_lc)
+            self.lcplot_data = pd.concat(lcplot_rows, ignore_index=True) if lcplot_rows else pd.DataFrame()
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
             sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
@@ -4455,3 +4468,85 @@ class SEDmodel(object):
             flux_grid = flux_grid.at[i, :, :len(fit_bands), :].set(lc)
 
         return flux_grid
+
+    def get_flux_from_chains_photoz(self, chains, bands, num_sne, n_grid=100, num_samples=200):
+        """
+        Observer-frame posterior-predictive model light curves for photo-z fits. Each posterior draw uses its
+        own redshift for both the K-correction and the rest-frame to observer-MJD time dilation, so the plotted
+        band carries the redshift uncertainty. Returns, per SN, a shared observer-MJD grid and the mean and
+        standard deviation of the model flux across draws.
+
+        Parameters
+        ----------
+        chains: dict
+            BayeSN photo-z posterior samples, must include a 'z' site.
+        bands: array-like
+            Per-SN list of bandpasses to evaluate the model in.
+        num_sne: int
+            Number of SNe to generate light curves for.
+        n_grid: int
+            Number of observer-MJD grid points per SN.
+        num_samples: int
+            Number of posterior draws used to form the predictive band.
+
+        Returns
+        -------
+        mjd_grids: array-like
+            (num_sne, n_grid) observer-frame MJD grid for each SN.
+        flux_mean, flux_std: array-like
+            (num_sne, max_bands, n_grid) mean and standard deviation of model flux across draws.
+        """
+        if type(chains) == str:
+            with open(chains, 'rb') as file:
+                chains = pickle.load(file)
+        total = chains['theta'].shape[0] * chains['theta'].shape[1]
+        num_samples = min(num_samples, total)
+        draw_inds = np.linspace(0, total - 1, num_samples).astype(int)
+        tau_min, tau_max = float(self.tau_knots.min()), float(self.tau_knots.max())
+        max_bands = int(np.max([len(b) for b in bands]))
+
+        mjd_grids = np.zeros((num_sne, n_grid))
+        flux_mean = np.zeros((num_sne, max_bands, n_grid))
+        flux_std = np.zeros((num_sne, max_bands, n_grid))
+
+        print('Getting photo-z posterior-predictive light curves from chains...')
+        for i in tqdm(np.arange(num_sne)):
+            fit_bands = bands[i]
+            n_band = len(fit_bands)
+            theta = chains['theta'][..., i].flatten(order='F')[draw_inds]
+            AV = chains['AV'][..., i].flatten(order='F')[draw_inds]
+            tmax = chains['tmax'][..., i].flatten(order='F')[draw_inds]
+            mu = chains['mu'][..., i].flatten(order='F')[draw_inds]
+            del_M = chains['delM'][..., i].flatten(order='F')[draw_inds]
+            z = chains['z'][..., i].flatten(order='F')[draw_inds]
+            RV = chains['RV'][..., i].flatten(order='F')[draw_inds] if 'RV' in chains.keys() else self.RV
+            eps = chains['eps'][..., i]
+            eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order='F')[draw_inds]
+            eps = eps.reshape((num_samples, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((num_samples, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+
+            # Shared observer-MJD grid: the rest knot range mapped at the mean fitted z
+            mjd_grid = self.peak_mjds[i] + jnp.linspace(tau_min, tau_max, n_grid) * (1 + z.mean())
+            # Per-draw rest phase from the observer grid, tiled band-major over this SN's bands
+            t_rest = (mjd_grid[:, None] - self.peak_mjds[i]) / (1 + z[None, :]) - tmax[None, :]
+            t = jnp.tile(t_rest, (n_band, 1))
+            band_indices = np.concatenate([np.full(n_grid, self.used_band_dict[self.band_dict[b]]) for b in fit_bands])
+            band_indices = band_indices[:, None].repeat(num_samples, axis=1).astype(int)
+            mask = jnp.ones_like(t)
+
+            hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t),
+                                      jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t_flat = t.flatten(order='F')
+            J_t = self.J_t_map(t_flat, self.tau_knots, self.KD_t).reshape(
+                (*keep_shape, self.tau_knots.shape[0]), order='F').transpose(1, 2, 0)
+            weights = self._calculate_band_weights_jax(z, ebv=jnp.full(num_samples, self.ebv[i]))
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, mu + del_M, RV, band_indices,
+                                       mask, J_t, hsiao_interp, weights)
+            flux = np.asarray(flux).reshape((n_band, n_grid, num_samples))
+            mjd_grids[i] = np.asarray(mjd_grid)
+            flux_mean[i, :n_band, :] = flux.mean(axis=-1)
+            flux_std[i, :n_band, :] = flux.std(axis=-1)
+
+        return mjd_grids, flux_mean, flux_std
