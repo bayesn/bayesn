@@ -883,8 +883,7 @@ class SEDmodel(object):
         obs_times = self.data[0, ...]
         if self.photoz:  # evaluate the model at the fitted redshift (band weights + time dilation)
             z_mean = np.array(samples['z'].mean(axis=(0, 1)))
-            zhat = np.asarray(self.data[-5, 0, :])
-            t = obs_times * (1 + zhat[None, :]) / (1 + z_mean[None, :]) - tmax_mean[None, :]
+            t = obs_times / (1 + z_mean[None, :]) - tmax_mean[None, :]
             weights = self._calculate_band_weights_jax(z_mean)
         else:
             t = obs_times - tmax_mean[None, :]
@@ -930,6 +929,7 @@ class SEDmodel(object):
         chi2_z = 0.0
         if self.photoz:
             if self.z_icdf_grid is None:  # Gaussian prior: pull^2 (drop the log-norm const, as SNANA does)
+                zhat = np.asarray(self.data[-5, 0, :])
                 zhat_err = np.asarray(self.data[-4, 0, :])
                 chi2_z = ((z_mean - zhat) / zhat_err) ** 2
             else:  # quantile prior: p_host is dCDF/dz, the finite-difference slope of the quantiles
@@ -1323,8 +1323,8 @@ class SEDmodel(object):
             else:  # Gaussian catalog prior
                 ztform = numpyro.sample('ztform', dist.Normal(0, 1))
                 z = numpyro.deterministic('z', zhat + zhat_err * ztform)
-            # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            # Rest-frame phase from the observer-frame days-from-peak at the sampled z
+            t = obs[0, ...] / (1 + z) - tmax[None, sn_index]
             hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -1386,8 +1386,8 @@ class SEDmodel(object):
             else:  # Gaussian catalog prior
                 ztform = numpyro.sample('ztform', dist.Normal(0, 1))
                 z = numpyro.deterministic('z', zhat + zhat_err * ztform)
-            # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            # Rest-frame phase from the observer-frame days-from-peak at the sampled z
+            t = obs[0, ...] / (1 + z) - tmax[None, sn_index]
             hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -1452,8 +1452,8 @@ class SEDmodel(object):
             if prior_only:
                 return
             band_indices = obs[-6, :, sn_index].astype(int).T
-            # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            # Rest-frame phase from the observer-frame days-from-peak at the sampled z
+            t = obs[0, ...] / (1 + z) - tmax[None, sn_index]
             hsiao_interp = jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -2659,7 +2659,7 @@ class SEDmodel(object):
 
         return samples, sn_props
 
-    def fit(self, t, flux, flux_err, filters, z, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
+    def fit(self, t, flux, flux_err, filters, z=None, ebv_mw=0, peak_mjd=None, filt_map={}, print_summary=True,
             file_prefix=None, drop_bands=[], fix_tmax=False, fix_theta=False, fix_AV=False, RV=False, mu_R=False,
             sigma_R=False, mag=False, photoz=False, z_prior_err=None, z_pdf=None, z_quantiles=None, chain_method='parallel',
             wave_extrap=1, phase_extrap=2):
@@ -2733,8 +2733,6 @@ class SEDmodel(object):
         if mag:  # Convert data from mag into FLUXCAL
             flux = np.power(10, (27.5 - flux) / 2.5)
             flux_err = (np.log(10) / 2.5) * flux * flux_err
-        if peak_mjd is not None:
-            t = (t - peak_mjd) / (1 + z)
         self.photoz = photoz
         self._set_warp_extrap(wave_extrap, phase_extrap)
         self.z_icdf_grid = None
@@ -2747,14 +2745,26 @@ class SEDmodel(object):
             self.z_u_grid = jnp.linspace(0., 1., 101)
             self.z_icdf_grid = jnp.atleast_2d(jnp.asarray(z_pdf.icdf(self.z_u_grid)))
         if photoz:
-            # Loose cut: drop epochs pre-explosion across the +/-3 sigma prior z and tmax range
-            if self.z_icdf_grid is not None:
+            if peak_mjd is None:
+                raise ValueError('peak_mjd is required for a photo-z fit')
+            if self.z_icdf_grid is not None:  # quantile/pdf prior: z not needed, centre on the grid median
                 z_lo, z_hi = float(self.z_icdf_grid[0, 0]), float(self.z_icdf_grid[0, -1])
-            else:
+                z_c = float(jnp.interp(0.5, self.z_u_grid, self.z_icdf_grid[0]))
+            else:  # Gaussian prior: z is the prior mean
+                if z is None or z_prior_err is None:
+                    raise ValueError('photo-z fit requires z_quantiles/z_pdf, or z with z_prior_err for a Gaussian prior')
                 z_lo, z_hi = z - 3 * z_prior_err, z + 3 * z_prior_err
-            p1, p2 = t * (1 + z) / (1 + z_lo), t * (1 + z) / (1 + z_hi)
+                z_c = z
+            t = t - peak_mjd  # observer-frame days-from-peak; dilation is applied in-model at the sampled z
+            # Loose cut: drop epochs pre-explosion across the prior z range
+            p1, p2 = t / (1 + z_lo), t / (1 + z_hi)
             keep = np.maximum(p1, p2) + 10 > float(self.hsiao_t[0])
         else:
+            if z is None:
+                raise ValueError('z is required for a spec-z fit')
+            z_c = z
+            if peak_mjd is not None:
+                t = (t - peak_mjd) / (1 + z)
             keep = (t > self.tau_knots.min()) & (t < self.tau_knots.max())
         flux, flux_err, filters, t = flux[keep], flux_err[keep], filters[keep], t[keep]
         filters = np.array([filt_map.get(filter, filter) for filter in filters])
@@ -2794,10 +2804,10 @@ class SEDmodel(object):
         data = data.at[1, :, 0].set(flux)
         data = data.at[2, :, 0].set(flux_err)
         data = data.at[4, :, 0].set(band_indices)
-        data = data.at[5, :, 0].set(np.full_like(t, z))
-        if photoz:
-            data = data.at[6, :, 0].set(np.full_like(t, z_prior_err))
-        data = data.at[7, :, 0].set(np.full_like(t, self.cosmo.distmod(z).value))
+        data = data.at[5, :, 0].set(np.full_like(t, z_c))
+        if photoz:  # z_prior_err is unused by the quantile prior, so default it when absent
+            data = data.at[6, :, 0].set(np.full_like(t, z_prior_err if z_prior_err is not None else 0.))
+        data = data.at[7, :, 0].set(np.full_like(t, self.cosmo.distmod(z_c).value))
         data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
         data = data.at[9, :, 0].set(np.ones_like(t))
 
@@ -2866,7 +2876,7 @@ class SEDmodel(object):
             with open(f'{file_prefix}_chains.pkl', 'wb') as file:
                 pickle.dump(samples, file)
 
-        sn_props = (z, ebv_mw)
+        sn_props = (z_c, ebv_mw)
 
         return samples, sn_props
 
@@ -3262,7 +3272,10 @@ class SEDmodel(object):
                     phot_df['FLT'] = phot_df['BAND'].map(map_dict)
 
                     zhel_per_obs = zhel_arr[sn_idx]
-                    phot_df['t'] = (phot_df['MJD'].values - peakmjd_arr[sn_idx]) / (1 + zhel_per_obs)
+                    if args['photoz']:  # observer-frame days-from-peak; dilation is applied in-model at the sampled z
+                        phot_df['t'] = phot_df['MJD'].values - peakmjd_arr[sn_idx]
+                    else:
+                        phot_df['t'] = (phot_df['MJD'].values - peakmjd_arr[sn_idx]) / (1 + zhel_per_obs)
                     phot_df['flux'] = phot_df['FLUXCAL'].values
                     phot_df['flux_err'] = np.maximum(
                         phot_df['FLUXCALERR'].values,
@@ -3363,7 +3376,11 @@ class SEDmodel(object):
                     for sn_ind in np.where(keep_mask)[0]:
                         j0, j1 = sn_starts[sn_ind], sn_ends[sn_ind]
                         all_lcs.append(phot_df.iloc[j0:j1])
-                        t_ranges.append((t_per_obs[j0:j1].min(), t_per_obs[j0:j1].max()))
+                        if args['photoz']:  # t is observer-frame; label TRESTMIN/MAX rest-frame at the host-z median
+                            z_c = np.interp(0.5, zphot_probs, q_arr[sn_ind])
+                            t_ranges.append((t_per_obs[j0:j1].min() / (1 + z_c), t_per_obs[j0:j1].max() / (1 + z_c)))
+                        else:
+                            t_ranges.append((t_per_obs[j0:j1].min(), t_per_obs[j0:j1].max()))
 
                         sn_snr = snr_per_obs[j0:j1]
                         sn_bi = band_idx_per_obs[j0:j1]
@@ -3412,7 +3429,10 @@ class SEDmodel(object):
                     zpec = np.sqrt((1 + vpec / c) / (1 - vpec / c)) - 1
                     zhd = (1 + zcmb) / (1 + zpec) - 1
                     # We deliberately don't include vpec error here, as BayeSN includes this elsewhere
-                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
+                    if args['photoz']:  # observer-frame days-from-peak; dilation is applied in-model at the sampled z
+                        data['t'] = data.MJD - peak_mjd
+                    else:
+                        data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
                     for f in data.BAND.unique():
@@ -3458,16 +3478,18 @@ class SEDmodel(object):
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift',
                          'redshift_error', 'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
-                    if args['photoz']:
-                        t_obs = lc['t'] * (1 + zhel)
-                        lc = lc[np.maximum(t_obs / (1 + z_lo), t_obs / (1 + z_hi)) + 10 > float(self.hsiao_t[0])]
+                    if args['photoz']:  # t is observer-frame; dilate the cut at the prior-z bounds
+                        lc = lc[np.maximum(lc['t'] / (1 + z_lo), lc['t'] / (1 + z_hi)) + 10 > float(self.hsiao_t[0])]
                     else:
                         lc = lc[(lc['t'] > tau_min) & (lc['t'] < tau_max)]
                     if lc.empty:  # Skip empty light curves, maybe they don't have any data in [-10, 40] days
                         continue
                     sne.append(sn_name)
                     peak_mjds.append(peak_mjd)
-                    t_ranges.append((lc['t'].min(), lc['t'].max()))
+                    if args['photoz']:  # t is observer-frame; label TRESTMIN/MAX rest-frame at the prior-centre z
+                        t_ranges.append((lc['t'].min() / (1 + zhel), lc['t'].max() / (1 + zhel)))
+                    else:
+                        t_ranges.append((lc['t'].min(), lc['t'].max()))
                     n_obs.append(lc.shape[0])
                     all_lcs.append(lc)
                     # Set up FITRES table data
@@ -3590,6 +3612,8 @@ class SEDmodel(object):
                 full_table.loc[full_table['CID'].isin(table[~keep]['CID']), 'DROP'] = param_cut
                 all_data = all_data[..., keep]
                 table = table[keep]
+                if args['photoz'] and zphot_probs is not None:  # keep the per-SN redshift grid aligned with the cuts
+                    zphot_quantiles = np.asarray(zphot_quantiles)[np.asarray(keep)]
                 cut_dict[param_cut] = drop
             print(cut_dict)
             print(full_table[['SNRMAX1', 'SNRMAX2', 'SNRMAX3', 'SEARCH_PEAKMJD', 'NEPOCH', 'TRESTMIN', 'TRESTMAX', 'DROP']])
@@ -3667,7 +3691,10 @@ class SEDmodel(object):
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
                     zhel = meta['REDSHIFT_HELIO']
-                    data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
+                    if args['photoz']:  # observer-frame days-from-peak; dilation is applied in-model at the sampled z
+                        data['t'] = data.MJD - peak_mjd
+                    else:
+                        data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
                     for f in data.FLT.unique():
@@ -3711,16 +3738,18 @@ class SEDmodel(object):
                         ['t', 'flux', 'flux_err', 'MAG', 'MAGERR', 'mass', 'band_indices', 'redshift', 'redshift_error',
                          'dist_mod', 'MWEBV', 'mask', 'MJD', 'FLT']]
                     lc = lc.dropna(subset=['flux', 'flux_err'])
-                    if args['photoz']:
-                        t_obs = lc['t'] * (1 + zhel)
-                        lc = lc[np.maximum(t_obs / (1 + z_lo), t_obs / (1 + z_hi)) + 10 > float(self.hsiao_t[0])]
+                    if args['photoz']:  # t is observer-frame; dilate the cut at the prior-z bounds
+                        lc = lc[np.maximum(lc['t'] / (1 + z_lo), lc['t'] / (1 + z_hi)) + 10 > float(self.hsiao_t[0])]
                     else:
                         lc = lc[(lc['t'] > tau_min) & (lc['t'] < tau_max)]
                     sn_lc_parts.append(lc)
                 sn_lc = pd.concat(sn_lc_parts, ignore_index=True)
                 sne.append(sn)
                 peak_mjds.append(peak_mjd)
-                t_ranges.append((lc['t'].min(), lc['t'].max()))
+                if args['photoz']:  # t is observer-frame; label TRESTMIN/MAX rest-frame at the prior-centre z
+                    t_ranges.append((lc['t'].min() / (1 + zhel), lc['t'].max() / (1 + zhel)))
+                else:
+                    t_ranges.append((lc['t'].min(), lc['t'].max()))
                 n_obs.append(lc.shape[0])
                 all_lcs.append(sn_lc)
                 # Set up FITRES table data
