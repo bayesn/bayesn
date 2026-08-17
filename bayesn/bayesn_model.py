@@ -1851,6 +1851,8 @@ class SEDmodel(object):
         args['zltn_particles'] = args.get('zltn_particles', 10)
         args['stage2_tmax_prior_std'] = args.get('stage2_tmax_prior_std', 1.0)
         args['batch_size'] = args.get('batch_size', None)
+        args['num_nobs_bins'] = args.get('num_nobs_bins', 1)
+        args['min_bin_gain'] = args.get('min_bin_gain', 0.05)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -1913,6 +1915,88 @@ class SEDmodel(object):
         t = self.data[0, ...]
         self.hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
         return args
+
+    def _choose_nobs_bins(self, num_nobs_bins, min_gain):
+        """
+        Bin SNe by their number of observations so each bin is padded only to its own max nobs, cutting padding waste
+        in fitting. Bin ceilings are chosen automatically by a partition DP minimising sum(count * max_nobs); bins are
+        added only while each extra one reduces that work by at least min_gain (up to num_nobs_bins, capped at the
+        number of distinct nobs). Returns a list of (ceiling, original_sn_indices).
+        """
+        nobs = np.asarray((self.data[-1] > 0).sum(0)).astype(int)  # per-SN real epoch count from the mask row
+        u, counts = np.unique(nobs, return_counts=True)  # ascending distinct nobs
+        U = len(u)
+        K = int(min(max(num_nobs_bins, 1), U))
+        cs = np.cumsum(counts)
+        cshift = np.concatenate([[0], cs[:-1]])
+        dp = np.full((K + 1, U + 1), np.inf)
+        cut = np.zeros((K + 1, U + 1), dtype=int)
+        dp[0, 0] = 0
+        for m in range(1, K + 1):
+            for j in range(m, U + 1):
+                s = np.arange(m - 1, j)
+                vals = dp[m - 1, s] + (cs[j - 1] - cshift[s]) * u[j - 1]  # bin cost = count * bin max nobs
+                b = int(np.argmin(vals))
+                dp[m, j] = vals[b]
+                cut[m, j] = s[b]
+        n_bins = 1
+        for k in range(2, K + 1):
+            if dp[k - 1, U] > 0 and (dp[k - 1, U] - dp[k, U]) / dp[k - 1, U] >= min_gain:
+                n_bins = k
+            else:
+                break
+        ceilings = []
+        j, m = U, n_bins
+        while m > 0:
+            ceilings.append(int(u[j - 1]))
+            j = cut[m, j]
+            m -= 1
+        ceilings = sorted(ceilings)
+        bin_of = np.searchsorted(np.array(ceilings), nobs, side='left')
+        bins = [(ceilings[b], np.where(bin_of == b)[0]) for b in range(n_bins)]
+        if n_bins > 1:
+            print(f'Binning light curves into {n_bins} nobs bins, ceilings {ceilings}')
+        return bins
+
+    def _fit_in_nobs_bins(self, batched_map, args):
+        """
+        Fit each nobs bin at its own number of observations and scatter per-SN results back into a full-length output
+        in original SN order, so nothing downstream sees a reordering. Shared by the MCMC and VI fitting paths;
+        batched_map is the vmapped per-SN fit. With num_nobs_bins=1 this reduces to a single pass over all SNe.
+        """
+        n_sne = self.data.shape[-1]
+        bs_cfg = args['batch_size']
+        bins = self._choose_nobs_bins(args['num_nobs_bins'], args['min_bin_gain'])
+        items = []
+        for ceiling, idx in bins:
+            bs = len(idx) if bs_cfg is None else min(bs_cfg, len(idx))
+            for lo in range(0, len(idx), bs):
+                items.append((ceiling, idx[lo:lo + bs], bs))
+        samples = None
+        for ceiling, batch_idx, bs in tqdm(items, desc='fit batches', disable=len(items) == 1):
+            n_real = len(batch_idx)
+            if n_real == bs:
+                contiguous = ceiling == self.data.shape[1] and n_real == int(batch_idx[-1] - batch_idx[0]) + 1
+                if contiguous:  # single-bin default: keep a zero-copy view of self.data
+                    lo, hi = int(batch_idx[0]), int(batch_idx[-1]) + 1
+                    batch_data, batch_weights = self.data[..., lo:hi], self.band_weights[lo:hi]
+                else:
+                    batch_data, batch_weights = self.data[:, :ceiling, batch_idx], self.band_weights[batch_idx]
+            else:
+                # Pad final batch by replicating the bin's first SN; padded outputs discarded.
+                batch_data = np.empty((self.data.shape[0], ceiling, bs), dtype=self.data.dtype)
+                batch_weights = np.empty((bs, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
+                batch_data[:, :, :n_real] = self.data[:, :ceiling, batch_idx]
+                batch_data[:, :, n_real:] = self.data[:, :ceiling, batch_idx[0:1]]
+                batch_weights[:n_real] = self.band_weights[batch_idx]
+                batch_weights[n_real:] = self.band_weights[batch_idx[0:1]]
+            chunk = batched_map(batch_data, batch_weights)
+            batch = {k: np.asarray(v)[:n_real] for k, v in chunk.items() if k != '_auto_latent'}
+            if samples is None:  # size the full-length output once, from the first batch
+                samples = {k: np.empty((n_sne, *v.shape[1:]), dtype=v.dtype) for k, v in batch.items()}
+            for k, v in batch.items():
+                samples[k][batch_idx] = v
+        return samples
 
     def run(self, args, cmd_args):
         """
@@ -2034,8 +2118,7 @@ class SEDmodel(object):
                 return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
 
             start = timeit.default_timer()
-            map = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0))
-            samples = map(self.data, self.band_weights)
+            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_mcmc, in_axes=(2, 0)), args)
             expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
@@ -2147,34 +2230,7 @@ class SEDmodel(object):
                 return {**samples}
 
             start = timeit.default_timer()
-            batched_map = jax.vmap(fit_vmap_vi, in_axes=(2, 0))
-            n_sne = self.data.shape[-1]
-            batch_size = args['batch_size'] if args['batch_size'] is not None else n_sne
-            n_batches = (n_sne + batch_size - 1) // batch_size
-
-            samples = None
-            for b in tqdm(range(n_batches), desc='VI batches', disable=n_batches == 1):
-                lo, hi = b * batch_size, min((b + 1) * batch_size, n_sne)
-                n_real = hi - lo
-                if n_real == batch_size:
-                    batch_data = self.data[..., lo:hi]
-                    batch_weights = self.band_weights[lo:hi]
-                else:
-                    # Pad final batch by replicating SN 0; padded outputs discarded.
-                    batch_data = np.empty(
-                        (*self.data.shape[:-1], batch_size), dtype=self.data.dtype)
-                    batch_weights = np.empty(
-                        (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
-                    batch_data[..., :n_real] = self.data[..., lo:hi]
-                    batch_data[..., n_real:] = self.data[..., 0:1]
-                    batch_weights[:n_real] = self.band_weights[lo:hi]
-                    batch_weights[n_real:] = self.band_weights[0:1]
-                chunk = batched_map(batch_data, batch_weights)
-                batch = {k: np.asarray(v)[:n_real] for k, v in chunk.items() if k != '_auto_latent'}
-                if samples is None:  # size the full-length output once, from the first batch
-                    samples = {k: np.empty((n_sne, *v.shape[1:]), dtype=v.dtype) for k, v in batch.items()}
-                for k, v in batch.items():
-                    samples[k][lo:hi] = v
+            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_vi, in_axes=(2, 0)), args)
             expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
