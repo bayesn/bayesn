@@ -2152,7 +2152,7 @@ class SEDmodel(object):
             batch_size = args['batch_size'] if args['batch_size'] is not None else n_sne
             n_batches = (n_sne + batch_size - 1) // batch_size
 
-            chunks = []
+            samples = None
             for b in tqdm(range(n_batches), desc='VI batches', disable=n_batches == 1):
                 lo, hi = b * batch_size, min((b + 1) * batch_size, n_sne)
                 n_real = hi - lo
@@ -2170,11 +2170,11 @@ class SEDmodel(object):
                     batch_weights[:n_real] = self.band_weights[lo:hi]
                     batch_weights[n_real:] = self.band_weights[0:1]
                 chunk = batched_map(batch_data, batch_weights)
-                chunks.append({k: np.asarray(v)[:n_real] for k, v in chunk.items()})
-
-            samples = {k: np.concatenate([c[k] for c in chunks], axis=0)
-                       for k in chunks[0]}
-            del samples['_auto_latent']
+                batch = {k: np.asarray(v)[:n_real] for k, v in chunk.items() if k != '_auto_latent'}
+                if samples is None:  # size the full-length output once, from the first batch
+                    samples = {k: np.empty((n_sne, *v.shape[1:]), dtype=v.dtype) for k, v in batch.items()}
+                for k, v in batch.items():
+                    samples[k][lo:hi] = v
             expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
