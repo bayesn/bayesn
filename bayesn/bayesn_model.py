@@ -237,7 +237,7 @@ class SEDmodel(object):
     out: `bayesn_model.SEDmodel` instance
     """
 
-    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None,
+    def __init__(self, num_devices=4, load_model='T21_model', filter_yaml=None, magobs_shift_zp_params = None,
                  fiducial_cosmology={"H0": 73.24, "Om0": 0.28}, fluxcal_zpt=27.5):
         # Settings for jax/numpyro
         numpyro.set_host_device_count(num_devices)
@@ -295,6 +295,7 @@ class SEDmodel(object):
         self.used_band_inds = None
         self.band_weights = None
         self.ZPT = fluxcal_zpt  # FLUXCAL zeropoint default; a file's ZP_FLUXCAL overrides it when present
+        self.magobs_shift_zp_params = magobs_shift_zp_params
         self._setup_band_weights()
 
         self.J_t_map = jax.jit(jax.vmap(self.spline_coeffs_irr_step, in_axes=(0, None, None)))
@@ -479,11 +480,24 @@ class SEDmodel(object):
 
             # Get zero points
             lam = R[:, 0]
+            # Call magobs_shift_zp_params here
+            def shift_standard(magobs_shift_zp_params, lam):
+                a, b, c = magobs_shift_zp_params
+                lam_micron = lam / 1e4 #SNANA expects the polynomial in microns.
+                dm = a + b * lam_micron + c * lam_micron**2
+                return 10**(-0.4 * dm) #Converting to fractional space for your health.
+
+            if self.magobs_shift_zp_params is not None:
+                shift_spec = shift_standard(self.magobs_shift_zp_params, lam)
+            else:
+                shift_spec = 1
+
+            # Get zero points
             if magsys == 'ab':
-                zp = ab_standard_flam(lam)
+                zp = ab_standard_flam(lam)*shift_spec
             else:
                 standard = filter_dict['standards'][magsys]
-                zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
+                zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)*shift_spec
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
@@ -1906,6 +1920,10 @@ class SEDmodel(object):
 
         if 'training' in args['mode'].lower():
             self.l_knots = device_put(np.array(args['l_knots'], dtype=float))
+            if self.magobs_shift_zp_params is not None:
+                print(f"Attempting to train a model with a systematic shift to the standard spectra.")
+                print(f"This is not allowed presently.")
+                quit()
             self._setup_band_weights()
             KD_l = invKD_irr(self.l_knots)
             self.J_l_T = device_put(spline_coeffs_irr(self.model_wave, self.l_knots, KD_l))
