@@ -497,7 +497,7 @@ class SEDmodel(object):
                 zp = ab_standard_flam(lam)*shift_spec
             else:
                 standard = filter_dict['standards'][magsys]
-                zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)
+                zp = interp1d(standard['lam'], standard['f_lam'], kind='cubic')(lam)*shift_spec
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
