@@ -1885,7 +1885,7 @@ class SEDmodel(object):
         args['save_summary'] = args.get('save_summary', False)
         args['keep_list'] = args.get('keep_list')
         if args['keep_list'] is not None:
-            keep_list = pd.read_csv(args['keep_list'], comment='#', delim_whitespace=True)
+            keep_list = pd.read_csv(args['keep_list'], comment='#', sep=r'\s+')
             if keep_list.shape[1] == 1:
                 keep_list = pd.read_csv(args['keep_list'], header=None)[0].astype(str).values
             else:
@@ -3144,6 +3144,8 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = all_lcs[0].shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
+            if args.get('redshift_final_shift'): #
+                z_hds = [z + args.get('redshift_final_shift') for z in z_hds]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
@@ -3243,7 +3245,7 @@ class SEDmodel(object):
             self.lcplot_data = lcplot_data
         else:
             table_path = os.path.join(args['data_root'], args['data_table'])
-            sn_list = pd.read_csv(table_path, comment='#', delim_whitespace=True)
+            sn_list = pd.read_csv(table_path, comment='#', sep=r'\s+')
             n_obs = []
 
             all_lcs = []
@@ -3369,6 +3371,8 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
+            if args.get('redshift_final_shift'):
+                z_hds = [z + args.get('redshift_final_shift') for z in z_hds]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
