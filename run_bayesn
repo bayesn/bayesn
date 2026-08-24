@@ -41,6 +41,7 @@ parser.add_argument('--batch_size', type=int, required=False)
 parser.add_argument('--num_lcplot', type=float, required=False)
 parser.add_argument('--save_summary', type=float, required=False)
 parser.add_argument('--magobs_shift_zp_params', type=float, nargs=3, required=False)
+parser.add_argument('--redshift_final_shift', type=float, required=False)
 
 cmd_args = parser.parse_args()
 
@@ -59,5 +60,5 @@ if 'filters' not in args.keys():
     args['filters'] = cmd_args.filters
 
 model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'],
-                 fluxcal_zpt=args.get('fluxcal_zpt', 27.5), magobs_shift_zp_params=cmd_args['magobs_shift_zp_params'])
+                 fluxcal_zpt=args.get('fluxcal_zpt', 27.5), magobs_shift_zp_params=cmd_args.magobs_shift_zp_params)
 model.run(args, cmd_args)
