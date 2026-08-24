@@ -3145,7 +3145,8 @@ class SEDmodel(object):
             N_col = all_lcs[0].shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
             if args.get('redshift_final_shift'): #
-                z_hds = [z + args.get('redshift_final_shift') for z in z_hds]
+                z_hds = [z + args.get('redshift_final_shift') for z in z_hds] 
+                z_hels = [z + args.get('redshift_final_shift') for z in z_hels]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
@@ -3373,6 +3374,7 @@ class SEDmodel(object):
             all_data = np.zeros((N_sn, N_obs, N_col))
             if args.get('redshift_final_shift'):
                 z_hds = [z + args.get('redshift_final_shift') for z in z_hds]
+                z_hels = [z + args.get('redshift_final_shift') for z in z_hels]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
