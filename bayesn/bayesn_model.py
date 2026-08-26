@@ -2770,6 +2770,9 @@ class SEDmodel(object):
         l_min = float(np.asarray(self.l_knots)[0])
         l_max = float(np.asarray(self.l_knots)[-1])
 
+        mwebv_scale = args.get("mwebv_scale", 1)
+        mwebv_shift = args.get("mwebv_shift", 0)
+
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
             if args['snana']:  # Assuming you're using SNANA running on Perlmutter or a similar cluster
@@ -2934,6 +2937,10 @@ class SEDmodel(object):
                     phot_df['redshift'] = zhel_arr[sn_idx]
                     phot_df['redshift_error'] = zhel_err_arr[sn_idx]
                     phot_df['MWEBV'] = mwebv_arr[sn_idx]
+                    phot_df['MWEBV'] *= mwebv_scale
+                    mwebv_arr[sn_idx] *= mwebv_scale #consistency with ASCII tables
+                    phot_df['MWEBV'] += mwebv_shift
+                    mwebv_arr[sn_idx] += mwebv_shift
                     phot_df['mass'] = mass_arr[sn_idx]
                     phot_df['dist_mod'] = 0.0
                     phot_df['mask'] = 1
@@ -3074,6 +3081,10 @@ class SEDmodel(object):
                     data['redshift'] = zhel
                     data['redshift_error'] = zhel_err
                     data['MWEBV'] = meta.get('MWEBV', 0.)
+                    data['MWEBV'] *= mwebv_scale
+                    meta['MWEBV'] *= mwebv_scale #changes to data do not propagate to the output table, which is dependent on the meta value
+                    data['MWEBV'] += mwebv_shift
+                    meta['MWEBV'] += mwebv_shift
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = self.cosmo.distmod(zhd)
                     data['mask'] = 1
@@ -3319,6 +3330,10 @@ class SEDmodel(object):
                     data['redshift'] = zhel
                     data['redshift_error'] = row.REDSHIFT_CMB_ERR
                     data['MWEBV'] = meta.get('MWEBV', 0.)
+                    data['MWEBV'] *= mwebv_scale
+                    meta['MWEBV'] *= mwebv_scale #changes to data do not propagate to the output table, which is dependent on the meta value
+                    data['MWEBV'] += mwebv_shift
+                    meta['MWEBV'] += mwebv_shift
                     data['mass'] = meta.get('HOSTGAL_LOGMASS', -9.)
                     data['dist_mod'] = 0.0  # filled in batch after the read loop
                     data['mask'] = 1

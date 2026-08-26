@@ -40,8 +40,11 @@ parser.add_argument('--error_floor', type=float, required=False)
 parser.add_argument('--batch_size', type=int, required=False)
 parser.add_argument('--num_lcplot', type=float, required=False)
 parser.add_argument('--save_summary', type=float, required=False)
+#CLI overrides for systematics begin here. 
 parser.add_argument('--magobs_shift_zp_params', type=float, nargs=3, required=False)
 parser.add_argument('--redshift_final_shift', type=float, required=False)
+parser.add_argument('--mwebv_scale', type=float, required=False)
+parser.add_argument('--mwebv_shift', type=float, required=False)
 
 cmd_args = parser.parse_args()
 
