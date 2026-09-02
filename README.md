@@ -8,7 +8,7 @@ Developed and maintained by: Matt Grayling (@mattgrayling), Stephen Thorp (@stev
 BayeSN is a probabilistic optical-NIR SED model for type Ia supernovae, allowing for hierarchical analysis of the
 population distribution of physical properties as well as cosmology-independent distance estimation for individual
 SNe. This repository contains an implementation of the BayeSN SED model built with numpyro and jax, with support for 
-GPU acceleration, as discussed in Grayling+2024 (https://arxiv.org/abs/2401.08755, accepted by MNRAS).
+GPU acceleration, as discussed in Grayling+2024 (MNRAS 531, 953, https://arxiv.org/abs/2401.08755).
 
 ## Installation and usage
 BayeSN can be pip-installed via the command `pip install bayesn`. 
@@ -21,12 +21,14 @@ or think of any functionality that would add a lot of value for you, please rais
 
 ## Citing the code/model
 If you utilise the BayeSN model in any way, please cite Mandel+2022 (MNRAS 510, 3, 3939-3966), and if you make use of
-this code please cite Grayling+2024 (submitted to MNRAS). In addition, if you use any of the pre-trained models included
+this code please cite Grayling+2024 (MNRAS 531, 953). In addition, if you use any of the pre-trained models included
 within BayeSN please cite the corresponding papers which present those models:
 
-- M20 model: Mandel et al. 2022 (MNRAS 510, 3, 3939-3966)
-- T21 model: Thorp et al. 2021 (MNRAS 508, 3, 4310-4331)
+- G26 model: Grayling et al. 2026 (arXiv:2606.19429)
+- G25 model: Grayling et al. 2026 (MNRAS 548, stag340)
 - W22 model: Ward et al. 2023 (ApJ 956, 2, 111)
+- T21 model: Thorp et al. 2021 (MNRAS 508, 3, 4310-4331)
+- M20 model: Mandel et al. 2022 (MNRAS 510, 3, 3939-3966)
 
 ## Things to note
 
