@@ -4,3 +4,163 @@ requires = [
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bayesn*"]
+
+[project]
+name = "bayesn"
+version = "0.5.0"
+requires-python = ">= 3.10"
+dependencies = [
+    "arviz >= 0.0.1",
+    "astropy >= 6.0.0",
+    "dust_extinction >= 1.5",
+    "extinction >= 0.4.6",
+    "h5py >= 3.6.0",
+    "jax >= 0.4.27",
+    "jaxlib >= 0.4.27",
+    "numpy >= 1.23.5",
+    "numpyro >= 0.14.0",
+    "pandas >= 1.4.0",
+    "ruamel.yaml >= 0.16.0",
+    "scipy >= 1.15.0",
+    "sncosmo >= 2.10",
+    "tqdm >= 4.29.1"
+]
+authors = [
+    {name = "Matthew Grayling", email = "mg2102@cam.ac.uk"},
+    {name = "Stephen Thorp"},
+    {name = "Kaisey Mandel"},
+    {name = "Aaron Do"},
+    {name = "Madeleine Ginolin"},
+]
+description = "Hierarchical Bayesian modelling of type Ia SNe"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.scripts]
+run_bayesn = "bayesn.run_bayesn:main"
+
+[project.urls]
+Homepage = "https://github.com/bayesn/bayesn"
+Documentation = "https://bayesn.readthedocs.io/en/latest/"
+
+[project.optional-dependencies]
+testing = [
+    "pytest",
+    "pytest-cov",
+    "jaxtyping",
+]
+build-docs = [
+    "sphinx",
+    "sphinx_rtd_theme",
+    "pillow",
+    "numpydoc",
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=bayesn --cov-report=term-missing"
+markers = [
+    "initialization: Tests for loading data into model",
+    "band_weights: Tests for band_weight manipulation and calculation",
+    "yaml: Tests parsing the input yaml (modes, model_kwargs)",
+    "dust: Tests get_axav methods with various reddening laws.",
+    "spectra: Tests get_spectra method and its wrapper",
+    "flux: Tests get_flux_batch",
+    "new: for testing tests",
+]
+
+[tool.setuptools.package-data]
+bayesn = [
+    "data/*",
+    "data/example_lcs/*",
+    "bayesn-filters/*",
+    "bayesn-filters/filters/*",
+    "bayesn-filters/filters/APO/SDSS/*",
+    "bayesn-filters/filters/ATLAS/ATLAS/*",
+    "bayesn-filters/filters/CAHA/O2K/*",
+    "bayesn-filters/filters/CFHT/Megacam/*",
+    "bayesn-filters/filters/CMO/2.5-m/*",
+    "bayesn-filters/filters/CTIO/*",
+    "bayesn-filters/filters/CTIO/0.9meter/*",
+    "bayesn-filters/filters/CTIO/2MASS/*",
+    "bayesn-filters/filters/CTIO/4meter/*",
+    "bayesn-filters/filters/CTIO/ANDICAM/*",
+    "bayesn-filters/filters/CTIO/DECAM/*",
+    "bayesn-filters/filters/CTIO/PROMPT/*",
+    "bayesn-filters/filters/DECam/*",
+    "bayesn-filters/filters/FLWO/1.2meter/*",
+    "bayesn-filters/filters/GALEX/Imaging/*",
+    "bayesn-filters/filters/GeminiNorth/NIRI/*",
+    "bayesn-filters/filters/HCT/TIRSPEC/*",
+    "bayesn-filters/filters/HST/WFC3/*",
+    "bayesn-filters/filters/HST/WFC3/IR/*",
+    "bayesn-filters/filters/HST/WFC3/UVIS2/*",
+    "bayesn-filters/filters/IRSF/SIRIUS/*",
+    "bayesn-filters/filters/IRTF/NSFCam/*",
+    "bayesn-filters/filters/KPNO/WIYN/*",
+    "bayesn-filters/filters/LaSilla/NTT/*",
+    "bayesn-filters/filters/LCO/*",
+    "bayesn-filters/filters/LCO/Baade/*",
+    "bayesn-filters/filters/LCO/Dupont/*",
+    "bayesn-filters/filters/LCO/PANIC/*",
+    "bayesn-filters/filters/LCO/Persson/*",
+    "bayesn-filters/filters/LCO/Swope/*",
+    "bayesn-filters/filters/Lick/KAIT/*",
+    "bayesn-filters/filters/Liverpool/*",
+    "bayesn-filters/filters/Liverpool/IOO/*",
+    "bayesn-filters/filters/Liverpool/RATCam/*",
+    "bayesn-filters/filters/LSST/*",
+    "bayesn-filters/filters/NOT/*",
+    "bayesn-filters/filters/NOT/ALFOSC/*",
+    "bayesn-filters/filters/NOT/MOSCA/*",
+    "bayesn-filters/filters/NOT/NOTCam/*",
+    "bayesn-filters/filters/NULL/*",
+    "bayesn-filters/filters/OAM/TJO/*",
+    "bayesn-filters/filters/Palomar/*",
+    "bayesn-filters/filters/Palomar/P48/*",
+    "bayesn-filters/filters/Palomar/P48/CFH12K/*",
+    "bayesn-filters/filters/Palomar/P48/ZTF/*",
+    "bayesn-filters/filters/Palomar/P60/GRBCam/*",
+    "bayesn-filters/filters/Palomar/P60/SEDM/*",
+    "bayesn-filters/filters/Paranal/*",
+    "bayesn-filters/filters/Paranal/HAWKI/*",
+    "bayesn-filters/filters/Paranal/ISAAC/*",
+    "bayesn-filters/filters/Paranal/VISTA/*",
+    "bayesn-filters/filters/PS1/*",
+    "bayesn-filters/filters/Spitzer/IRAC/*",
+    "bayesn-filters/filters/SPM/RATIR/*",
+    "bayesn-filters/filters/standard/*",
+    "bayesn-filters/filters/standard/2MASS_PAIRITEL/*",
+    "bayesn-filters/filters/standard/Bessell/*",
+    "bayesn-filters/filters/standard/Persson/*",
+    "bayesn-filters/filters/standard/stritzinger/*",
+    "bayesn-filters/filters/Swift/UVOT/*",
+    "bayesn-filters/filters/TNG/*",
+    "bayesn-filters/filters/UKIRT/WFCAM/*",
+    "bayesn-filters/filters/USNO/USNO40/*",
+    "bayesn-filters/standards/*",
+    "model_files/*",
+    "model_files/M20_model/*",
+    "model_files/T21_model/*",
+    "model_files/W22_model/*",
+    "redlaws/*",
+    "redlaws/C00/*",
+    "redlaws/C94/*",
+    "redlaws/CCM89/*",
+    "redlaws/D22/*",
+    "redlaws/F04/*",
+    "redlaws/F19/*",
+    "redlaws/F99/*",
+    "redlaws/F99_AVGLMC/*",
+    "redlaws/F99_LMC2/*",
+    "redlaws/F99_SNANA/*",
+    "redlaws/FM07/*",
+    "redlaws/G23/*",
+    "redlaws/GCC09/*",
+    "redlaws/O94/*",
+    "redlaws/VCG04/*",
+]

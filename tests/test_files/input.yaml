@@ -1,0 +1,16 @@
+mode: custom
+load_model: T21_model
+load_ext_rel: F99
+vary_filter_shifts: False
+vary_offsets: False
+num_chains: 4
+num_warmup: 100
+num_samples: 100
+chain_method: parallel
+initialisation: median
+l_knots: [3500.0, 4900.0, 6200.0, 7700.0, 8700.0, 9500.0]
+tau_knots: [-10.0, 0.0, 10.0, 20.0, 30.0, 40.0]
+map: {g: g_PS1, r: r_PS1, i: i_PS1, z: z_PS1}
+data_root: tests/test_files/
+data_table: T21_mini_set.txt
+outputdir: test_training

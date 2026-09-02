@@ -1,17 +1,18 @@
 sphinx==7.2.6
 sphinx_rtd_theme==2.0.0
-numpy==1.25.2
+numpy>=1.23.5
 numpydoc==1.6.0
 pillow==10.0.0
-pandas
-matplotlib
-h5py
-sncosmo
-arviz
-astropy
-extinction
-jax
-numpyro
-scipy
-ruamel.yaml
-tqdm
+pandas>=1.4.0
+h5py >= 3.6.0
+sncosmo >= 2.10
+arviz >= 0.0.1
+astropy >= 6.0.0
+extinction >= 0.4.6
+dust_extinction >= 1.5
+jax >= 0.4.27
+jaxlib >= 0.4.27
+numpyro >= 0.14.0
+scipy >= 1.15.0
+ruamel.yaml >= 0.16.0
+tqdm >= 4.29.1
