@@ -113,6 +113,26 @@ def load_training_systematics(model_dir):
                 'band_shift_names': [str(nm) for nm in d['band_shift_names']]}
 
 
+def merge_systematic_covariance(syst_files):
+    """
+    Combine the per-SN Delta-mu matrices B written by separate fitting jobs into one systematic
+    covariance. Rows are stacked in the order the files are given, which must match the order the
+    Hubble diagram rows were merged in. Writes SNANA's npz covariance format: the number of SNe,
+    then the upper triangle (including the diagonal, row-major) as float32.
+    """
+    B = []
+    for syst_file in syst_files:
+        with np.load(syst_file) as d:
+            B.append(d['B'])
+    B = np.concatenate(B, axis=0)
+    C_sys = B @ B.T
+
+    cov_file = os.path.basename(syst_files[0]).split('_SPLIT')[0] + '_COVSYS'  # {version}_{fitopt}_COVSYS.npz
+    np.savez(cov_file, nsn=[C_sys.shape[0]],
+             cov=C_sys[np.triu_indices_from(C_sys)].astype(np.float32), allow_pickle=False)
+    print(f'Merged {len(syst_files)} systematics files ({C_sys.shape[0]} SNe) into {cov_file}.npz')
+
+
 class SEDmodel(object):
     """
     BayeSN-SED Model
