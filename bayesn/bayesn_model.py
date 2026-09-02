@@ -97,49 +97,20 @@ def _prior_pot(model, args, kwargs, z_unc):
     return -log_joint
 
 
-def load_training_systematics(chains_dir):
+def load_training_systematics(model_dir):
     """
-    Load a BayeSN training posterior (chains.pkl + companion band-shift CSV) and assemble the
-    global-parameter mean and covariance used to propagate model+calibration systematics into a
-    fit. The residual model is carried as one L_Sigma block (diag(sigmaepsilon) @ L_Omega, lower
-    triangle); per-band lam_shift/mag_shift are keyed by band name from the CSV, with lam_shift's
-    NULL band at index 0 dropped. Returns a dict with the mean vector ghat, covariance Sigma_g, a
-    name->slice layout, and the shift band names.
+    Load systematics.npz from a model directory - the model's own training run reduced to what a fit
+    needs. Returns a dict with the global-parameter mean ghat, a factor F with F F^T = Sigma_g (each
+    column one training draw), a name->slice layout, and the shift band names.
     """
-    with open(os.path.join(chains_dir, 'chains.pkl'), 'rb') as f:
-        chains = pickle.load(f)
-    band_shift_names = list(pd.read_csv(os.path.join(chains_dir, 'output_band_shifts.csv'))['BAND'])
-
-    def draws(key):  # collapse (n_chains, n_samples, ...) -> (n_draws, ...)
-        a = np.asarray(chains[key])
-        return a.reshape(a.shape[0] * a.shape[1], *a.shape[2:])
-
-    n_eps = draws('sigmaepsilon').shape[1]
-    tril = np.tril_indices(n_eps)
-    L_Sigma = draws('sigmaepsilon')[:, :, None] * draws('L_Omega')  # diag(sigmaepsilon) @ L_Omega
-
-    blocks = [('W0', draws('W0')), ('W1', draws('W1')),
-              ('L_Sigma', L_Sigma[:, tril[0], tril[1]]),
-              ('sigma0', draws('sigma0')[:, None]), ('tauA', draws('tauA')[:, None])]
-    for key in ('RV', 'mu_R', 'sigma_R'):  # scalar-per-draw globals the fit conditions on (skip per-SN RV, M_step)
-        if key in chains and draws(key).ndim == 1:
-            blocks.append((key, draws(key)[:, None]))
-    blocks.append(('lam_shift', draws('lam_shift')[:, 1:]))  # drop NULL band (index 0)
-    blocks.append(('mag_shift', draws('mag_shift')))
-
-    layout, cols, i = {}, [], 0
-    for name, b in blocks:
-        layout[name] = (i, i + b.shape[1])
-        cols.append(b)
-        i += b.shape[1]
-    G = np.concatenate(cols, axis=1)
-    for key in ('lam_shift', 'mag_shift'):
-        lo, hi = layout[key]
-        if hi - lo != len(band_shift_names):
-            raise ValueError(f'{key} width {hi - lo} does not match {len(band_shift_names)} band-shift names')
-
-    return {'ghat': G.mean(0), 'Sigma_g': np.cov(G, rowvar=False), 'layout': layout,
-            'band_shift_names': band_shift_names}
+    path = os.path.join(model_dir, 'systematics.npz')
+    if not os.path.exists(path):
+        raise FileNotFoundError(f'No systematics.npz in {model_dir} - this model does not provide training '
+                                f'systematics, so they cannot be propagated')
+    with np.load(path) as d:
+        layout = {str(nm): (int(lo), int(hi)) for nm, (lo, hi) in zip(d['layout_names'], d['layout_bounds'])}
+        return {'ghat': d['ghat'], 'F': d['F'], 'layout': layout,
+                'band_shift_names': [str(nm) for nm in d['band_shift_names']]}
 
 
 class SEDmodel(object):
@@ -300,7 +271,7 @@ class SEDmodel(object):
         self.hsiao_interp = None
         self._lam_shift = None  # fit-ordered per-band shifts applied when systematics propagation is on (else inert)
         self._mag_shift = None
-        self._syst = None  # loaded training-posterior systematics (set only when systematics_chains is passed)
+        self._syst = None  # loaded training-posterior systematics (set only when systematics is enabled)
         self.RV_MW = device_put(jnp.array(3.1))
         self.sigma_pec = device_put(jnp.array(150 / 3e5))
         self.sn_list = None
@@ -309,11 +280,13 @@ class SEDmodel(object):
 
         if os.path.exists(load_model):
             print(f'Loading custom model at {load_model}')
+            self.model_dir = os.path.dirname(os.path.abspath(load_model))
             with open(load_model, 'r') as file:
                 params = yaml.load(file)
         elif load_model in built_in_models:
             print(f'Loading built-in model {load_model}')
-            with open(os.path.join(self.__root_dir__, 'model_files', load_model, 'BAYESN.YAML'), 'r') as file:
+            self.model_dir = os.path.join(self.__root_dir__, 'model_files', load_model)
+            with open(os.path.join(self.model_dir, 'BAYESN.YAML'), 'r') as file:
                 params = yaml.load(file)
         else:
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
@@ -1988,7 +1961,7 @@ class SEDmodel(object):
         args['batch_size'] = args.get('batch_size', None)
         args['num_nobs_bins'] = args.get('num_nobs_bins', 1)
         args['min_bin_gain'] = args.get('min_bin_gain', 0.05)
-        args['systematics_chains'] = args.get('systematics_chains', None)
+        args['systematics'] = args.get('systematics', False)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2147,14 +2120,14 @@ class SEDmodel(object):
         # reorder per-training-band shift values into this fit's band order; 0 where a band has no match (align<0)
         return jnp.where(align >= 0, vals[align], 0.0)
 
-    def _setup_systematics(self, chains_dir):
+    def _setup_systematics(self):
         """
         Load the training posterior, align its per-band shifts to this fit's band ordering, apply the training MEAN
         shifts (so central distances sit at the posterior mean) and announce it loudly. A fit band absent from the
         training set errors by default. Returns the systematics dict augmented with the fit-band alignment index that
         the sensitivity uses later.
         """
-        syst = load_training_systematics(chains_dir)
+        syst = load_training_systematics(self.model_dir)
         name_to_pos = {n: i for i, n in enumerate(syst['band_shift_names'])}
         fit_band_names = [self.inv_band_dict[int(b)] for b in self.used_band_inds]
         align, missing = [], []
@@ -2164,7 +2137,7 @@ class SEDmodel(object):
             if pos < 0 and nm != 'NULL_BAND':
                 missing.append(nm)
         if missing:
-            raise ValueError(f'Bands in the fit but absent from the training systematics {chains_dir}: {missing}. '
+            raise ValueError(f'Bands in the fit but absent from the model systematics {self.model_dir}: {missing}. '
                              f'These have no calibration posterior - retrain, or restrict the fit to trained bands.')
         syst['fit_align'] = np.array(align)
         al = jnp.asarray(syst['fit_align'])
@@ -2174,7 +2147,7 @@ class SEDmodel(object):
         self._mag_shift = self._align_shifts(jnp.asarray(syst['ghat'][mlo:mhi]), al)
 
         print('=' * 78)
-        print(f'SYSTEMATICS PROPAGATION ON ({chains_dir})')
+        print(f'SYSTEMATICS PROPAGATION ON ({self.model_dir})')
         print('Applying training MEAN calibration offsets -> central distances differ from a shifts-off fit:')
         for i, nm in enumerate(fit_band_names):
             if syst['fit_align'][i] >= 0:
@@ -2183,21 +2156,22 @@ class SEDmodel(object):
         print('=' * 78)
         return syst
 
-    def _systematic_covariance(self, zmode):
+    def _systematic_dmu(self, zmode):
         """
-        Propagate the training-posterior covariance Sigma_g to a per-SN distance systematic covariance
-        C_sys = J Sigma_g J^T, using this fit's own outputs - no refitting. Per SN the sensitivity is
-        implicit-differentiated through the posterior mode, in the unconstrained space where the mode is
-        interior and the Hessian positive-definite (in constrained space AV's exponential prior puts the mode
-        on the AV>=0 boundary and no PD Hessian exists). zmode holds each SN's LM MAP from the fit, which a
-        few damped-Newton steps on the potential energy polish to stationarity; then
-        d mu/d g = d mu/d g|expl - a . d(grad_z pot)/dg with a = H^-1 d mu/dz. Returns (C_sys, dmu_vecs,
-        gammas) - the covariance, the independent eigen-direction Delta-mu vectors (sqrt(gamma) u), and their
-        eigenvalues.
+        Propagate the training posterior to a per-SN distance systematic covariance, using this fit's own
+        outputs - no refitting. Per SN the sensitivity is implicit-differentiated through the posterior mode,
+        in the unconstrained space where the mode is interior and the Hessian positive-definite (in
+        constrained space AV's exponential prior puts the mode on the AV>=0 boundary and no PD Hessian
+        exists). zmode holds each SN's LM MAP from the fit, which a few damped-Newton steps on the potential
+        energy polish to stationarity; then
+        d mu/d g = d mu/d g|expl - a . d(grad_z pot)/dg with a = H^-1 d mu/dz. Returns B = J F, one row per
+        SN, whose column j is that SN's Delta-mu under training draw j. C_sys = B B^T; because the rows are
+        per-SN, jobs fitting different SNe can be merged by stacking their B, recovering the cross-job blocks
+        that a per-job C_sys cannot.
         """
         syst = self._syst
         ghat = jnp.asarray(syst['ghat'])
-        Sigma_g = np.asarray(syst['Sigma_g'])
+        F = np.asarray(syst['F'])
         layout = syst['layout']
         align = jnp.asarray(syst['fit_align'])
         L, T = self.l_knots.shape[0], self.tau_knots.shape[0]
@@ -2277,12 +2251,7 @@ class SEDmodel(object):
         # |grad| does not by itself flag a bad sensitivity - it is also large at the floor/ceil kinks in the
         # Hsiao phase interpolation, where C_sys is fine - so report it rather than thresholding on it
         print(f'Mode polish: max |grad| = {grad_norm.max():.2e}, min Hessian eigenvalue = {min_eig.min():.2e}')
-        C_sys = J @ Sigma_g @ J.T
-        w, U = np.linalg.eigh(C_sys)
-        w = np.clip(w[::-1], 0, None)
-        U = U[:, ::-1]
-        dmu_vecs = U * np.sqrt(w)[None, :]  # columns sqrt(gamma_i) u_i sum to C_sys
-        return C_sys, dmu_vecs, w
+        return J @ F  # per-SN rows; C_sys = B B^T, and rows from separate jobs concatenate
 
     def run(self, args, cmd_args):
         """
@@ -2301,11 +2270,11 @@ class SEDmodel(object):
         args = self.parse_yaml_input(args, cmd_args)
 
         self._syst = None
-        if args['systematics_chains'] is not None:  # opt-in: apply training mean shifts, propagate systematics later
+        if args['systematics']:  # opt-in: apply training mean shifts, propagate systematics later
             if args['fit_method'] != 'vi' or args['laplace_method'] != 'lm':
-                raise ValueError('systematics_chains requires fit_method=vi and laplace_method=lm, since the '
+                raise ValueError('systematics requires fit_method=vi and laplace_method=lm, since the '
                                  'sensitivity is evaluated at the LM MAP those produce')
-            self._syst = self._setup_systematics(args['systematics_chains'])
+            self._syst = self._setup_systematics()
 
         # Set up initialisation for HMC chains
         # -------------------------
@@ -2558,13 +2527,13 @@ class SEDmodel(object):
         print(f'Total inference runtime: {end - start:.2f} seconds')
         if self._syst is not None:  # propagate training-posterior systematics from this fit's VI outputs, and save
             zmode = {k[6:]: samples.pop(k) for k in list(samples) if k.startswith('zmode_')}
-            C_sys, dmu_vecs, gammas = self._systematic_covariance(zmode)
+            B = self._systematic_dmu(zmode)
             pre = os.path.join(args['outputdir'], args['outfile_prefix'])
-            np.savetxt(f'{pre}.COV', C_sys)
-            np.savez(f'{pre}_syst.npz', C_sys=C_sys, dmu_vecs=dmu_vecs, gammas=gammas,
-                     sn_list=np.array(self.sn_list, dtype=str))
-            print(f'Systematic covariance: {C_sys.shape[0]}x{C_sys.shape[0]} written to {args["outfile_prefix"]}.COV '
-                  f'(+ {gammas.size} Delta-mu directions in {args["outfile_prefix"]}_syst.npz)')
+            np.savetxt(f'{pre}.COV', B @ B.T)
+            np.savez(f'{pre}_syst.npz', B=B, sn_list=np.array(self.sn_list, dtype=str))
+            print(f'Systematic covariance: {B.shape[0]}x{B.shape[0]} written to {args["outfile_prefix"]}.COV '
+                  f'(+ per-SN Delta-mu over {B.shape[1]} training draws in {args["outfile_prefix"]}_syst.npz, '
+                  f'C_sys = B B^T)')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
