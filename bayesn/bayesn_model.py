@@ -116,17 +116,28 @@ class SEDmodel(object):
         valid model can be constructed. Currently implemented default models
         are listed below - default is T21.
 
+        ``G26_model``: Grayling+26 BayeSN model (arXiv:2606.19429).
+                        Covers rest wavelength range of 2800-10800A (ugriz). Intended for cosmology; jointly fits
+                        filter wavelength and zero-point cross-calibration shifts alongside the SED, using Dovekie
+                        as an informative prior. Population RV distribution. Trained on 1024 SNe Ia from the
+                        Kenworthy+21 compilation with Dovekie calibration updates (Foundation, CfA3, CfA4, CSP,
+                        SDSS, PS1, DES, SNLS).
+        ``G25_model``: Grayling+26 phase-extended optical+NIR BayeSN model (MNRAS 548, stag340; arXiv:2510.11719;
+                        BayeSN-TD). Covers rest wavelength range of 2800-18500A (UBgVrizYJH) and phase range
+                        -10 to +85 days, motivated by fitting late-time observations of strongly-lensed SNe Ia.
+                        Population RV distribution. Trained on 278 SNe Ia combining Avelino+19 low-z compilation,
+                        Foundation DR1 (Foley+18, Jones+19), and CSP-I.
+        ``W22_model``: Ward+22 No-Split BayeSN model (ApJ 956, 111; arXiv:2209.10558).
+                        Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects.
+                        Global RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19) and low-z Avelino+19
+                        (ApJ, 887, 106) compilation of CfA, CSP and others.
+        ``T21_model``: Thorp+21 No-Split BayeSN model (arXiv:2102:05678).
+                        Covers rest wavelength range of 3500-9500A (griz). No treatment of host mass effects.
+                        Global RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19).
         ``M20_model``: Mandel+20 BayeSN model (arXiv:2008.07538).
                         Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects.
                         Global RV assumed. Trained on low-z Avelino+19 (ApJ, 887, 106) compilation of CfA, CSP and
                         others.
-        ``T21_model``: Thorp+21 No-Split BayeSN model (arXiv:2102:05678).
-                        Covers rest wavelength range of 3500-9500A (griz). No treatment of host mass effects. Global RV
-                        assumed. Trained on Foundation DR1 (Foley+18, Jones+19).
-        ``W22_model``: Ward+22 No-Split BayeSN model (arXiv:2209.10558).
-                        Covers rest wavelength range of 3000-18500A (BVRIYJH). No treatment of host mass effects. Global
-                        RV assumed. Trained on Foundation DR1 (Foley+18, Jones+19) and low-z Avelino+19 (ApJ, 887, 106)
-                        compilation of CfA, CSP and others.
     fiducial_cosmology :  dict, optional
         Dictionary containg kwargs ``{H0, Om0}`` for initialising an ``astropy.cosmology.FlatLambdaCDM`` instance.
         Defaults to Riess+16 (ApJ, 826, 56) cosmology:
@@ -978,6 +989,71 @@ class SEDmodel(object):
 
         return X
 
+    def fit_model_uniformRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+        """
+        Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
+        as theta, epsilon, AV and distance modulus.
+
+        Parameters
+        ----------
+        obs: array-like
+            Data to fit, from output of process_dataset
+        weights: array-like
+            Band-weights to calculate photometry
+        fix_tmax: Boolean, optional
+            If True, tmax will be fixed to fiducial value and will not be inferred. Defaults to False
+        fix_theta: Boolean, optional
+            If True, theta will be fixed to value specified by theta_val. Defaults to False.
+        theta_val: float or array-like, optional
+            Value to fix theta to, if fix_theta=True. Defaults to 0
+        fix_AV: Boolean, optional
+            If True, AV will be fixed to value specified by theta_AV. Defaults to False.
+        AV_val: float or array-like, optional
+            Value to fix AV to, if fix_AV=True. Defaults to 0
+
+        Returns
+        -------
+
+        """
+        sample_size = obs.shape[-1]
+        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+
+        with numpyro.plate('SNe', sample_size) as sn_index:
+            theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
+            theta = theta * (1 - fix_theta) + theta_val * fix_theta
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            RV = numpyro.sample('RV', dist.Uniform(1, 6))
+            tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            tmax = tmax * (1 - fix_tmax)
+            t = obs[0, ...] - tmax[None, sn_index]
+            hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
+            keep_shape = t.shape
+            t = t.flatten(order='F')
+            J_t = self.J_t_map(t, self.tau_knots, self.KD_t).reshape((*keep_shape, self.tau_knots.shape[0]),
+                                                                     order='F').transpose(1, 2, 0)
+            eps_mu = jnp.zeros(N_knots_sig)
+            eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
+            eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
+            band_indices = obs[-6, :, sn_index].astype(int).T
+            muhat = obs[-3, 0, sn_index]
+            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat_err = 5
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
+            Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights)
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
+                               obs=obs[1, :, sn_index].T)
+
     def fit_model_globalRV(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
@@ -1194,7 +1270,7 @@ class SEDmodel(object):
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
             RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
-            RV = numpyro.deterministic('Rv',
+            RV = numpyro.deterministic('RV',
                                        self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
 
             t = obs[0, ...] - tmax[None, sn_index]
@@ -2465,21 +2541,25 @@ class SEDmodel(object):
         band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
 
         # Update dust parameters if specified manually
-        if RV:
-            self.RV = jnp.array(RV)
-            self.model_type = 'fixed_RV'
-        elif mu_R:
-            if not sigma_R:
-                raise ValueError('You have set a custom mu_R, please also set a custom sigma_R')
-            self.mu_R = jnp.array(mu_R)
-            self.sigma_R = jnp.array(sigma_R)
-            self.model_type = 'pop_RV'
-        if self.model_type == 'fixed_RV':
-            nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
+        if RV == 'uniform':
+            nuts_kernel = NUTS(self.fit_model_uniformRV, adapt_step_size=True, init_strategy=init_to_median(),
                                max_tree_depth=10)
-        elif self.model_type == 'pop_RV':
-            nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
-                               max_tree_depth=10)
+        else:
+            if RV:
+                self.RV = jnp.array(RV)
+                self.model_type = 'fixed_RV'
+            elif mu_R:
+                if not sigma_R:
+                    raise ValueError('You have set a custom mu_R, please also set a custom sigma_R')
+                self.mu_R = jnp.array(mu_R)
+                self.sigma_R = jnp.array(sigma_R)
+                self.model_type = 'pop_RV'
+            if self.model_type == 'fixed_RV':
+                nuts_kernel = NUTS(self.fit_model_globalRV, adapt_step_size=True, init_strategy=init_to_median(),
+                                   max_tree_depth=10)
+            elif self.model_type == 'pop_RV':
+                nuts_kernel = NUTS(self.fit_model_popRV, adapt_step_size=True, init_strategy=init_to_median(),
+                                   max_tree_depth=10)
         mcmc = MCMC(nuts_kernel, num_samples=250, num_warmup=250, num_chains=4, chain_method='parallel')
         rng = PRNGKey(0)
 
@@ -3945,6 +4025,7 @@ class SEDmodel(object):
         eps_tform = np.random.multivariate_normal(eps_mu, np.eye(N_knots_sig), N)
         eps_tform = eps_tform.T
         eps = np.matmul(self.L_Sigma, eps_tform)
+        eps = eps.T
         eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
         eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full[:, 1:-1, :] = eps
@@ -4034,7 +4115,8 @@ class SEDmodel(object):
 
             theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
                                         eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
-
+            if 'RV' in chains.keys():
+                RV = RV[:num_samples, ...]
             if mean:
                 theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
 

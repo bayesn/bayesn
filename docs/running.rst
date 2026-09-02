@@ -31,7 +31,7 @@ The keys which can be specified are described below. Depending on whether you ar
   - 'dust': Infer dust properties while keeping SN population parameters fixed based on previously inferred model, as explored in Grayling+2024.
   - 'dust_split_mag': Infer dust properties separately in different mass bins split at 10^10 solar masses, allowing for an intrinsic magnitude offset between the bins, as explored in Grayling+2024.
   - 'dust_split_sed': Infer dust properties separately in different mass bins split at 10^10 solar masses, allowing for a difference in baseline intrinsic SED, as explored in Grayling+2024.
-- ``load_model``: The existing BayeSN to use if you are fitting or only doing dust inference. You can either specify one of the built-in models (one of 'M20_model', 'T21_model' or 'W22_model') or use a path to a model you have trained yourself (defined by a bayesn.yaml file).
+- ``load_model``: The existing BayeSN to use if you are fitting or only doing dust inference. You can either specify one of the built-in models (one of 'G26_model', 'G25_model', 'W22_model', 'T21_model' or 'M20_model') or use a path to a model you have trained yourself (defined by a bayesn.yaml file).
 - ``num_warmup``: The number of warmup steps for HMC. Typically 500 is sufficient for training and 250 for fitting for convergence, but you may need to increase this.
 - ``num_samples``: The number of posterior samples to take. Again, typically in development 500 was used when training and 250 when fitting, but you may want to experiment with this to achieve sufficient convergence.
 - ``num_chains``: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.
