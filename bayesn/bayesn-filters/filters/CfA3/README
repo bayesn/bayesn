@@ -1,0 +1,27 @@
+The Jha06 transmission functions can be downloaded from
+https://cdsarc.cds.unistra.fr/ftp/J/AJ/131/527/table5.dat
+These are in the file table5.dat
+The columns are described in the paper and the README
+https://cdsarc.cds.unistra.fr/ftp/J/AJ/131/527/ReadMe
+They are reproduced here for convenience.
+
+    Byte-by-byte Description of file: table5.dat
+    --------------------------------------------------------------------------------
+       Bytes Format Units Label       Explanations
+    --------------------------------------------------------------------------------
+           1  A1    ---   Filter      [UBVRI] Filter
+       3-  6  I4    nm    lambda      Wavelength
+       8- 12  F5.3  ---   Andy/SAO    The AndyCam/SAO normalized response
+      14- 18  F5.3  ---   Andy/Har    The AndyCam/Harris normalized response
+      20- 24  F5.3  ---   4Shoot/SAO  The 4Shooter/SAO normalized response
+      26- 30  F5.3  ---   4Shoot/Har  The 4Shooter/Harris normalized response
+    --------------------------------------------------------------------------------
+
+If table5.dat, keplercam.passbands.txt, and modtran_atm_stubbs_Jan21.dat exist,
+running create_bandpasses.py will create files for the 4Shooter and Keplercam bandpasses
+named 4sh_{UBVRI}_modtran.dat and KC_{BVri}_modtran.dat respectively. The files have
+unlabeled columns of wavelength in Angstroms and photonic transmission (max 1).
+All bandpasses have one application of the model atmosphere (1 airmass?), except
+4Shooter's U band, which has one airmass of the "IRAF Kitt Peak atmospheric extinction curve,
+adjusted to match the average observed extinction coefficients" (sec 2.4, Jha et al., 2006).
+The model atmosphere is interpolated to the bandpass wavelengths via a spline.

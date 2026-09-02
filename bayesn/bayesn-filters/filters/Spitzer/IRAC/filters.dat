@@ -1,0 +1,4 @@
+S36 080924ch1trans_full.txt VegaB=0 Spitzer IRAC [3.6] filter
+S45 080924ch2trans_full.txt VegaB=0 Spitzer IRAC [4.5] filter
+S58 080924ch3trans_full.txt VegaB=0 Spitzer IRAC [5.8] filter
+S80 080924ch4trans_full.txt VegaB=0 Spitzer IRAC [8.0] filter
