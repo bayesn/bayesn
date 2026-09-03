@@ -68,7 +68,7 @@ import timeit
 from ruamel.yaml import YAML
 import time
 from tqdm import tqdm
-from typing import Any
+from typing import Any, NamedTuple
 
 from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 from .spline_utils import invKD, spline_coeffs, spline_coeffs_step
@@ -90,8 +90,30 @@ np.seterr(divide="ignore", invalid="ignore")  # Disable divide by zero warnings
 
 BASE_DIR: Path = Path(__file__).parent.absolute()
 with open(BASE_DIR.parent / "defaults.yaml", "r") as file:
-    default_model_kwargs = yaml.load(file)
-default_model_kwargs["AV_dist"] = dist.Exponential
+    default_kwargs = yaml.load(file)
+default_kwargs["AV_dist"] = dist.Exponential
+
+
+class DustParams(NamedTuple):
+    """Container for population-level dust parameters."""
+    sigma0: ArrayLike
+    tauA: ArrayLike
+    mu_R: ArrayLike | None
+    sigma_R: ArrayLike | None
+    phi_alpha_R: ArrayLike | None
+    mu_z_grad: ArrayLike | float
+    tau_z_grad: ArrayLike | float
+    global_RV: ArrayLike | float
+
+
+class DustPop(NamedTuple):
+    """Container for high-mass and low-mass population dust parameters."""
+    HM: DustParams
+    LM: DustParams | None = None
+    HM_flag: ArrayLike | None = None
+    sigma0: ArrayLike | float | None = None
+    split_variant: str | None = None
+
 
 class SEDmodel(object):
     """
@@ -113,9 +135,9 @@ class SEDmodel(object):
         lower-level method that has more restrictive arguments.
     initial_guess:
         Defined method used to initialise chains for model training.
-    parse_yaml_input:
-        Parse the input yaml file along with any command line arguments to define the
-        job being run.
+    parse_args:
+        Parse the args from the input yaml file along with any command line arguments
+        to define the job being run.
     postprocess:
         Postprocess the output of the MCMC run if required and save the chains and
         summaries.
@@ -394,7 +416,8 @@ class SEDmodel(object):
         """ Changing the ext_rel attribute would not recalculate mw_ext.
         This method allows the user to change extinction relations cleanly.
         """
-        self.mw_ext = DustExtRel(ext_rel_name, x_in=self.hires_wave).get_axav(self.RV_MW)[0]
+        hires = DustExtRel(ext_rel_name, x_in=self.hires_wave, verbose=False)
+        self.mw_ext = hires.get_axav(self.RV_MW, verbose=False)[0]
         self.ext_rel = DustExtRel(ext_rel_name, x_in=self.model_wave)
 
     def _load_hsiao_template(self, file_path: None | str | Path = None) -> None:
@@ -907,7 +930,7 @@ class SEDmodel(object):
     #####################
     ### Configuration ###
     #####################
-    def parse_yaml_input(self, args: dict, cmd_args: dict | argparse.Namespace) -> dict:
+    def parse_args(self, args: dict, cmd_args: dict | argparse.Namespace, verbose: bool = True) -> dict:
         """
         Parameters
         ----------
@@ -917,13 +940,80 @@ class SEDmodel(object):
         cmd_args:
             dict-like of command line arguments, which overrides yaml file if specified
         """
-        # TODO: consolidate populate config params and model kwargs.
         args = self._cmd_arg_overrides(args, cmd_args)
         args.pop("CONFIG", None)
         args.pop("config", None)
         args = self._parse_mode(args)
-        args = self._populate_config_params(args)
-        args["model_kwargs"] = self._populate_model_kwargs(args, verbose=True)
+        self.RV_type = args["rv_type"] = self._get_rv_type(args, verbose=True)
+
+        # Print out when relevant parameters are being assigned their default values.
+        # p2 is only relevant if substr is in p1.
+        for substr, p1, p2 in zip(
+            *np.array([
+                ("split", "mode", "M_split"),
+                ("pop", "rv_type", "mu_R"),
+                ("pop", "rv_type", "sigma_R"),
+                ("pop", "rv_type", "mu_R_min"),
+                ("pop", "rv_type", "mu_R_max"),
+                ("pop", "rv_type", "sigma_sigma_R"),
+                ("uniform", "rv_type", "uniform_RV_min"),
+                ("uniform", "rv_type", "uniform_RV_max"),
+                ("True", "vary_redshift", "tau_z_min"),
+                ("True", "vary_redshift", "tau_z_max"),
+            ]).T
+        ):
+            comparison = args.get(p1)
+            if not verbose or comparison is None or substr not in str(comparison) or p2 in args:
+                continue
+            print(
+                f"{p1} is {comparison}, but {p2} is not in the input args. "
+                f"Setting {p2} to its default of {default_kwargs[p2]}."
+            )
+
+        for param, default in default_kwargs.items():
+            args[param] = args.pop(param, default)
+
+        # Defaults based on model values.
+        for key in ("RV", "mu_R"):
+            if args[key] == "default":
+                args[key] = float(getattr(self, "RV", 3))
+        for key in ("l_knots", "tau_knots"):
+            if args[key] == "default":
+                args[key] = args.get(key, getattr(self, key).tolist())
+
+        # The VI fitting method uses a modified exponential for AV.
+        if args.get("fit_method") == "vi":
+            args["AV_dist"] = zltn.My_Exponential
+
+        if args["outputdir"] == "default":
+            args["outputdir"] = "."
+        args["outputdir"] = Path(args["outputdir"]).absolute()
+        args["photoz"] = args.get("photoz", False)
+        args["num_zltn_iter"] = args.get("num_zltn_iter", 4000 if args["photoz"] else 1500)
+        if args["keep_list"] is not None:
+            keep_list = pd.read_csv(args["keep_list"], comment="#", sep=r"\s+")
+            if keep_list.shape[1] == 1:
+                keep_list = pd.read_csv(args["keep_list"], header=None)[0].astype(str).values
+            else:
+                if "CID" in keep_list.columns:
+                    keep_list = keep_list.CID.values
+                elif "SNID" in keep_list.columns:
+                    keep_list = keep_list.SNID.values
+            args["SNID_keep_list"] = keep_list.astype(str)
+        else:
+            args["SNID_keep_list"] = None
+
+        for key in {"mode", "fit_method", "laplace_method", "lm_solver"}:
+            args[key] = args[key].lower()
+        pdp = args.get("private_data_path", [])
+        args["private_data_path"] = [pdp] if isinstance(pdp, str) else pdp
+        if args["jobsplit"] is not None:
+            args["snana"] = True
+        else:
+            args["jobsplit"] = [1, 1]
+            args["snana"] = False
+        args["jobid"] = args["jobsplit"][0]
+        args["njobtot"] = args["jobsplit"][1] * args["sim_prescale"]
 
         if not (args["mode"].startswith("fit") and args["snana"]):
             try:
@@ -935,13 +1025,13 @@ class SEDmodel(object):
                 )
         self._check_args_valid(args)
 
-        if args["model_kwargs"]["train_new_model"]:
-            self.l_knots = device_put(np.array(args["model_kwargs"]["l_knots"], dtype=float))
+        if args["train_new_model"]:
+            self.l_knots = device_put(np.array(args["l_knots"], dtype=float))
             KD_l = invKD(self.l_knots)
             self.J_l_T = device_put(
                 spline_coeffs(self.model_wave, self.l_knots, KD_l)
             )
-            self.tau_knots = device_put(np.array(args["model_kwargs"]["tau_knots"], dtype=float))
+            self.tau_knots = device_put(np.array(args["tau_knots"], dtype=float))
             self.KD_t = device_put(invKD(self.tau_knots))
         return args
 
@@ -979,13 +1069,12 @@ class SEDmodel(object):
     def _parse_mode(self, args: dict, verbose: bool = True) -> dict:
         """
         This method interprets the mode config parameter.
-        Mode was a macro for several configurations of params/model_kwargs.
+        Mode was a macro for several configurations of kwargs.
         If something is in the yaml but conflicts with the mode, raise an error.
-        Otherwise, populate args with the model's appropriate model_kwargs as if they
-        were in the yaml. _populate_model_kwargs will later move these into
-        args["model_kwargs"].
+        Otherwise, populate args with the model's appropriate kwargs as if they
+        were in the yaml.
 
-        The supported modes and their corresponding model_kwargs are
+        The supported modes and (TODO: their corresponding kwargs) are
             "fitting"
             "training_popRv"
             "training_globalRv"
@@ -1043,9 +1132,6 @@ class SEDmodel(object):
             if split_variant in mode:
                 args["split_variant"] = split_variant
 
-        # args["rv_type"] will be moved to args["model_kwargs"] when
-        # _populate_model_kwargs is called, but may be provided through the input yaml
-        # which would place it in args at this stage.
         if mode.startswith("dust"):
             if args.get("rv_type", "pop") != "pop":
                 raise ValueError(
@@ -1085,166 +1171,6 @@ class SEDmodel(object):
                 "rv_type parameter in the input yaml file."
             )
         return args
-
-    def _populate_config_params(self, args: dict) -> dict:
-        """
-        Provides default configuration parameters necessary for SEDmodel.run if they
-        were not included in the input yaml.
-        config_params are different from model_kwargs in that the former describe how
-        the model is sampled, while the latter describe the model.
-        Both can be provided through the input yaml.
-
-        Parameters
-        ----------
-        args:
-            Combination of arguments from input yaml file and command line overrides,
-            defines model wavelength range and data set to load.
-
-        Returns
-        -------
-        args: dict
-            Original args updated with default config params for terms not in the yaml.
-        """
-        # Set default parameters for some parameters if not specified in input.yaml or
-        # command line. mode straddles the line between a config param and model kwarg
-        # since it sets other model kwargs, but does directly affect SEDmodel._model.
-        for param, default in zip(
-            *np.array([
-                ("mode", "custom"),
-                ("num_chains", 4),
-                ("num_warmup", 500),
-                ("num_samples", 500),
-                ("fit_method", "mcmc"),
-                ("chain_method", "parallel"),
-                ("laplace_method", "lm"),
-                ("lm_maxiter", 30),
-                ("lm_lam_init", 1.0),
-                ("lm_use_linesearch", True),
-                ("zltn_lr", 0.02),
-                ("zltn_lr_final", 0.002),
-                ("zltn_particles", 10),
-                ("stage2_tmax_prior_std", 1.0),
-                ("lm_solver", "gn"),
-                ("batch_size", None),
-                ("initialisation", "median"),
-                ("map", {}),
-                ("drop_bands", []),
-                ("outputdir", Path().absolute()),
-                ("outfile_prefix", "output"),
-                ("jobid", False),
-                ("sim_prescale", 1),
-                ("sim_peakmjd", False),
-                ("zlim", 99.),  # SNe with zhel >= zlim will not be loaded
-                ("peakmjd_key", "PEAKMJD"),  # Key specifying peak MJD in SN files
-                ("jobsplit", None),
-                ("save_fit_errors", False),
-                ("lc_cuts", {}),
-                ("save_summary", False),
-                ("keep_list", None),
-                ("error_floor", 0.0),
-                ("num_lcplot", None),  # If None, make lcplot data for all
-            ], dtype=object).T
-        ):
-            args[param] = args.get(param, default)
-        args["outputdir"] = Path(args["outputdir"])
-        # Photoz is technically a model kwarg, but is needed for num_zltn_iter
-        args["photoz"] = args.get("photoz", False)
-        args["num_zltn_iter"] = args.get("num_zltn_iter", 4000 if args["photoz"] else 1500)
-        if args["keep_list"] is not None:
-            keep_list = pd.read_csv(args["keep_list"], comment="#", sep=r"\s+")
-            if keep_list.shape[1] == 1:
-                keep_list = pd.read_csv(args["keep_list"], header=None)[0].astype(str).values
-            else:
-                if "CID" in keep_list.columns:
-                    keep_list = keep_list.CID.values
-                elif "SNID" in keep_list.columns:
-                    keep_list = keep_list.SNID.values
-            args["SNID_keep_list"] = keep_list.astype(str)
-        else:
-            args["SNID_keep_list"] = None
-
-        for key in {"mode", "fit_method", "laplace_method", "lm_solver"}:
-            args[key] = args[key].lower()
-        pdp = args.get("private_data_path", [])
-        args["private_data_path"] = [pdp] if isinstance(pdp, str) else pdp
-        if args["jobsplit"] is not None:
-            args["snana"] = True
-        else:
-            args["jobsplit"] = [1, 1]
-            args["snana"] = False
-        args["jobid"] = args["jobsplit"][0]
-        args["njobtot"] = args["jobsplit"][1] * args["sim_prescale"]
-        return args
-
-    def _populate_model_kwargs(self, args: dict, verbose: bool = True) -> dict:
-        """
-        Provides default parameters passed as keywords to SEDmodel._model if they were
-        not included in the input yaml. Also prints some warnings if relevant default
-        parameters are being assigned and verbose is True.
-        config_params are different from model_kwargs in that the former describe how
-        the model is sampled, while the latter describe the model.
-        Both can be provided through the input yaml.
-
-        Parameters
-        ----------
-        args:
-            Combination of arguments from input yaml file and command line overrides,
-            defines model wavelength range and data set to load.
-        verbose:
-
-        Returns
-        -------
-        args: dict
-            Original args updated with default model kwargs for terms not in the yaml.
-        """
-        model_kwargs = {}
-        # The args include everything from the input yaml, which may include
-        # model kwargs. default_model_kwargs contains a complete set of model kwargs
-        # and default values, so they can be assigned if not in the args dict.
-        # The defaults are configured for fitting if no mode is assigned (mode does not
-        # start with fit, training, or dust).
-        defaults = default_model_kwargs
-        defaults["RV"] = float(getattr(self, "RV", 3))
-        defaults["mu_R"] = float(getattr(self, "RV", 3))
-        self.RV_type = model_kwargs["rv_type"] = self._get_rv_type(args, verbose=True)
-        for param, default in defaults.items():
-            model_kwargs[param] = args.pop(param, default)
-        model_kwargs["l_knots"] = args.get("l_knots", self.l_knots.tolist())
-        model_kwargs["tau_knots"] = args.get("tau_knots", self.tau_knots.tolist())
-
-        # The VI fitting method uses a modified exponential for AV.
-        if args.get("fit_method") == "vi":
-            model_kwargs["AV_dist"] = zltn.My_Exponential
-        if not verbose:
-            return model_kwargs
-
-        # Print out when relevant parameters are being assigned their default values.
-        # p2 is only relevant if substr is in p1.
-        for substr, p1, p2 in zip(
-            *np.array([
-                ("split", "mode", "M_split"),
-                ("pop", "rv_type", "mu_R"),
-                ("pop", "rv_type", "sigma_R"),
-                ("pop", "rv_type", "mu_R_min"),
-                ("pop", "rv_type", "mu_R_max"),
-                ("pop", "rv_type", "sigma_sigma_R"),
-                ("uniform", "rv_type", "uniform_RV_min"),
-                ("uniform", "rv_type", "uniform_RV_max"),
-                ("True", "vary_redshift", "tau_z_min"),
-                ("True", "vary_redshift", "tau_z_max"),
-            ]).T
-        ):
-            if p1 == "mode":
-                comparison = args[p1]
-            else:
-                comparison = model_kwargs[p1]
-            if substr not in str(comparison) or model_kwargs[p2] != defaults[p2]:
-                continue
-            print(
-                f"{p1} is {comparison}, but {p2} is not in the input yaml. "
-                f"Setting {p2} to its default of {defaults[p2]}."
-            )
-        return model_kwargs
 
     def _get_rv_type(self, args: dict, verbose: bool = True) -> str:
         """
@@ -1326,33 +1252,32 @@ class SEDmodel(object):
                     f"{val_name} must be a float-like value. Instead got {val}."
                 )
 
-        model_kwargs = args["model_kwargs"]
         # RV_type
         supported_RV_types = ("global", "pop", "uniform")
-        if model_kwargs["rv_type"] not in supported_RV_types:
+        if args["rv_type"] not in supported_RV_types:
             raise ValueError(
-                f"rv_type is {model_kwargs['rv_type']}, which is not a supported"
+                f"rv_type is {args['rv_type']}, which is not a supported"
                 f"option. Please set rv_type to something from {supported_RV_types}."
             )
-        if model_kwargs["rv_type"] == "global":
-            check_scalar(model_kwargs["RV"], "RV")
-        elif model_kwargs["rv_type"] == "pop":
-            [check_scalar(model_kwargs[name], name) for name in ("mu_R", "sigma_R")]
-            if float(model_kwargs["sigma_R"]) == 0:
+        if args["rv_type"] == "global":
+            check_scalar(args["RV"], "RV")
+        elif args["rv_type"] == "pop":
+            [check_scalar(args[name], name) for name in ("mu_R", "sigma_R")]
+            if float(args["sigma_R"]) == 0:
                 raise ValueError(
                     "sigma_R cannot be 0. Consider using rv_type: 'global'."
                 )
-        elif model_kwargs["rv_type"] == "uniform":
-            [check_scalar(model_kwargs[name], name) for name in ("uniform_RV_min", "uniform_RV_max")]
-            if float(model_kwargs["uniform_RV_min"]) == float(model_kwargs["uniform_RV_max"]):
+        elif args["rv_type"] == "uniform":
+            [check_scalar(args[name], name) for name in ("uniform_RV_min", "uniform_RV_max")]
+            if float(args["uniform_RV_min"]) == float(args["uniform_RV_max"]):
                 raise ValueError(
                     "uniform_RV_min cannot equal uniform_RV_max. "
                     "Consider using rv_type: 'global'."
                 )
 
-        if model_kwargs["data_type"] not in ("flux", "mag"):
+        if args["data_type"] not in ("flux", "mag"):
             raise ValueError(
-                f"Requested data_type, {args['model_kwargs']['data_type']}, is not "
+                f"Requested data_type, {args['args']['data_type']}, is not "
                 "supported. Please set data_type to either 'flux' or 'mag'."
             )
         if args["fit_method"] not in ("vi", "mcmc"):
@@ -1456,7 +1381,7 @@ class SEDmodel(object):
         self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
         self.lcplot_data = ds.make_lcplot_data(args["num_lcplot"])
         sn_data, obs_data = ds.make_bayesn_data(
-            data_type=args["model_kwargs"]["data_type"],
+            data_type=args["data_type"],
             band_dict=None,  # uses 1-based order in ds.unique_bands
             N_obs_max=args.get("N_obs_max"),
             cosmo=self.cosmo,
@@ -1481,9 +1406,9 @@ class SEDmodel(object):
             lam_shifts=np.zeros(len(self.ds.unique_bands)+1),
         )
 
-    #################
-    ### Modelling ###
-    #################
+    ###############################
+    ### Astronomical Quantities ###
+    ###############################
     def _get_axav(self, RV: ArrayLike) -> Array:
         """
         Parameters
@@ -1870,6 +1795,179 @@ class SEDmodel(object):
 
         return model_mag
 
+    def get_flux_from_chains(
+        self,
+        t: ArrayLike,
+        bands: ArrayLike,
+        chains: str | ArrayLike,
+        zs: ArrayLike | float,
+        ebv_mws: ArrayLike | float,
+        mag: bool = True,
+        num_samples: int | None = None,
+        num_sne: int | None = None,
+        mean: bool = False
+    ) -> Array:
+        """
+        Returns model photometry for posterior samples from BayeSN fits, which can be
+        used to make light curve fit plots.
+
+        Parameters
+        ----------
+        t :
+            Array of phases to evaluate model photometry at
+        bands :
+            List of bandpasses to evaluate model photometry in. Photometry will be
+        chains :
+            If a str, path to file containing BayeSN fitting posterior samples you
+            wish to obtain photometry for. If not a str, then the posterior samples.
+        zs :
+            Array of heliocentric redshifts corresponding to the SNe you are obtaining
+            model fit light curves for.
+        ebv_mws :
+            Array containing Milky Way extincion values corresponding to the SNe you
+            are obtaining model fit light curves for.
+        mag :
+            Boolean to specify whether you want magnitude or flux data. If True,
+            magnitudes will be returned. If False, flux densities (f_lambda) will be
+            returned. Default to True i.e. mag data.
+        num_samples :
+            An optional keyword argument to specify the number of posterior samples
+            you wish to obtain photometry for. Might be useful in testing if you are
+            looking at lots of SNe, as otherwise this function will take a while to
+            generate e.g. photometry for 1000 posterior samples across 1000 SNe.
+            Default to None, meaning that photometry will be calculated for all
+            posterior samples in chains provided.
+        mean :
+            If True, generate only one flux time-series for each SN using the mean
+            values for SN parameters.
+
+        Returns
+        -------
+        flux_grid : Array shape (N_sn, num_samples, len(bands), len(t))
+            Array containing photometry for all SNe, posterior samples, bands and
+            phases requested.
+        """
+        if type(chains) == str:
+            with open(chains, "rb") as file:
+                chains = pickle.load(file)
+
+        if num_sne is None:
+            num_sne = chains["theta"].shape[2]
+        if num_samples is None:
+            num_samples = chains["theta"].shape[0] * chains["theta"].shape[1]
+
+        if np.isscalar(zs):
+            zs = np.array([zs])
+        if np.isscalar(ebv_mws):
+            ebv_mws = np.array([ebv_mws])
+
+        if mean:
+            num_samples = 1
+
+        band_list = isinstance(bands[0], list)
+        if band_list:
+            max_bands = np.max([len(b) for b in bands])
+        else:
+            max_bands = len(bands)
+        if self.band_weights is None:
+            self.band_weights = self._calculate_band_weights(zs, ebv_mws)
+
+        flux_grid = jnp.zeros((num_sne, num_samples, max_bands, len(t)))
+        print("Getting best fit light curves from chains...")
+        for i in tqdm(np.arange(num_sne)):
+            if band_list:
+                fit_bands = bands[i]
+            else:
+                fit_bands = bands
+            theta = chains["theta"][..., i].flatten(order="F")
+            AV = chains["AV"][..., i].flatten(order="F")
+            tmax = chains["tmax"][..., i].flatten(order="F")
+            if "RV" in chains:
+                RV = chains["RV"][..., i].flatten(order="F")
+            else:
+                RV = None
+            if "lam_shift" in chains:
+                lam_shift = chains["lam_shift"][..., i].flatten(order="F")
+            else:
+                # Not None because simulate_light_curve interprets constants as a value
+                # to use whereas None leads to sampling from priors.
+                lam_shift = 0
+            if "mag_shift" in chains:
+                mag_shift = chains["mag_shift"][..., i].flatten(order="F")
+            else:
+                # See above lam_shift comment.
+                mag_shift = 0
+            mu = chains["mu"][..., i].flatten(order="F")
+            eps = chains["eps"][..., i]
+            eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order="F")
+            eps = eps.reshape(
+                (eps.shape[0], self.l_knots.shape[0] - 2, self.tau_knots.shape[0]),
+                order="F",
+            )
+            eps_full = jnp.zeros(
+                (eps.shape[0], self.l_knots.shape[0], self.tau_knots.shape[0])
+            )
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+            del_M = chains["delM"][..., i].flatten(order="F")
+
+            theta, AV, mu, eps, del_M, tmax = (
+                theta[:num_samples],
+                AV[:num_samples],
+                mu[:num_samples],
+                eps[:num_samples],
+                del_M[:num_samples],
+                tmax[:num_samples],
+            )
+            if "RV" in chains:
+                RV = RV[:num_samples]
+            if "lam_shift" in chains:
+                lam_shift = lam_shift[:num_samples]
+            if "mag_shift" in chains:
+                mag_shift = mag_shift[:num_samples]
+            if mean:
+                theta, AV, mu, eps, del_M, tmax = (
+                    theta.mean()[None],
+                    AV.mean()[None],
+                    mu.mean()[None],
+                    eps.mean(axis=0)[None],
+                    del_M.mean()[None],
+                    tmax.mean()[None],
+                )
+                if "RV" in chains:
+                    RV = RV.mean()[None]
+                if "lam_shift" in chains:
+                    lam_shift = lam_shift.mean()[None]
+                if "mag_shift" in chains:
+                    mag_shift = mag_shift.mean()[None]
+
+            lc, lc_err, params = self.simulate_light_curve(
+                t,
+                theta.shape[0],
+                fit_bands,
+                theta=theta,
+                AV=AV,
+                mu=mu,
+                tmax=tmax,
+                del_M=del_M,
+                eps=eps,
+                lam_shift=lam_shift,
+                mag_shift=mag_shift,
+                RV=RV,
+                z=zs[i],
+                write_to_files=False,
+                ebv_mw=ebv_mws[i],
+                yerr=0,
+                mag=mag,
+                band_weights=self.band_weights[i : i + 1],
+            )
+            lc = lc.T
+            lc = lc.reshape(num_samples, len(fit_bands), len(t))
+            flux_grid = flux_grid.at[i, :, : len(fit_bands), :].set(lc)
+
+        return flux_grid
+    #########################
+    ### Numpyro Modelling ###
+    #########################
     def _model(
         self,
         obs: ArrayLike,
@@ -1887,7 +1985,6 @@ class SEDmodel(object):
         **kwargs: Any,
     ) -> None:
         # TODO: Split functionality by primary use cases (fitting / training)
-        # TODO: move private methods somewhere else so people browsing run method don't get overwhelmed.
         """
         Modular numpyro sampling functions are defined and organized based on common
         use cases. The input kwargs are then parsed and the appropriate functions are
@@ -2011,510 +2108,28 @@ class SEDmodel(object):
             tau_z_max: default 0.5
                 The upper bound of the uniform distribution of tau_z_grad.
         """
-        def _sample_model_params(train_new_model: bool) -> tuple[Array, Array, Array]:
-            """ Sample W0, W1, and L_Sigma if train_new_model
-
-            Parameters
-            ----------
-            train_new_model: bool
-                If True, draw new samples for W0, W1, and L_Sigma.
-                If False, return the model's pre-computed values.
-
-            Returns
-            -------
-            W0: numpryo Sample if train_new_model, else jax.Array
-            W1: same type W0
-            L_Sigma: same type as W0
-            """
-            if not train_new_model:
-                return self.W0, self.W1, self.L_Sigma
-            W_mu = jnp.zeros(self.N_knots)
-            W0 = numpyro.sample("W0", dist.MultivariateNormal(W_mu, jnp.eye(self.N_knots)))
-            W1 = numpyro.sample("W1", dist.MultivariateNormal(W_mu, jnp.eye(self.N_knots)))
-            W0 = jnp.reshape(
-                W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            W1 = jnp.reshape(
-                W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-
-            sigmaepsilon = numpyro.sample("sigmaepsilon", dist.HalfCauchy(jnp.ones(self.N_knots_sig)))
-
-            # Cholesky factors L of correlation matrix Omega
-            # Covariance matrix Sigma = diag(sigmaepsilon) Omega diag(sigmaepsilon)
-            # Or, Sigma = L_Sigma L_Sigma.T with L_Sigma = diag(sigmaepsilon) L_Omega
-            L_Omega = numpyro.sample("L_Omega", dist.LKJCholesky(self.N_knots_sig))
-            L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
-
-            return W0, W1, L_Sigma
-
-        def _sample_model_dust_params(
-            infer_dust_properties: bool = True,
-            vary_redshift: bool = False,
-            suffix: str = "",
-            global_RV: ArrayLike | None = None,
-            mu_R: ArrayLike | None = None,
-            sigma_R: ArrayLike | None = None,
-            mu_R_min: float = 1.2,
-            mu_R_max: float = 6,
-            sigma_sigma_R: float = 2,
-            tau_z_min: float = -0.5,
-            tau_z_max: float = 0.5,
-            uniform_RV_min: float = 1,
-            uniform_RV_max: float = 6,
-            **kwargs: Any,
-        ) -> tuple[Array, Array, Array | None, Array | None, Array | None, Array | None, Array | None, Array | None]:
-            """ Draw SN population level parameters that may vary by sub-population
-            (e.g. split by galaxy mass)
-
-            Parameters
-            ----------
-            infer_dust_properties:
-                If True, samples sigma0, tauA.
-                If True and SEDmodel.RV_type is "pop", also samples mu_R, sigma_R
-                If True and vary_redshift is True, also samples mu_z_grad and
-                tau_z_grad. If False, uses pre-computed model attributes.
-            vary_redshift:
-                If True and infer_dust_properties is True, samples mu_z_grad and
-                tau_z_grad.
-            suffix:
-                This string is appended to the parameter naming scheme used by numpyro.
-            global_RV:
-                Default value for global_RV if infer_dust_properties is False.
-            mu_R:
-                Default value for mu_R if infer_dust_properties is False.
-            sigma_R:
-                Default value for sigma_R if infer_dust_properties is False.
-            mu_R_min:
-                Minimum value for mu_R. 1.2 is the value for pure Rayleigh Scattering
-                (A propto wl^-4) as estimated in Draine 2003, 2003ARA&A..41..241D
-            mu_R_max:
-                Maximum value for mu_R. Very large grains would produce extinction
-                curves with no theoretical upper limit on R_V, but many extinction
-                curves use data capping out around R_V = 6 (e.g. Cardelli 1989,
-                Fitzpatrick 1999/2019, etc.)
-            sigma_sigma_R:
-                Scale factor for sigma_R ~ HalfNormal(sigma_sigma_R).
-            tau_z_min:
-                Lower limit for the evolution of tauA with redshift.
-                tau_z_grad ~ U(tau_z_min, tau_z_max)
-            tau_z_max:
-                Upper limit for the evolution of tauA with redshift.
-                tau_z_grad ~ U(tau_z_min, tau_z_max)
-
-            Returns
-            -------
-                sigma0:
-                tauA:
-                mu_R:
-                sigma_R:
-                phi_alpha_R:
-                mu_z_grad:
-                tau_z_grad:
-            """
-            # If not infer_dust properties, return the sigma0 and tauA values
-            # pre-defined in the model. If mu_R and sigma_R are provided, return those
-            # values and the resultant phi_alpha_R. Assume no variation with redshift.
-            phi_alpha_R, mu_z_grad, tau_z_grad, global_RV = [0 for _ in range(4)]
-            if not infer_dust_properties:
-                if mu_R is not None and sigma_R is not None:
-                    phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
-                return self.sigma0, self.tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, self.RV
-
-            sigma0 = numpyro.sample(f"sigma0{suffix}", dist.HalfCauchy(0.1))
-            tauA = numpyro.sample(f"tauA{suffix}", dist.HalfCauchy())
-
-            if self.RV_type == "global" and global_RV == 0:
-                global_RV = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
-            if self.RV_type == "pop":
-                mu_R = numpyro.sample(f"mu_R{suffix}", dist.Uniform(mu_R_min, mu_R_max))
-                sigma_R = numpyro.sample(f"sigma_R{suffix}", dist.HalfNormal(sigma_sigma_R))
-                phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
-            if vary_redshift:
-                mu_z_grad = numpyro.sample(f"mu_grad{suffix}", dist.Uniform(mu_R_min - mu_R, mu_R_max - mu_R))
-                tau_z_grad = numpyro.sample(f"tau_z_grad{suffix}", dist.Uniform(tau_z_min, tau_z_max))
-            return sigma0, tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, global_RV
-
-        def _sample_split_model_dust_params(
-            split_variant: str | None,
-            infer_dust_properties: bool,
-            vary_redshift: bool,
-            mass: Array,
-            M_split: float,
-            W0: Array,
-            **kwargs: Any,
-        ) -> tuple[dict[str, Any], Array, Array, Array]:
-            """ Parse the split_variant to figure out what parameters must be sampled.
-
-            If split_variant is None, call _sample_model_dust_params once and store the
-            parameters in split_kwargs["HM"].
-
-            If split_variant is not None, then a High Mass (HM) and Low Mass (LM) set
-            of parameters must be generated for populations with mass values on either
-            side of the M_split. The parameters are stored in split_kwargs["HM"] and
-            split_kwargs["LM"] respectively.
-
-            If split_variant is "split_mag", sample M_step_HM/LM.
-            These values are added to M0 for their corresponding populations.
-            This corresponds to an achromatic, time-invariant difference in SEDs.
-
-            If split_variant is "split_sed", sample delW_HM/LM.
-            These values are added to W0 for their corresponding populations.
-            This allows for a chromatic, time-varying difference in SEDs.
-
-            Parameters
-            ----------
-            split_variant:
-                This should be None, "split_mag", or "split_sed".
-                None indicates the model should treat all SNe as a single population.
-                Otherwise, the SNe are treated as coming from a HM and LM population,
-                where the model dust parameters (sigma0, tauA, mu_R, sigma_R,
-                phi_alpha_R, mu_z_grad, and tau_z_grad) are allowed to differ.
-
-                "split_mag" samples for population-specific M0 values, representing
-                an achromatic, time-invariant difference in the SEDs.
-
-                "split_sed" samples for population-specific W0 values, representing
-                a chromatic, time-varying difference in the SEDs.
-
-            infer_dust_properties:
-                If True, draw new samples for model dust parameters.
-                If False, use the pre-computed model values.
-
-            vary_redshift:
-            mass:
-                Shape (N_sn,)
-                An array of log_10(stellar mass / M_sun) for each SN's host galaxy.
-            M_split:
-                The dividing edge in log_10(stellar mass / M_sun) between LM and HM.
-            W0:
-                Passed as a parameter so that W0 can be returned with or without
-                modification as appropriate for each split_variant.
-                M0 is not sampled, so it does not need to be passed as a parameter.
-
-            Returns
-            -------
-                split_kwargs:
-                HM_flag:
-                M0:
-                W0:
-            """
-            split_kwargs = {}
-            dust_param_names = ("sigma0", "tauA", "mu_R", "sigma_R", "phi_alpha_R", "mu_z_grad", "tau_z_grad", "global_RV")
-            HM_flag = mass > M_split
-            M0 = self.M0
-            # Regardless of split variant, at least one set of dust parameters should
-            # be drawn. These are stored in split_kwargs["HM"] even if there is no
-            # split. The numpyro parameters will need to know what suffix to use.
-            split_kwargs["HM"] = copy.deepcopy(kwargs)
-            params = _sample_model_dust_params(
-                infer_dust_properties=infer_dust_properties,
-                vary_redshift=vary_redshift,
-                suffix="_HM"*(split_variant is not None),
-                **kwargs
-            )
-            split_kwargs["HM"].update(zip(dust_param_names, params))
-            if split_variant is not None:
-                split_kwargs["LM"] = copy.deepcopy(kwargs)
-                LM_params = _sample_model_dust_params(
-                    infer_dust_properties=infer_dust_properties,
-                    vary_redshift=vary_redshift,
-                    suffix="_LM",
-                    **kwargs,
-                    )
-                split_kwargs["LM"].update(zip(dust_param_names, LM_params))
-                split_kwargs["HM"]["sigma0"] = HM_flag * split_kwargs["HM"]["sigma0"] + (1 - HM_flag) * split_kwargs["LM"]["sigma0"]
-
-            if split_variant == "split_mag":
-                M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
-                M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
-                M0 = (
-                    M0 * jnp.ones_like(mass)
-                    + HM_flag * M_step_HM
-                    + (1 - HM_flag) * M_step_LM
-                )
-
-            if split_variant == "split_sed":
-                W_mu = jnp.zeros(self.N_knots)
-                delW_HM = numpyro.sample(
-                    "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-                )
-                delW_LM = numpyro.sample(
-                    "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-                )
-                delW_HM = jnp.reshape(
-                    delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-                )
-                delW_LM = jnp.reshape(
-                    delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-                )
-                W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
-                W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
-                W0 = (
-                    HM_flag[:, None, None] * W0_HM[None, ...]
-                    + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
-                )
-            return split_kwargs, HM_flag, M0, W0
-
-        def _sample_z(z_obs: ArrayLike, z_obs_err: ArrayLike) -> Array:
-            if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
-                u = numpyro.sample('u', dist.Uniform(self.z_u_grid[0], self.z_u_grid[-1]))
-                if z_icdf is not None:  # single per-SN row passed in (VI vmaps over SNe)
-                    z_sampled = numpyro.deterministic('z', jnp.interp(u, self.z_u_grid, z_icdf))
-                else:  # MCMC: one plate over all SNe, index the shared table
-                    z_sampled = numpyro.deterministic('z', jax.vmap(jnp.interp, in_axes=(0, None, 0))(
-                        u, self.z_u_grid, self.z_icdf_grid[sn_index]))
-            else:  # Gaussian catalog prior
-                ztform = numpyro.sample('ztform', dist.Normal(0, 1))
-                z_sampled = numpyro.deterministic('z', z_obs + z_obs_err * ztform)
-            # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            return z_sampled
-
-        def _sample_SN_dust_params(
-            tauA: float,
-            AV_dist: Callable[[float], Array] = dist.Exponential,
-            fix_AV: float | None = None,
-            global_RV: ArrayLike | None = None,
-            mu_R: ArrayLike | None = None,
-            sigma_R: ArrayLike | None = None,
-            phi_alpha_R: ArrayLike | None = None,
-            redshift: float = 0,
-            mu_z_grad: float = 0,
-            tau_z_grad: float = 0,
-            uniform_RV_min: float = 1,
-            uniform_RV_max: float = 6,
-            suffix: str = "",
-            **kwargs: Any,
-        ) -> tuple[Array, Array]:
-            """ Sample AV and RV for each SN.
-
-            Parameters
-            ----------
-            tauA:
-                Scale factor for sampling AV ~ Exponential(1/tauA)
-            AV_dist:
-                The stochastic function used to draw AV as fn(1/tauA).
-                For normal use, this should be dist.Exponential.
-                For VI, this should be zltn.My_Exponential.
-            fix_AV: default None
-                If not None, use float(fix_AV) as the AV value for all SNe
-            RV: default None
-                If self.RV_type == "global", this is the RV value for all SNe.
-            mu_R: default None
-                If self.RV_type == "pop", this is used to calculate RV.
-            sigma_R: default None
-                If self.RV_type == "pop", this is used to calculate RV.
-            phi_alpha_R: default None
-                If self.RV_type == "pop", this is used to calculate RV.
-                While this is calculable as norm.cdf((self.trunc_val - mu_R) / sigma_R),
-                passing it as an argument saves computation.
-            redshift: default 0
-                Needed if mu_z_grad or tau_z_grad are not 0.
-            mu_z_grad: default 0
-                global_RV and mu_R are increased by redshift * mu_z_grad.
-            tau_z_grad: default 0
-                tauA is increased by redshift * tau_z_grad.
-            uniform_RV_min: default 1
-                If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
-            uniform_RV_max: default 6
-                If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
-            suffix: default ""
-                This string is appended to the parameter naming scheme used by numpyro.
-
-            Returns
-            -------
-                AV:
-                RV:
-            """
-            suffix = f"_{suffix}".replace("__", "_").rstrip("_")
-            if fix_AV is not None:
-                AV = jnp.array([float(fix_AV)])
-            else:
-                AV = numpyro.sample(f"AV{suffix}", AV_dist(1 / (tauA + redshift * tau_z_grad)))
-
-            if self.RV_type == "global":
-                RV = global_RV + redshift * mu_z_grad
-            if self.RV_type == "pop":
-                RV_tform = numpyro.sample(f"RV_tform{suffix}", dist.Uniform(0, 1))
-                RV = numpyro.deterministic(
-                    f"RV{suffix}",
-                    mu_R + redshift * mu_z_grad + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)),
-                )
-            elif self.RV_type == "uniform":
-                RV = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
-            return AV, RV
-
-        def _sample_split_SN_dust_params(split_variant: str | None, HM_flag: ArrayLike, redshift: ArrayLike, **split_kwargs: Any) -> tuple[Array, Array]:
-            """ Parse split_variant to appropriately sample AV and RV for each SN.
-
-            If split_variant is None, call _sample_SN_dust_params to get one AV and RV
-            for each SN using split_kwargs["HM"], which is where the parameters are
-            stored when split_variant is None in _sample_split_model_dust_params.
-
-            If split_variant is not None, then a High Mass (HM) and Low Mass (LM) set
-            of AVs and RVs are be generated for each SN, and the HM_flag mask is used
-            to determine which value to use for each SN.
-            """
-
-            AV, RV = _sample_SN_dust_params(
-                redshift=redshift,
-                suffix="HM"*(split_variant is not None),
-                **split_kwargs["HM"],
-            )
-            if split_variant is not None:
-                AV_LM, RV_LM = _sample_SN_dust_params(
-                    redshift=obs[5, 0, sn_index],
-                    suffix="LM",
-                    **split_kwargs["LM"],
-                )
-                AV = numpyro.deterministic("AV", HM_flag * AV + (1 - HM_flag) * AV_LM)
-                RV = numpyro.deterministic("RV", HM_flag * RV + (1 - HM_flag) * RV_LM)
-            return AV, RV
-
-        def _sample_SN_params(
-            N_sn: int,
-            sn_obs: ArrayLike,
-            L_Sigma: Array,
-            sigma0: float | Array,
-            fix_theta: float | None = None,
-            muhat_err: float | None = None,
-            fix_dist_limit: float = 0.08,
-            fix_dist_Ds_err: float = 5,
-            **kwargs: Any,
-        ) -> tuple[Array, Array, Array]:
-            """ Sample theta, eps, Ds for each SN.
-
-            Parameters
-            ----------
-            N_sn:
-                Total number of SN in self.data.
-                This information is required because eps is delivered as a matrix of shape
-                (N_sn, N_l_knots, N_tau_knots) where the N_sn broadcasting is handled by
-                calling this function within a numpyro plate.
-            sn_obs: ArrayLike
-                Slice of self.data of shape (10, N_max_epochs).
-                The first dimension spans
-                    phase, flux, flux error, host-galaxy mass, band indices, host-galaxy z,
-                    host-galaxy z error, cosmological distance modulus, MW E(B-V), masking
-                N_max_epochs is the greatest number of observations for a single SN across
-                all SN in self.data.
-            L_Sigma:
-                The covariance matrix for the prior of epsilon.
-                The shape is (N_knots, N_knots) array where N_knots is the product of
-                (N_l_knots - 2) and N_tau_knots. The - 2 is because the bluest and reddest
-                bins in the full epsilon matrix are fixed to 0 at all phase bins.
-            sigma0:
-                Model-specific standard deviation in distance modulus to be added in
-                quadrature to the error in cosmological distance modulus.
-                If float-like, use the same sigma0 value for all SNe.
-                If split_variant is not None, this will be an array of shape (N_sn,).
-                The sigma0 values will be broadcast to each SN.
-            fix_theta: default None
-                If not None, float(fix_theta) will be used as the theta value for all SNe.
-            muhat_err:
-                If None, calculate muhat_err as 5*sqrt(z_err**2 + self.sigma_pec**2)/(z*ln(10))
-                If scalar, use muhat_err to calculate Ds_err
-
-            Returns
-            -------
-                theta:
-                eps:
-                Ds:
-            """
-            redshift, redshift_error, muhat = sn_obs[5:8, 0]
-
-            if fix_theta is not None:
-                theta = jnp.array([float(fix_theta)])
-            else:
-                theta = numpyro.sample(f"theta", dist.Normal(0, 1.0))
-
-            eps_mu = jnp.zeros(self.N_knots_sig)
-            eps_tform = numpyro.sample(
-                "eps_tform", dist.MultivariateNormal(eps_mu, jnp.eye(self.N_knots_sig))
-            )
-            eps_tform = eps_tform.T
-            eps = numpyro.deterministic("eps", jnp.matmul(L_Sigma, eps_tform))
-            eps = eps.T
-            eps = jnp.reshape(
-                eps,
-                (N_sn, self.N_knots_sig_l, self.tau_knots.shape[0]),
-                order="F",
-            )
-            eps_full = jnp.zeros(
-                (N_sn, self.l_knots.shape[0], self.tau_knots.shape[0])
-            )
-            eps = eps_full.at[:, 1:-1, :].set(eps)
-
-            # x * x seems more performant than x ** 2 or jnp.power(x, 2)
-            # Should this be just 5?
-            if muhat_err is None:
-                muhat_err = (
-                    5
-                    / (redshift * jnp.log(10))
-                    * jnp.sqrt(redshift_error * redshift_error + self.sigma_pec * self.sigma_pec)
-                )
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
-            fix_dist = redshift < fix_dist_limit
-            Ds_err = Ds_err * fix_dist + fix_dist_Ds_err * (1 - fix_dist)
-            Ds_tform = numpyro.sample("Ds_tform", dist.Normal(0, 1))
-            Ds = numpyro.deterministic("Ds", muhat + Ds_tform * Ds_err)
-
-            return theta, eps, Ds
-
-        def _sample_SN_tmax(
-            t_all_sn: ArrayLike,
-            sn_index: Array,
-            z_obs: ArrayLike,
-            z_sampled: ArrayLike,
-            fix_tmax: bool = False,
-            tmax_min: float = -10,
-            tmax_max: float = 10
-        ) -> tuple[Array, Array, Array | None]:
-            """ Draw tmax samples for each SN and provide hsiao_interp and J_t.
-            This only includes tmax.
-            This does not sample theta, eps, or Ds, which come from _sample_SN_params.
-            Nor does this sample AV and RV, which come from _sample_SN_dust_params.
-
-            Parameters
-            ----------
-            t_all_sn: ArrayLike
-                Shape (N_max_epochs, N_sn) array containing the phase of each epoch of
-                photometry for each SN. N_max_epochs is the greatest number of epochs for
-                any single SN in the data set, and the rest are padded with 0s for phases.
-                These padded values are masked out during sampling.
-            sn_index:
-                The plate-level indices of the SN being sampled. The shape is (N_sn,).
-                quadrature to the error in cosmological distance modulus.
-            fix_tmax: default False
-                If True, return the pre-calculated self.hsiao_interp and self.J_t values.
-                If False, sample tmax ~ U(tmax_min, tmax_max) and adjust all phases from
-                t_all_sn accordingly, then recalculate hsiao_interp and J_t.
-
-            Returns
-            -------
-                hsiao_interp:
-                J_t:
-                tmax:
-            """
-            if fix_tmax:
-                return self.hsiao_interp, self.J_t, None
-            tmax = numpyro.sample("tmax", dist.Uniform(tmax_min, tmax_max))
-            t_all_sn = t_all_sn * (1+z_obs)/(1+z_sampled) - tmax[None, sn_index]
-            J_t = self.get_J_t(t_all_sn)
-            hsiao_interp = self.get_hsiao_interp(t_all_sn)
-            return hsiao_interp, J_t, tmax
-
         N_sn = obs.shape[2]
-        W0, W1, L_Sigma = _sample_model_params(train_new_model)
-        split_kwargs, HM_flag, M0, W0 = _sample_split_model_dust_params(
-            infer_dust_properties=infer_dust_properties,
-            vary_redshift=vary_redshift,
-            split_variant=split_variant,
-            mass=obs[3, 0],
-            M_split=M_split,
-            W0=W0,
-            **kwargs
-        )
+        if not train_new_model:
+            W0, W1, L_Sigma = self.W0, self.W1, self.L_Sigma
+        else:
+            W0, W1, L_Sigma = self._sample_model_params()
+        if infer_dust_properties:
+            dust_pop, M0, W0 = self._sample_dust_hyperparams(
+                split_variant=split_variant,
+                vary_redshift=vary_redshift,
+                mass=obs[3, 0],
+                M_split=M_split,
+                W0=W0,
+                **kwargs,
+            )
+        else:
+            dust_pop, M0, W0 = self._get_fixed_dust_hyperparams(
+                split_variant=split_variant,
+                mass=obs[3, 0],
+                M_split=M_split,
+                W0=W0,
+                **kwargs,
+            )
         lam_shift, mag_shift = 0, 0
         if vary_filter_shifts:
             lam_shift = numpyro.sample("lam_shift", dist.Normal(0, self.used_wave_sigmas))
@@ -2524,28 +2139,43 @@ class SEDmodel(object):
             band_indices = obs[4, :, sn_index].astype(int).T
             phot_mask = obs[9, :, sn_index].T.astype(bool)
             if photoz:
-                z = _sample_z(obs[5, 0, sn_index], obs[6, 0, sn_index])
+                z = self._sample_z(
+                    obs[5, 0, sn_index],
+                    obs[6, 0, sn_index],
+                    sn_index=sn_index,
+                    z_icdf=kwargs.get("z_icdf"),
+                )
             else:
                 z = obs[5, 0, sn_index]
             if vary_filter_shifts or photoz:
                 # In either case, observer frame transmissions need re-calculation
                 # If we decide to sample E(B-V)_MW one day, that will also require
                 # re-calculation.
-                weights = self._calculate_band_weights(z, obs[8,0,sn_index], lam_shift)
-            AV, RV = _sample_split_SN_dust_params(
-                split_variant=split_variant,
-                HM_flag=HM_flag,
+                weights = self._calculate_band_weights(z, obs[8, 0, sn_index], lam_shift)
+            AV, RV = self._sample_split_SN_dust_params(
+                dust_pop=dust_pop,
                 redshift=z,
-                **split_kwargs
+                z_obs=obs[5, 0, sn_index],
+                **kwargs,
             )
-            theta, eps, Ds = _sample_SN_params(
+            theta, eps, Ds = self._sample_SN_params(
                 N_sn=N_sn,
                 sn_obs=obs[..., sn_index],
                 L_Sigma=L_Sigma,
-                **split_kwargs["HM"]
+                sigma0=dust_pop.sigma0,
+                **kwargs,
             )
 
-            hsiao_interp, J_t, tmax = _sample_SN_tmax(t_all_sn=obs[0], sn_index=sn_index, z_obs=obs[5,0,sn_index], z_sampled=z, fix_tmax=fix_tmax)
+            if fix_tmax:
+                hsiao_interp, J_t, tmax = self.hsiao_interp, self.J_t, None
+            else:
+                hsiao_interp, J_t, tmax = self._sample_SN_tmax(
+                    t_all_sn=obs[0],
+                    sn_index=sn_index,
+                    z_obs=obs[5, 0, sn_index],
+                    z_sampled=z,
+                    **kwargs,
+                )
             phot_epoch_spectra = self._get_spectra(theta, AV, W0, W1, eps, RV, J_t, hsiao_interp)
             if data_type == "flux":
                 data_fn = self.get_flux_batch
@@ -2555,8 +2185,8 @@ class SEDmodel(object):
                 model_spectra=phot_epoch_spectra,
                 M0=M0,
                 Ds=Ds,
-                z=obs[5,0],
-                ebv=obs[8,0],
+                z=obs[5, 0],
+                ebv=obs[8, 0],
                 band_indices=band_indices,
                 mask=phot_mask,
                 weights=weights,
@@ -2570,6 +2200,540 @@ class SEDmodel(object):
                     dist.Normal(data, obs[2, :, sn_index].T),
                     obs=obs[1, :, sn_index].T,
                 )
+
+    def _sample_model_params(self) -> tuple[Array, Array, Array]:
+        """ Sample W0, W1, and L_Sigma
+
+        Returns
+        -------
+        W0: numpryo Sample if train_new_model, else jax.Array
+        W1: same type W0
+        L_Sigma: same type as W0
+        """
+        W_mu = jnp.zeros(self.N_knots)
+        W0 = numpyro.sample("W0", dist.MultivariateNormal(W_mu, jnp.eye(self.N_knots)))
+        W1 = numpyro.sample("W1", dist.MultivariateNormal(W_mu, jnp.eye(self.N_knots)))
+        W0 = jnp.reshape(
+            W0, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+        )
+        W1 = jnp.reshape(
+            W1, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+        )
+
+        sigmaepsilon = numpyro.sample("sigmaepsilon", dist.HalfCauchy(jnp.ones(self.N_knots_sig)))
+
+        # Cholesky factors L of correlation matrix Omega
+        # Covariance matrix Sigma = diag(sigmaepsilon) Omega diag(sigmaepsilon)
+        # Or, Sigma = L_Sigma L_Sigma.T with L_Sigma = diag(sigmaepsilon) L_Omega
+        L_Omega = numpyro.sample("L_Omega", dist.LKJCholesky(self.N_knots_sig))
+        L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon), L_Omega)
+
+        return W0, W1, L_Sigma
+
+    def _sample_model_dust_params(
+        self,
+        suffix: str = "",
+        vary_redshift: bool = False,
+        global_RV: ArrayLike | None = None,
+        mu_R: ArrayLike | None = None,
+        sigma_R: ArrayLike | None = None,
+        mu_R_min: float = 1.2,
+        mu_R_max: float = 6,
+        sigma_sigma_R: float = 2,
+        tau_z_min: float = -0.5,
+        tau_z_max: float = 0.5,
+        uniform_RV_min: float = 1,
+        uniform_RV_max: float = 6,
+        **kwargs: Any,
+    ) -> tuple[Array, Array, Array | None, Array | None, Array | None, Array | None, Array | None, Array | None]:
+        """Draw SN population level parameters that may vary by sub-population
+        (e.g. split by galaxy mass)."""
+        phi_alpha_R, mu_z_grad, tau_z_grad, global_RV_val = [0 for _ in range(4)]
+        if global_RV is not None:
+            global_RV_val = global_RV
+
+        sigma0 = numpyro.sample(f"sigma0{suffix}", dist.HalfCauchy(0.1))
+        tauA = numpyro.sample(f"tauA{suffix}", dist.HalfCauchy())
+
+        if self.RV_type == "global" and global_RV_val == 0:
+            global_RV_val = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
+        if self.RV_type == "pop":
+            mu_R = numpyro.sample(f"mu_R{suffix}", dist.Uniform(mu_R_min, mu_R_max))
+            sigma_R = numpyro.sample(f"sigma_R{suffix}", dist.HalfNormal(sigma_sigma_R))
+            phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
+        if vary_redshift:
+            mu_z_grad = numpyro.sample(f"mu_grad{suffix}", dist.Uniform(mu_R_min - mu_R, mu_R_max - mu_R))
+            tau_z_grad = numpyro.sample(f"tau_z_grad{suffix}", dist.Uniform(tau_z_min, tau_z_max))
+        return sigma0, tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, global_RV_val
+
+    def _get_fixed_model_dust_params(
+        self,
+        mu_R: ArrayLike | None = None,
+        sigma_R: ArrayLike | None = None,
+        **kwargs: Any,
+    ) -> tuple[Array, Array, Array | None, Array | None, Array | None, int, int, Array]:
+        """Return pre-computed model dust parameters."""
+        phi_alpha_R, mu_z_grad, tau_z_grad, global_RV = [0 for _ in range(4)]
+        if mu_R is not None and sigma_R is not None:
+            phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
+        return self.sigma0, self.tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, self.RV
+
+    def _sample_dust_hyperparams(
+        self,
+        split_variant: str | None,
+        vary_redshift: bool,
+        mass: ArrayLike,
+        M_split: float,
+        W0: ArrayLike,
+        **kwargs: Any,
+    ) -> tuple[DustPop, Array, Array]:
+        """Sample population dust parameters (and mass-split parameters if specified)."""
+        HM_flag = mass > M_split
+        M0 = self.M0
+
+        suffix = "_HM" if split_variant is not None else ""
+        hm_params = self._sample_model_dust_params(
+            suffix=suffix,
+            vary_redshift=vary_redshift,
+            **kwargs,
+        )
+        hm_dust = DustParams(*hm_params)
+
+        lm_dust = None
+        sigma0 = hm_dust.sigma0
+        if split_variant is not None:
+            lm_params = self._sample_model_dust_params(
+                suffix="_LM",
+                vary_redshift=vary_redshift,
+                **kwargs,
+            )
+            lm_dust = DustParams(*lm_params)
+            sigma0 = HM_flag * hm_dust.sigma0 + (1 - HM_flag) * lm_dust.sigma0
+
+        if split_variant == "split_mag":
+            M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
+            M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
+            M0 = (
+                M0 * jnp.ones_like(mass)
+                + HM_flag * M_step_HM
+                + (1 - HM_flag) * M_step_LM
+            )
+
+        if split_variant == "split_sed":
+            W_mu = jnp.zeros(self.N_knots)
+            delW_HM = numpyro.sample(
+                "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+            )
+            delW_LM = numpyro.sample(
+                "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+            )
+            delW_HM = jnp.reshape(
+                delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+            )
+            delW_LM = jnp.reshape(
+                delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+            )
+            W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
+            W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
+            W0 = (
+                HM_flag[:, None, None] * W0_HM[None, ...]
+                + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
+            )
+
+        dust_pop = DustPop(
+            HM=hm_dust,
+            LM=lm_dust,
+            HM_flag=HM_flag,
+            sigma0=sigma0,
+            split_variant=split_variant,
+        )
+        return dust_pop, M0, W0
+
+    def _get_fixed_dust_hyperparams(
+        self,
+        split_variant: str | None,
+        mass: ArrayLike,
+        M_split: float,
+        W0: ArrayLike,
+        **kwargs: Any,
+    ) -> tuple[DustPop, Array, Array]:
+        """Retrieve pre-computed model dust parameters (and sample mass-split steps if specified)."""
+        HM_flag = mass > M_split
+        M0 = self.M0
+
+        hm_params = self._get_fixed_model_dust_params(**kwargs)
+        hm_dust = DustParams(*hm_params)
+
+        lm_dust = None
+        sigma0 = hm_dust.sigma0
+        if split_variant is not None:
+            lm_params = self._get_fixed_model_dust_params(**kwargs)
+            lm_dust = DustParams(*lm_params)
+            sigma0 = HM_flag * hm_dust.sigma0 + (1 - HM_flag) * lm_dust.sigma0
+
+        if split_variant == "split_mag":
+            M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
+            M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
+            M0 = (
+                M0 * jnp.ones_like(mass)
+                + HM_flag * M_step_HM
+                + (1 - HM_flag) * M_step_LM
+            )
+
+        if split_variant == "split_sed":
+            W_mu = jnp.zeros(self.N_knots)
+            delW_HM = numpyro.sample(
+                "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+            )
+            delW_LM = numpyro.sample(
+                "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+            )
+            delW_HM = jnp.reshape(
+                delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+            )
+            delW_LM = jnp.reshape(
+                delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+            )
+            W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
+            W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
+            W0 = (
+                HM_flag[:, None, None] * W0_HM[None, ...]
+                + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
+            )
+
+        dust_pop = DustPop(
+            HM=hm_dust,
+            LM=lm_dust,
+            HM_flag=HM_flag,
+            sigma0=sigma0,
+            split_variant=split_variant,
+        )
+        return dust_pop, M0, W0
+
+    def _sample_split_model_dust_params(
+        self,
+        split_variant: str | None,
+        infer_dust_properties: bool,
+        vary_redshift: bool,
+        mass: ArrayLike,
+        M_split: float,
+        W0: ArrayLike,
+        **kwargs: Any,
+    ) -> tuple[dict[str, Any], Array, Array, Array]:
+        """Legacy method retained for backward compatibility."""
+        if infer_dust_properties:
+            dust_pop, M0, W0 = self._sample_dust_hyperparams(
+                split_variant=split_variant,
+                vary_redshift=vary_redshift,
+                mass=mass,
+                M_split=M_split,
+                W0=W0,
+                **kwargs,
+            )
+        else:
+            dust_pop, M0, W0 = self._get_fixed_dust_hyperparams(
+                split_variant=split_variant,
+                mass=mass,
+                M_split=M_split,
+                W0=W0,
+                **kwargs,
+            )
+        split_kwargs = {"HM": dict(dust_pop.HM._asdict(), **kwargs)}
+        if dust_pop.LM is not None:
+            split_kwargs["LM"] = dict(dust_pop.LM._asdict(), **kwargs)
+        split_kwargs["HM"]["sigma0"] = dust_pop.sigma0
+        return split_kwargs, dust_pop.HM_flag, M0, W0
+
+    def _sample_z(
+        self,
+        z_obs: ArrayLike,
+        z_obs_err: ArrayLike,
+        sn_index: ArrayLike,
+        z_icdf: ArrayLike | None = None,
+    ) -> Array:
+        """Sample or interpolate redshift for each SN."""
+        if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
+            u = numpyro.sample('u', dist.Uniform(self.z_u_grid[0], self.z_u_grid[-1]))
+            if z_icdf is not None:  # single per-SN row passed in (VI vmaps over SNe)
+                z_sampled = numpyro.deterministic('z', jnp.interp(u, self.z_u_grid, z_icdf))
+            else:  # MCMC: one plate over all SNe, index the shared table
+                z_sampled = numpyro.deterministic('z', jax.vmap(jnp.interp, in_axes=(0, None, 0))(
+                    u, self.z_u_grid, self.z_icdf_grid[sn_index]))
+        else:  # Gaussian catalog prior
+            ztform = numpyro.sample('ztform', dist.Normal(0, 1))
+            z_sampled = numpyro.deterministic('z', z_obs + z_obs_err * ztform)
+        # Rest-frame phase from the observer frame at the sampled z (time dilation)
+        return z_sampled
+
+    def _sample_SN_dust_params(
+        self,
+        dust_params: DustParams | None = None,
+        tauA: float | ArrayLike | None = None,
+        AV_dist: Callable[[float], Array] = dist.Exponential,
+        fix_AV: float | None = None,
+        global_RV: ArrayLike | None = None,
+        mu_R: ArrayLike | None = None,
+        sigma_R: ArrayLike | None = None,
+        phi_alpha_R: ArrayLike | None = None,
+        redshift: float | ArrayLike = 0,
+        mu_z_grad: float = 0,
+        tau_z_grad: float = 0,
+        uniform_RV_min: float = 1,
+        uniform_RV_max: float = 6,
+        suffix: str = "",
+        **kwargs: Any,
+    ) -> tuple[Array, Array]:
+        """Sample AV and RV for each SN.
+
+        Parameters
+        ----------
+        dust_params: DustParams, optional
+            NamedTuple containing population dust parameters. If provided, overrides
+            individual dust arguments.
+        tauA:
+            Scale factor for sampling AV ~ Exponential(1/tauA).
+        AV_dist:
+            The stochastic function used to draw AV as fn(1/tauA).
+        fix_AV: default None
+            If not None, use float(fix_AV) as the AV value for all SNe.
+        global_RV: default None
+            If self.RV_type == "global", this is the RV value for all SNe.
+        mu_R: default None
+            If self.RV_type == "pop", this is used to calculate RV.
+        sigma_R: default None
+            If self.RV_type == "pop", this is used to calculate RV.
+        phi_alpha_R: default None
+            If self.RV_type == "pop", this is used to calculate RV.
+        redshift: default 0
+            Needed if mu_z_grad or tau_z_grad are not 0.
+        mu_z_grad: default 0
+            global_RV and mu_R are increased by redshift * mu_z_grad.
+        tau_z_grad: default 0
+            tauA is increased by redshift * tau_z_grad.
+        uniform_RV_min: default 1
+            If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
+        uniform_RV_max: default 6
+            If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
+        suffix: default ""
+            This string is appended to the parameter naming scheme used by numpyro.
+
+        Returns
+        -------
+            AV:
+            RV:
+        """
+        if dust_params is not None:
+            tauA = dust_params.tauA
+            global_RV = dust_params.global_RV
+            mu_R = dust_params.mu_R
+            sigma_R = dust_params.sigma_R
+            phi_alpha_R = dust_params.phi_alpha_R
+            mu_z_grad = dust_params.mu_z_grad
+            tau_z_grad = dust_params.tau_z_grad
+
+        suffix = f"_{suffix}".replace("__", "_").rstrip("_")
+        if fix_AV is not None:
+            AV = jnp.array([float(fix_AV)])
+        else:
+            AV = numpyro.sample(f"AV{suffix}", AV_dist(1 / (tauA + redshift * tau_z_grad)))
+
+        if self.RV_type == "global":
+            RV = global_RV + redshift * mu_z_grad
+        if self.RV_type == "pop":
+            RV_tform = numpyro.sample(f"RV_tform{suffix}", dist.Uniform(0, 1))
+            RV = numpyro.deterministic(
+                f"RV{suffix}",
+                mu_R + redshift * mu_z_grad + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)),
+            )
+        elif self.RV_type == "uniform":
+            RV = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
+        return AV, RV
+
+    def _sample_split_SN_dust_params(
+        self,
+        dust_pop: DustPop | None = None,
+        redshift: ArrayLike = 0,
+        z_obs: ArrayLike | None = None,
+        split_variant: str | None = None,
+        HM_flag: ArrayLike | None = None,
+        **kwargs: Any,
+    ) -> tuple[Array, Array]:
+        """Sample AV and RV for each SN given population dust parameters."""
+        if z_obs is None:
+            z_obs = redshift
+
+        if dust_pop is not None:
+            split_variant = dust_pop.split_variant
+            HM_flag = dust_pop.HM_flag
+            AV, RV = self._sample_SN_dust_params(
+                dust_params=dust_pop.HM,
+                redshift=redshift,
+                suffix="HM" * (split_variant is not None),
+                **kwargs,
+            )
+            if split_variant is not None and dust_pop.LM is not None:
+                AV_LM, RV_LM = self._sample_SN_dust_params(
+                    dust_params=dust_pop.LM,
+                    redshift=z_obs,
+                    suffix="LM",
+                    **kwargs,
+                )
+                AV = numpyro.deterministic("AV", HM_flag * AV + (1 - HM_flag) * AV_LM)
+                RV = numpyro.deterministic("RV", HM_flag * RV + (1 - HM_flag) * RV_LM)
+            return AV, RV
+
+        # Legacy fallback if dust_pop is not provided
+        split_kwargs = kwargs
+        AV, RV = self._sample_SN_dust_params(
+            redshift=redshift,
+            suffix="HM" * (split_variant is not None),
+            **split_kwargs.get("HM", {}),
+        )
+        if split_variant is not None:
+            AV_LM, RV_LM = self._sample_SN_dust_params(
+                redshift=z_obs,
+                suffix="LM",
+                **split_kwargs.get("LM", {}),
+            )
+            AV = numpyro.deterministic("AV", HM_flag * AV + (1 - HM_flag) * AV_LM)
+            RV = numpyro.deterministic("RV", HM_flag * RV + (1 - HM_flag) * RV_LM)
+        return AV, RV
+
+    def _sample_SN_params(
+        self,
+        N_sn: int,
+        sn_obs: ArrayLike,
+        L_Sigma: ArrayLike,
+        sigma0: float | ArrayLike,
+        fix_theta: float | None = None,
+        muhat_err: float | None = None,
+        fix_dist_limit: float = 0.08,
+        fix_dist_Ds_err: float = 5,
+        **kwargs: Any,
+    ) -> tuple[Array, Array, Array]:
+        """ Sample theta, eps, Ds for each SN.
+
+        Parameters
+        ----------
+        N_sn:
+            Total number of SN in self.data.
+            This information is required because eps is delivered as a matrix of shape
+            (N_sn, N_l_knots, N_tau_knots) where the N_sn broadcasting is handled by
+            calling this function within a numpyro plate.
+        sn_obs: ArrayLike
+            Slice of self.data of shape (10, N_max_epochs).
+            The first dimension spans
+                phase, flux, flux error, host-galaxy mass, band indices, host-galaxy z,
+                host-galaxy z error, cosmological distance modulus, MW E(B-V), masking
+            N_max_epochs is the greatest number of observations for a single SN across
+            all SN in self.data.
+        L_Sigma:
+            The covariance matrix for the prior of epsilon.
+            The shape is (N_knots, N_knots) array where N_knots is the product of
+            (N_l_knots - 2) and N_tau_knots. The - 2 is because the bluest and reddest
+            bins in the full epsilon matrix are fixed to 0 at all phase bins.
+        sigma0:
+            Model-specific standard deviation in distance modulus to be added in
+            quadrature to the error in cosmological distance modulus.
+            If float-like, use the same sigma0 value for all SNe.
+            If split_variant is not None, this will be an array of shape (N_sn,).
+            The sigma0 values will be broadcast to each SN.
+        fix_theta: default None
+            If not None, float(fix_theta) will be used as the theta value for all SNe.
+        muhat_err:
+            If None, calculate muhat_err as 5*sqrt(z_err**2 + self.sigma_pec**2)/(z*ln(10))
+            If scalar, use muhat_err to calculate Ds_err
+
+        Returns
+        -------
+            theta:
+            eps:
+            Ds:
+        """
+        redshift, redshift_error, muhat = sn_obs[5:8, 0]
+
+        if fix_theta is not None:
+            theta = jnp.array([float(fix_theta)])
+        else:
+            theta = numpyro.sample(f"theta", dist.Normal(0, 1.0))
+
+        eps_mu = jnp.zeros(self.N_knots_sig)
+        eps_tform = numpyro.sample(
+            "eps_tform", dist.MultivariateNormal(eps_mu, jnp.eye(self.N_knots_sig))
+        )
+        eps_tform = eps_tform.T
+        eps = numpyro.deterministic("eps", jnp.matmul(L_Sigma, eps_tform))
+        eps = eps.T
+        eps = jnp.reshape(
+            eps,
+            (N_sn, self.N_knots_sig_l, self.tau_knots.shape[0]),
+            order="F",
+        )
+        eps_full = jnp.zeros(
+            (N_sn, self.l_knots.shape[0], self.tau_knots.shape[0])
+        )
+        eps = eps_full.at[:, 1:-1, :].set(eps)
+
+        # x * x seems more performant than x ** 2 or jnp.power(x, 2)
+        # Should this be just 5?
+        if muhat_err is None:
+            muhat_err = (
+                5
+                / (redshift * jnp.log(10))
+                * jnp.sqrt(redshift_error * redshift_error + self.sigma_pec * self.sigma_pec)
+            )
+        Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
+        fix_dist = redshift < fix_dist_limit
+        Ds_err = Ds_err * fix_dist + fix_dist_Ds_err * (1 - fix_dist)
+        Ds_tform = numpyro.sample("Ds_tform", dist.Normal(0, 1))
+        Ds = numpyro.deterministic("Ds", muhat + Ds_tform * Ds_err)
+
+        return theta, eps, Ds
+
+    def _sample_SN_tmax(
+        self,
+        t_all_sn: ArrayLike,
+        sn_index: ArrayLike,
+        z_obs: ArrayLike,
+        z_sampled: ArrayLike,
+        fix_tmax: bool = False,
+        tmax_min: float = -10,
+        tmax_max: float = 10,
+        **kwargs: Any,
+    ) -> tuple[Array, Array, Array | None]:
+        """ Draw tmax samples for each SN and provide hsiao_interp and J_t.
+        This only includes tmax.
+        This does not sample theta, eps, or Ds, which come from _sample_SN_params.
+        Nor does this sample AV and RV, which come from _sample_SN_dust_params.
+
+        Parameters
+        ----------
+        t_all_sn: ArrayLike
+            Shape (N_max_epochs, N_sn) array containing the phase of each epoch of
+            photometry for each SN. N_max_epochs is the greatest number of epochs for
+            any single SN in the data set, and the rest are padded with 0s for phases.
+            These padded values are masked out during sampling.
+        sn_index:
+            The plate-level indices of the SN being sampled. The shape is (N_sn,).
+            quadrature to the error in cosmological distance modulus.
+        fix_tmax: default False
+            If True, return the pre-calculated self.hsiao_interp and self.J_t values.
+            If False, sample tmax ~ U(tmax_min, tmax_max) and adjust all phases from
+            t_all_sn accordingly, then recalculate hsiao_interp and J_t.
+
+        Returns
+        -------
+            hsiao_interp:
+            J_t:
+            tmax:
+        """
+        if fix_tmax:
+            return self.hsiao_interp, self.J_t, None
+        tmax = numpyro.sample("tmax", dist.Uniform(tmax_min, tmax_max))
+        t_all_sn = t_all_sn * (1+z_obs)/(1+z_sampled) - tmax[None, sn_index]
+        J_t = self.get_J_t(t_all_sn)
+        hsiao_interp = self.get_hsiao_interp(t_all_sn)
+        return hsiao_interp, J_t, tmax
 
 
     def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
@@ -2867,7 +3031,7 @@ class SEDmodel(object):
         param_init["W1"] = jnp.array(
             W1_init + np.random.normal(0, 0.01, W1_init.shape[0])
         )
-        if args["model_kwargs"]["rv_type"] == "pop":
+        if args["rv_type"] == "pop":
             param_init["mu_R"] = jnp.array(3.0)
             param_init["sigma_R"] = jnp.array(0.5)
             param_init["RV_tform"] = jnp.array(
@@ -2905,8 +3069,7 @@ class SEDmodel(object):
     def run(self, args: dict, cmd_args: Any) -> None:
         """
         Main method to run BayeSN. The input yaml file allows for customisation of the
-        sampling configuration (see _populate_config_params) and of the model via
-        keyword arguments (see _populate_model_kwargs).
+        sampling configuration and model via keyword arguments.
 
         Parameters
         ----------
@@ -2916,7 +3079,7 @@ class SEDmodel(object):
         cmd_args:
             dictionary of command line arguments, which overrides yaml file if specified
         """
-        args = self.parse_yaml_input(args, cmd_args)
+        args = self.parse_args(args, cmd_args)
         if args.get("version_photometry") is not None:
             self._depr_process_dataset_version_photometry(args)
         else:
@@ -2938,7 +3101,7 @@ class SEDmodel(object):
                 values=self.initial_guess(args, reference_model=args["initialisation"])
             )
         mode = args["mode"]
-        self.RV_type = args["model_kwargs"]["rv_type"]
+        self.RV_type = args["rv_type"]
         fitting_mode = mode.startswith("fit")
         if (args['mode'].lower() == 'fitting'
             and args['fit_method'] == 'vi'
@@ -3007,9 +3170,9 @@ class SEDmodel(object):
                     chain_method=args["chain_method"],
                     progress_bar=True,
                 )
-                if args["model_kwargs"]["photoz"] and self.z_icdf_grid is not None:
-                    args["model_kwargs"]["z_icdf"] = z_icdf
-                mcmc.run(rng_key, data[..., None], weights[None, ...],  **args["model_kwargs"])
+                if args["photoz"] and self.z_icdf_grid is not None:
+                    args["z_icdf"] = z_icdf
+                mcmc.run(rng_key, data[..., None], weights[None, ...],  **args)
                 return {
                     **mcmc.get_samples(group_by_chain=True),
                     **mcmc.get_extra_fields(group_by_chain=True),
@@ -3018,7 +3181,7 @@ class SEDmodel(object):
             start = timeit.default_timer()
             vmap = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0, 3))
             n_sne = self.data.shape[-1]
-            if args["model_kwargs"]["photoz"] and self.z_icdf_grid is not None:
+            if args["photoz"] and self.z_icdf_grid is not None:
                 z_icdf_all = np.asarray(self.z_icdf_grid)
             else:
                 z_icdf_all = np.zeros((n_sne, 1))
@@ -3053,7 +3216,7 @@ class SEDmodel(object):
                     Samples and other information from MCMC fit
 
                 """
-                if args["model_kwargs"]["photoz"]:
+                if args["photoz"]:
                     noeps_model = self.fit_model_photoz_noeps
                     vi_model = self.fit_model_photoz_vi
                     z_loc = "u" if self.z_icdf_grid is not None else "ztform"
@@ -3152,7 +3315,7 @@ class SEDmodel(object):
                     zltn_guide, params=params, num_samples=4 * args["num_samples"]
                 )
                 samples = predictive(PRNGKey(123), data=None)
-                if args["model_kwargs"]["photoz"]: # surface z (a deterministic, so not in the guide samples)
+                if args["photoz"]: # surface z (a deterministic, so not in the guide samples)
                     if self.z_icdf_grid is not None:
                         samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
                     else:
@@ -3227,7 +3390,7 @@ class SEDmodel(object):
             start = timeit.default_timer()
 
             mcmc.run(
-                rng, self.data, weights, **args["model_kwargs"], extra_fields=("potential_energy",),
+                rng, self.data, weights, **args, extra_fields=("potential_energy",),
             )
             end = timeit.default_timer()
             mcmc.print_summary()
@@ -3534,9 +3697,9 @@ class SEDmodel(object):
         )
 
         kwargs["mode"] = "fitting"
-        model_kwargs = self._populate_model_kwargs(kwargs)
-        self.RV_type = model_kwargs["rv_type"] = self._get_rv_type(kwargs)
-        model_kwargs["muhat_err"] = 5
+        kwargs = self.parse_args(kwargs)
+        self.RV_type = kwargs["rv_type"] = self._get_rv_type(kwargs)
+        kwargs["muhat_err"] = 5
 
         nuts_kernel = NUTS(
             self._model,
@@ -3555,7 +3718,7 @@ class SEDmodel(object):
             rng,
             data,
             weights,
-            **model_kwargs,
+            **kwargs,
             extra_fields=("potential_energy",),
         )
         if print_summary:
@@ -3581,12 +3744,12 @@ class SEDmodel(object):
             )
             samples["delM"] = samples["Ds"] - samples["mu"]
 
-        if model_kwargs["fix_tmax"]:
+        if kwargs["fix_tmax"]:
             samples["tmax"] = jnp.zeros_like(samples["tmax"])
-        if model_kwargs["fix_theta"] is not None:
-            samples["theta"] = jnp.ones((num_chains, num_samples, 1))*model_kwargs["fix_theta"]
-        if model_kwargs["fix_AV"] is not None:
-            samples["AV"] = jnp.ones((num_chains, num_samples, 1))*model_kwargs["fix_AV"]
+        if kwargs["fix_theta"] is not None:
+            samples["theta"] = jnp.ones((num_chains, num_samples, 1))*kwargs["fix_theta"]
+        if kwargs["fix_AV"] is not None:
+            samples["AV"] = jnp.ones((num_chains, num_samples, 1))*kwargs["fix_AV"]
 
         if file_prefix is not None:
             summary = arviz.summary(samples)
@@ -3692,11 +3855,11 @@ class SEDmodel(object):
                 # "L_SIGMA_EPSILON_DUST": L_Sigma_dust.tolist(),
             }
 
-            if args["model_kwargs"]["rv_type"] == "global":
+            if args["rv_type"] == "global":
                 yaml_data["RV"] = float(self.RV)
-            elif args["model_kwargs"]["rv_type"] == "uniform":
+            elif args["rv_type"] == "uniform":
                 yaml_data["RV"] = float(np.mean(samples.get("RV", float(self.RV))))
-            elif args["model_kwargs"]["rv_type"] == "pop":
+            elif args["rv_type"] == "pop":
                 yaml_data["MUR"] = float(np.mean(samples.get("mu_R", float(self.RV))))
                 yaml_data["SIGMAR"] = float(np.mean(samples["sigma_R"]))
 
@@ -3709,7 +3872,7 @@ class SEDmodel(object):
         if args["mode"].startswith("fit"):
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            if args["model_kwargs"]["photoz"]:
+            if args["photoz"]:
                 # Cosmology-independent: report the fitted light-curve distance Ds directly,
                 # without the muhat (catalog-z distmod) shrinkage that would inject a fiducial cosmology
                 samples["mu"] = samples["Ds"]
@@ -3728,7 +3891,7 @@ class SEDmodel(object):
                 samples["delM"] = samples["Ds"] - samples["mu"]
             if "tmax" in samples:  # Convert tmax samples into peak_MJD samples
                 # Time dilation at the fitted z for photo-z, else the fixed catalog z
-                z_dilation = samples["z"] if args["model_kwargs"]["photoz"] else z_HEL[None, None, :]
+                z_dilation = samples["z"] if args["photoz"] else z_HEL[None, None, :]
                 samples["peak_MJD"] = self.peak_mjds[None, None, :] + samples["tmax"] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
@@ -3821,7 +3984,7 @@ class SEDmodel(object):
             for key in ("theta", "AV", "peak_MJD"):
                 self.fitres_table[key.upper().replace("_", "")] = samples[key].mean(axis=(0, 1))
                 self.fitres_table[key.upper().replace("_", "")+"ERR"] = samples[key].std(axis=(0, 1))
-            if args["model_kwargs"]["photoz"]:
+            if args["photoz"]:
                 # fitted photo-z posterior (catalog zHEL/zHD columns keep the host prior)
                 self.fitres_table['ZPHOT_FIT'] = samples['z'].mean(axis=(0, 1))
                 self.fitres_table['ZPHOT_FITERR'] = samples['z'].std(axis=(0, 1))
@@ -3882,285 +4045,12 @@ class SEDmodel(object):
 
             dump_args = copy.deepcopy(args)
             with open(args["outputdir"] / "input.yaml", "w") as file:
-                if args["model_kwargs"].get("AV_dist") == dist.Exponential:
-                    dump_args["model_kwargs"]["AV_dist"] = "dist.Exponential"
-                elif args["model_kwargs"].get("AV_dist") == zltn.My_Exponential:
-                    dump_args["model_kwargs"]["AV_dist"] = "zltn.My_Exponential"
+                if args.get("AV_dist") == dist.Exponential:
+                    dump_args["AV_dist"] = "dist.Exponential"
+                elif args.get("AV_dist") == zltn.My_Exponential:
+                    dump_args["AV_dist"] = "zltn.My_Exponential"
                 yaml.dump(dump_args, file)
 
-    def sample_del_M(self, N: int) -> Array:
-        """
-        Samples grey offset del_M from model prior
-
-        Parameters
-        ----------
-        N :
-            Number of objects to sample for
-
-        Returns
-        -------
-        del_M :
-            Sampled del_M values
-        """
-        del_M = np.random.normal(0, self.sigma0, N)
-        return del_M
-
-    def sample_AV(self, N: int) -> Array:
-        """
-        Samples AV from model prior
-
-        Parameters
-        ----------
-        N :
-            Number of objects to sample for
-
-        Returns
-        -------
-        AV :
-            Sampled AV values
-        """
-        AV = np.random.exponential(self.tauA, N)
-        return AV
-
-    def sample_theta(self, N: int) -> Array:
-        """
-        Samples theta from model prior
-
-        Parameters
-        ----------
-        N :
-            Number of objects to sample for
-
-        Returns
-        -------
-        theta :
-            Sampled theta values
-        """
-        theta = np.random.normal(0, 1, N)
-        return theta
-
-    def sample_epsilon(self, N: int) -> Array:
-        """
-        Samples epsilon from model prior
-
-        Parameters
-        ----------
-        N :
-            Number of objects to sample for
-
-        Returns
-        -------
-        eps_full :
-            Sampled epsilon values
-        """
-        eps_mu = jnp.zeros(self.N_knots_sig)
-        eps_tform = np.random.multivariate_normal(eps_mu, np.eye(self.N_knots_sig), N)
-        eps_tform = eps_tform.T
-        eps = np.matmul(self.L_Sigma, eps_tform)
-        eps = eps.T
-        eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order="F")
-        eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
-        eps_full[:, 1:-1, :] = eps
-        return eps_full
-
-    def sample_lam_shift(self, *args: Any) -> Array:
-        """
-        Samples lam_shift from model prior. N accepted for consistency with other
-        sampling functions, but it doesn't do anything.
-
-        Returns
-        -------
-        lam_shift :
-            Sampled lam_shift values
-        """
-        lam_shift = np.random.normal(0, self.used_wave_sigmas)
-        return lam_shift
-
-    def sample_mag_shift(self, *args: Any) -> Array:
-        """
-        Samples mag_shift from model prior. N accepted for consistency with other
-        sampling functions, but it doesn't do anything.
-
-        Returns
-        -------
-        mag_shift :
-            Sampled mag_shift values
-        """
-        if not len(self.used_calib_chcov):
-            return jnp.zeros(1)
-        mag_shift = np.random.multivariate_normal(np.zeros(len(self.used_calib_cov)), self.used_calib_cov)
-        return mag_shift
-
-    def get_flux_from_chains(
-        self,
-        t: ArrayLike,
-        bands: ArrayLike,
-        chains: str | ArrayLike,
-        zs: ArrayLike | float,
-        ebv_mws: ArrayLike | float,
-        mag: bool = True,
-        num_samples: int | None = None,
-        num_sne: int | None = None,
-        mean: bool = False
-    ) -> Array:
-        """
-        Returns model photometry for posterior samples from BayeSN fits, which can be
-        used to make light curve fit plots.
-
-        Parameters
-        ----------
-        t :
-            Array of phases to evaluate model photometry at
-        bands :
-            List of bandpasses to evaluate model photometry in. Photometry will be
-        chains :
-            If a str, path to file containing BayeSN fitting posterior samples you
-            wish to obtain photometry for. If not a str, then the posterior samples.
-        zs :
-            Array of heliocentric redshifts corresponding to the SNe you are obtaining
-            model fit light curves for.
-        ebv_mws :
-            Array containing Milky Way extincion values corresponding to the SNe you
-            are obtaining model fit light curves for.
-        mag :
-            Boolean to specify whether you want magnitude or flux data. If True,
-            magnitudes will be returned. If False, flux densities (f_lambda) will be
-            returned. Default to True i.e. mag data.
-        num_samples :
-            An optional keyword argument to specify the number of posterior samples
-            you wish to obtain photometry for. Might be useful in testing if you are
-            looking at lots of SNe, as otherwise this function will take a while to
-            generate e.g. photometry for 1000 posterior samples across 1000 SNe.
-            Default to None, meaning that photometry will be calculated for all
-            posterior samples in chains provided.
-        mean :
-            If True, generate only one flux time-series for each SN using the mean
-            values for SN parameters.
-
-        Returns
-        -------
-        flux_grid : Array shape (N_sn, num_samples, len(bands), len(t))
-            Array containing photometry for all SNe, posterior samples, bands and
-            phases requested.
-        """
-        if type(chains) == str:
-            with open(chains, "rb") as file:
-                chains = pickle.load(file)
-
-        if num_sne is None:
-            num_sne = chains["theta"].shape[2]
-        if num_samples is None:
-            num_samples = chains["theta"].shape[0] * chains["theta"].shape[1]
-
-        if np.isscalar(zs):
-            zs = np.array([zs])
-        if np.isscalar(ebv_mws):
-            ebv_mws = np.array([ebv_mws])
-
-        if mean:
-            num_samples = 1
-
-        band_list = isinstance(bands[0], list)
-        if band_list:
-            max_bands = np.max([len(b) for b in bands])
-        else:
-            max_bands = len(bands)
-        if self.band_weights is None:
-            self.band_weights = self._calculate_band_weights(zs, ebv_mws)
-
-        flux_grid = jnp.zeros((num_sne, num_samples, max_bands, len(t)))
-        print("Getting best fit light curves from chains...")
-        for i in tqdm(np.arange(num_sne)):
-            if band_list:
-                fit_bands = bands[i]
-            else:
-                fit_bands = bands
-            theta = chains["theta"][..., i].flatten(order="F")
-            AV = chains["AV"][..., i].flatten(order="F")
-            tmax = chains["tmax"][..., i].flatten(order="F")
-            if "RV" in chains:
-                RV = chains["RV"][..., i].flatten(order="F")
-            else:
-                RV = None
-            if "lam_shift" in chains:
-                lam_shift = chains["lam_shift"][..., i].flatten(order="F")
-            else:
-                # Not None because simulate_light_curve interprets constants as a value
-                # to use whereas None leads to sampling from priors.
-                lam_shift = 0
-            if "mag_shift" in chains:
-                mag_shift = chains["mag_shift"][..., i].flatten(order="F")
-            else:
-                # See above lam_shift comment.
-                mag_shift = 0
-            mu = chains["mu"][..., i].flatten(order="F")
-            eps = chains["eps"][..., i]
-            eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order="F")
-            eps = eps.reshape(
-                (eps.shape[0], self.l_knots.shape[0] - 2, self.tau_knots.shape[0]),
-                order="F",
-            )
-            eps_full = jnp.zeros(
-                (eps.shape[0], self.l_knots.shape[0], self.tau_knots.shape[0])
-            )
-            eps = eps_full.at[:, 1:-1, :].set(eps)
-            del_M = chains["delM"][..., i].flatten(order="F")
-
-            theta, AV, mu, eps, del_M, tmax = (
-                theta[:num_samples],
-                AV[:num_samples],
-                mu[:num_samples],
-                eps[:num_samples],
-                del_M[:num_samples],
-                tmax[:num_samples],
-            )
-            if "RV" in chains:
-                RV = RV[:num_samples]
-            if "lam_shift" in chains:
-                lam_shift = lam_shift[:num_samples]
-            if "mag_shift" in chains:
-                mag_shift = mag_shift[:num_samples]
-            if mean:
-                theta, AV, mu, eps, del_M, tmax = (
-                    theta.mean()[None],
-                    AV.mean()[None],
-                    mu.mean()[None],
-                    eps.mean(axis=0)[None],
-                    del_M.mean()[None],
-                    tmax.mean()[None],
-                )
-                if "RV" in chains:
-                    RV = RV.mean()[None]
-                if "lam_shift" in chains:
-                    lam_shift = lam_shift.mean()[None]
-                if "mag_shift" in chains:
-                    mag_shift = mag_shift.mean()[None]
-
-            lc, lc_err, params = self.simulate_light_curve(
-                t,
-                theta.shape[0],
-                fit_bands,
-                theta=theta,
-                AV=AV,
-                mu=mu,
-                tmax=tmax,
-                del_M=del_M,
-                eps=eps,
-                lam_shift=lam_shift,
-                mag_shift=mag_shift,
-                RV=RV,
-                z=zs[i],
-                write_to_files=False,
-                ebv_mw=ebv_mws[i],
-                yerr=0,
-                mag=mag,
-                band_weights=self.band_weights[i : i + 1],
-            )
-            lc = lc.T
-            lc = lc.reshape(num_samples, len(fit_bands), len(t))
-            flux_grid = flux_grid.at[i, :, : len(fit_bands), :].set(lc)
-
-        return flux_grid
     #################
     ### Utilities ###
     #################
@@ -4316,6 +4206,109 @@ class SEDmodel(object):
             1.0
         )
         return fitprob, T_joint, ndof
+
+    def sample_del_M(self, N: int) -> Array:
+        """
+        Samples grey offset del_M from model prior
+
+        Parameters
+        ----------
+        N :
+            Number of objects to sample for
+
+        Returns
+        -------
+        del_M :
+            Sampled del_M values
+        """
+        del_M = np.random.normal(0, self.sigma0, N)
+        return del_M
+
+    def sample_AV(self, N: int) -> Array:
+        """
+        Samples AV from model prior
+
+        Parameters
+        ----------
+        N :
+            Number of objects to sample for
+
+        Returns
+        -------
+        AV :
+            Sampled AV values
+        """
+        AV = np.random.exponential(self.tauA, N)
+        return AV
+
+    def sample_theta(self, N: int) -> Array:
+        """
+        Samples theta from model prior
+
+        Parameters
+        ----------
+        N :
+            Number of objects to sample for
+
+        Returns
+        -------
+        theta :
+            Sampled theta values
+        """
+        theta = np.random.normal(0, 1, N)
+        return theta
+
+    def sample_epsilon(self, N: int) -> Array:
+        """
+        Samples epsilon from model prior
+
+        Parameters
+        ----------
+        N :
+            Number of objects to sample for
+
+        Returns
+        -------
+        eps_full :
+            Sampled epsilon values
+        """
+        eps_mu = jnp.zeros(self.N_knots_sig)
+        eps_tform = np.random.multivariate_normal(eps_mu, np.eye(self.N_knots_sig), N)
+        eps_tform = eps_tform.T
+        eps = np.matmul(self.L_Sigma, eps_tform)
+        eps = eps.T
+        eps = np.reshape(eps, (N, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order="F")
+        eps_full = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
+        eps_full[:, 1:-1, :] = eps
+        return eps_full
+
+    def sample_lam_shift(self, *args: Any) -> Array:
+        """
+        Samples lam_shift from model prior. N accepted for consistency with other
+        sampling functions, but it doesn't do anything.
+
+        Returns
+        -------
+        lam_shift :
+            Sampled lam_shift values
+        """
+        lam_shift = np.random.normal(0, self.used_wave_sigmas)
+        return lam_shift
+
+    def sample_mag_shift(self, *args: Any) -> Array:
+        """
+        Samples mag_shift from model prior. N accepted for consistency with other
+        sampling functions, but it doesn't do anything.
+
+        Returns
+        -------
+        mag_shift :
+            Sampled mag_shift values
+        """
+        if not len(self.used_calib_chcov):
+            return jnp.zeros(1)
+        mag_shift = np.random.multivariate_normal(np.zeros(len(self.used_calib_cov)), self.used_calib_cov)
+        return mag_shift
 
     def simulate_spectrum(
         self,

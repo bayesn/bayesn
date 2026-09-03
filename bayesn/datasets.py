@@ -17,6 +17,7 @@ from itertools import chain
 from numbers import Number
 from pathlib import Path
 from typing import Any
+from warnings import warn
 
 from astropy.cosmology import FlatLambdaCDM
 from astropy.table import QTable
@@ -94,6 +95,8 @@ def get_standard_name(name: str) -> str:
         "survey":              "idsurvey",
         "sim_dlmu":            "sim_dlmags",
         "sim_template_index":  "sim_template_ids",
+        "sim_av":              "sim_AVs",
+        "sim_rv":              "sim_RVs",
         # photometry columns
         "fluxcal":             "flux",
         "fluxcalerr":          "flux_err",
@@ -125,7 +128,7 @@ def get_SNANA_name(name: str) -> str:
         # photometry columns
         "FLUX":             "FLUXCAL",
         "FLUX_ERR":         "FLUXCALERR",
-        "mag_err":          "MAGERR",
+        "MAG_ERR":          "MAGERR",
     }
     if name in misc:
         return misc[name]
@@ -133,7 +136,8 @@ def get_SNANA_name(name: str) -> str:
         return name.replace("Z", "REDSHIFT")
     if name.startswith("SIM_"):
         return name.rstrip("S")
-    warn(UserWarning(f"Not sure what SNANA key {name} refers to, returning input."))
+    if name not in [x.upper() for x in all_meta_names]:
+        warn(UserWarning(f"Not sure what SNANA key {name} refers to, returning input."))
     return name
 
 def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike]) -> dict:
@@ -555,9 +559,9 @@ class SNDataset:
         self._validate_other_lengths(sn_dict, obs_df)
 
         # Sort into duplicate/new and append
-        # all_snids = set(sn_dict["snid"])
-        # common_snids = all_snids.intersection(self.snid)
-        # new_snids = all_snids.difference(self.snid)
+        all_snids = set(sn_dict["snid"])
+        common_snids = all_snids.intersection(self.snid)
+        new_snids = all_snids.difference(self.snid)
         # for snids, append_fn in zip(
         #     (common_snids, new_snids),
         #     (self._append_duplicate, self._append_new)
@@ -578,11 +582,10 @@ class SNDataset:
                 self._append_new(meta, phot)
 
         # Add Nones for missing other_metadata
-        none_arr = np.full(len(sn_dict["snid"]), None)
         for attr in set(self.other_metadata.keys()).difference(sn_dict.keys()):
             self.other_metadata[attr] = np.append(
                 self.other_metadata[attr],
-                np.full(len(sn_dict["snid"]), None)
+                np.full(len(new_snids), None)
             )
 
 
@@ -621,7 +624,11 @@ class SNDataset:
         sanitisation and error checking. The given sn_dict and obs_df are used to append
         any new data for SNe that are already in the SNDataset (by snid).
         """
-        # Comparing metadata to make sure numeric values are in agreement.
+        # Add new other_metadata keys if not already present.
+        for other_key in set(sn_dict.keys()).difference(all_meta_names):
+            if other_key not in self.other_metadata:
+                self.other_metadata[other_key] = np.full(self.N_sn, None)
+        # compare metadata to make sure numeric values are in agreement.
         indices = self.get_idx(sn_dict["snid"])
         meta = self.get_metadata_subset(idx=indices)
         utils.assert_dicts_match(meta, sn_dict, flag_missing_data=False)
@@ -788,7 +795,7 @@ class SNDataset:
             The value against which the selected metadata will be compared.
         inplace:
             If True, remove the cut SNe from the dataset, otherwise return a tuple
-            containing a cut metadata dict, photometry DataFrame, and phot_idx array.
+            containing a cut metadata dict and photometry DataFrame.
         use_defaults:
             If True, replace metadata stored as None with the default values in
             default_values when determining cuts.
@@ -805,8 +812,7 @@ class SNDataset:
             keep = list(set(np.arange(self.N_sn)).difference(drop))
             meta = self.get_metadata_subset(idx=keep, use_defaults=use_defaults)
             phot = self.get_phot_subset(idx=keep)
-            phot_idx = self.get_phot_idx_subset(idx=keep)
-            return meta, phot, phot_idx
+            return meta, phot
         self.remove_sn(idx=drop)
 
     def cut_by_phot_numeric(
@@ -824,7 +830,8 @@ class SNDataset:
         val:
             The value against which the selected metadata will be compared.
         inplace:
-            TODO: add support for inplace being False.
+            If True, remove the cut observations from the photometry, otherwise return
+            a tuple containing a cut metadata dict and cut photometry DataFrame.
         """
         if name not in self.photometry:
             raise ValueError(
@@ -834,10 +841,9 @@ class SNDataset:
         arr = self.photometry[name]
         drop = utils.where_logic(arr=self.photometry[name], val=val, logic=logic)[0]
         if not inplace:
-            raise NotImplementedError(
-                "inplace filtering is a little harder since the subset methods are "
-                "build on SN indices rather than photometry."
-            )
+            phot_copy = copy.deepcopy(self.photometry).drop(drop).reset_index(drop=True)
+            idx = self.get_idx(snid=phot_copy["snid"].unique())
+            return self.get_metadata_subset(idx=idx), phot_copy
         self.remove_phot_by_idx(drop)
 
 
@@ -869,7 +875,8 @@ class SNDataset:
         snrmaxes:
             list of N floats providing the SNR maxima in descending order.
         """
-        phot = self.get_phot_subset(snid)
+        assert isinstance(snid, str), "Non-str snids are not supported."
+        phot = self.get_phot_subset(snid=snid)
         snr = phot["flux"]/phot["flux_err"]
         snrmaxes = [snr.max()]
         for i in range(1,N):
@@ -879,25 +886,6 @@ class SNDataset:
             snr = phot["flux"] / phot["flux_err"]
             snrmaxes.append(snr.max())
         return snrmaxes
-
-    def calculate_rest_phases(self, snid: str, peak_mjd: Number | None = None) -> None:
-        """ Given MJDs, a heliocentric redshift, and fiducial times (peak B-band), get
-        rest-frame phases (MJD - t_max)/(1+z_helio) and set it in self.photometry["phase"]
-
-        Parameters
-        ----------
-        peak_mjd:
-            A guess for the value of tmax in modified Julian Date. Used to define
-            rest-frame phase. If None, this will be inferred from the photometry using
-            a SNR^2-weighted average of available epochs. This is not a reliable metric
-            if the peak is not covered.
-        """
-        idx = self.get_idx(snid)
-        pkmjd = peak_mjd or self.peak_mjd[idx]
-        if pkmjd is None:
-            self.peak_mjd[idx] = pkmjd = self.estimate_tmax(self.snid[idx])
-        epochs = self.photometry["mjd"][self.phot_idx[idx]:self.phot_idx[idx+1]].to_numpy()
-        return (epochs - pkmjd) / (1.0 + self.z_helio[idx])
 
     def estimate_tmax(self, snid: str) -> Number:
         """ Use a SNR^2-weighted average of available epochs to estimate the time of
@@ -913,6 +901,7 @@ class SNDataset:
         snid:
             snid of SN for which to estimate tmax.
         """
+        assert isinstance(snid, str), "Non-str snids are not supported."
         phot = self.get_phot_subset(snid)
         tmax = utils.SNR_power_weighted_ave(
             phot["mjd"],
@@ -923,9 +912,28 @@ class SNDataset:
         return tmax
 
 
+    def calculate_rest_phases(self, snid: str, peak_mjd: Number | None = None) -> None:
+        """ Given MJDs, a heliocentric redshift, and fiducial times (peak B-band), get
+        rest-frame phases (MJD - t_max)/(1+z_helio) and set it in self.photometry["phase"]
+
+        Parameters
+        ----------
+        peak_mjd:
+            A guess for the value of tmax in modified Julian Date. Used to define
+            rest-frame phase. If None, this will be inferred from the photometry using
+            a SNR^2-weighted average of available epochs. This is not a reliable metric
+            if the peak is not covered.
+        """
+        assert isinstance(snid, str), "Non-str snids are not supported."
+        idx = self.get_idx(snid)
+        if peak_mjd is None:
+            peak_mjd = self.peak_mjd[idx] or self.estimate_tmax(self.snid[idx])
+        epochs = self.photometry["mjd"][self.phot_idx[idx]:self.phot_idx[idx+1]].to_numpy()
+        return (epochs - peak_mjd) / (1.0 + self.z_helio[idx])
+
     def get_band_indices(
         self,
-        band_dict: dict[str, int],
+        band_dict: None | dict[str, int] = None,
         photometry: None | pd.DataFrame = None
     ) -> np.ndarray:
         """ Get integer indices of the flt column in the photometry attribute.

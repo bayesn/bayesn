@@ -235,7 +235,7 @@ class DustExtRel:
         ret_val = cond(self.output_type == "axav", no_op, lambda v: v / RV[:, None], ret_val)
         return cond(self.output_type == "exvebv", lambda v: v + 1, no_op, ret_val)
 
-    def get_axav(self, RV: ArrayLike) -> Array:
+    def get_axav(self, RV: ArrayLike, verbose: bool = True) -> Array:
         """ A wrapper for _get_axav that prints out a warning if the RV is out of the
         specified RV_range.
 
@@ -250,13 +250,15 @@ class DustExtRel:
             A set of A(x)/A(V) values calculated with the loaded extinction relation.
         """
         shaped_RV = jnp.atleast_1d(jnp.squeeze(RV))
-        if len(shaped_RV.shape) > 1:
+        if verbose and len(shaped_RV.shape) > 1:
             raise ValueError(
                 f"RV should be a constant, 1D-array, or ArrayLike that can be "
                 "jnp.squeezed into a 1D-array. The current squeezed shape is "
                 f"{shaped_RV.shape}, which is not supported."
             )
-        if (shaped_RV < self.rv_range[0]).any() or (shaped_RV > self.rv_range[1]).any():
+        if verbose and (
+            shaped_RV < self.rv_range[0]).any() or (shaped_RV > self.rv_range[1]
+        ).any():
             warn(UserWarning(
                 f"WARNING: The {self.name} dust extinction relation is only valid with "
                 f"RV in the interval {self.rv_range}. RV={RV} will require "

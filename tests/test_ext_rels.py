@@ -7,7 +7,7 @@ import time
 from typing import Any
 from warnings import warn
 
-from bayesn.bayesn_model import SEDmodel, default_model_kwargs
+from bayesn.bayesn_model import SEDmodel
 from bayesn.extinction_relations import DustExtRel
 import argparse
 import astropy.units as u

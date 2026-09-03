@@ -8,7 +8,7 @@ import time
 from typing import Any
 from warnings import warn
 
-from bayesn.bayesn_model import SEDmodel, default_model_kwargs
+from bayesn.bayesn_model import SEDmodel, default_kwargs
 import argparse
 import astropy.units as u
 import jax
@@ -87,7 +87,7 @@ def loaded_model_and_args(initial_args: dict, model: SEDmodel) -> tuple[SEDmodel
     cmd_args = {"input": str(TEST_DIR / "input.yaml")}
     # T21_mini_set.txt uses PS1 data.
     model._set_used_bands(bands=[f"{bp}_PS1" for bp in "griz"])
-    args = model.parse_yaml_input(initial_args, cmd_args)
+    args = model.parse_args(initial_args, cmd_args)
     model.process_dataset(args)
     return model, args
 
@@ -408,17 +408,7 @@ class TestYaml:
         with pytest.raises(ValueError):
             model._parse_mode(mode_args)
 
-    def test_model_kwargs(self, initial_args: dict, model: SEDmodel):
-        args = copy.deepcopy(initial_args)
-        args = model._parse_mode(args)
-        mode_args = copy.deepcopy(args)
-        args = model._populate_config_params(args)
-        args["model_kwargs"] = model._populate_model_kwargs(args)
-        for key, val in default_model_kwargs.items():
-            if key not in initial_args and key not in mode_args:
-                assert args["model_kwargs"][key] == val
-
-    def test_parse_yaml_input_args_dict(self, loaded_model_and_args: tuple[SEDmodel, dict]):
+    def test_parse_args(self, loaded_model_and_args: tuple[SEDmodel, dict]):
         # If regenerating the pickled results, remove your personal directory structure
         # before dumping with args["data_root"] = args["data_root"].lstrip(BASE_DIR)
         _, args = loaded_model_and_args
@@ -637,12 +627,12 @@ class TestModelTrace:
     @pytest.mark.parametrize("variant,RV_type", zip((variants.keys()), RV_types))
     def test_trace(self, loaded_model_and_args: tuple[SEDmodel, dict], variant: str, RV_type: str):
         model, args = loaded_model_and_args
-        model_kwargs = copy.deepcopy(args["model_kwargs"])
-        model_kwargs.update(self.variants[variant])
+        kwargs = copy.deepcopy(args)
+        kwargs.update(self.variants[variant])
         model.RV_type = RV_type
         test_trace = trace(
                 seed(model._model, jax.random.PRNGKey(0))
-            ).get_trace(model.data, model.band_weights, **model_kwargs)
+            ).get_trace(model.data, model.band_weights, **kwargs)
         with open(PICKLE_DIR / f"T21_trace.{variant}.pkl", "rb") as file:
             ref_trace = pickle.load(file)
         for test, ref in zip(test_trace.values(), ref_trace.values()):
