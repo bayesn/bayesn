@@ -1,0 +1,25 @@
+DOCUMENTATION:
+    PURPOSE: low-z filter trans for CfA sample tied to Landolt standards
+    REF: 
+    - AUTHOR:  Jha, Riess, Kirshner 2007
+      ADS:     https://ui.adsabs.harvard.edu/abs/2007ApJ...659..122J
+    INTENT:     Nominal
+    USAGE_KEY:  FILTER
+    USAGE_CODE: kcor.exe
+    VALIDATE_SCIENCE: used in multiple cosmology analyses (SDSS,JLA,Pantheon)
+    NOTES:
+    - interpolated to 5A grid to avoid interpolation differences among codes
+    - Copied/modified from SNLS3-Landolt-model/FilterWheel file.
+DOCUMENTATION_END:
+
+# - - - - - - - - 
+May 04 2011 - J.Mosher
+
+Filters 
+sb-shifted.dat  si-shifted.dat  sr-shifted.dat  sux-shifted.dat  sv-shifted.dat
+copied from 
+ /data/dp62.a/data/SALT2/data/Instruments/SNLS3-Landolt-model
+ to match those specified in SNLS3-Landolt-model/FilterWheel file.
+
+
+

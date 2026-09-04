@@ -1,0 +1,130 @@
+# legacy term for specific combinations of parameters
+mode: custom
+# Number of chains to use for sampling
+num_chains: 4
+# Number of warmup steps to take before sampling
+num_warmup: 500
+# Number of steps to take during sampling
+num_samples: 500
+# mcmc or vi for NUTS sampling or variational inference
+fit_method: mcmc
+# parallel or sequential to indicate sampling order
+chain_method: parallel
+laplace_method: lm
+lm_maxiter: 30
+lm_lam_init: 1.0
+lm_use_linesearch: True
+zltn_lr: 0.02
+zltn_lr_final: 0.002
+zltn_particles: 10
+stage2_tmax_prior_std: 1.0
+lm_solver: gn
+batch_size: null
+# median, sample, or one of the built-in models (or a custom model) to initialise
+# hyper-parameters
+initialisation: median
+# dictionary with keys of bandpass names as they appear in the data files and values
+# of the corresponding names in BayeSN (see bayesn/bayesn-filters/filtes.yaml)
+map: {}
+# list of BayeSN bandpass names to ignore when ingesting data
+drop_bands: []
+# A path to a directory where run results will be output. A value of default will output
+# files to the working directory, even if a "default" directory exists.
+outputdir: default
+# A string to prepend to all output
+outfile_prefix: output
+jobid: False
+sim_prescale: 1
+sim_peakmjd: False
+# SNe with zhel >= zlim will not be loaded
+zlim: 99.
+# Key specifying peak MJD in SN files
+peakmjd_key: PEAKMJD
+jobsplit: null
+save_fit_errors: False
+# A dictionary with keys of metadata parameter names and values of 2-tuples indicating
+# the lower and upper limits beyond which data will be cut. THIS DOES NOT AFFECT THE
+# SAMPLING, ONLY THE FITRES TABLE.
+lc_cuts: {}
+save_summary: False
+# A list of SN names to be retained, with data for all others dropped. If null, retain
+# all SNe.
+keep_list: null
+# A lower-limit for magnitude errors. The flux equivalent is calculated and applied.
+# This is in magnitude space regardless of data_type being "flux" or "mag".
+error_floor: 0.0
+# Numer of SNe for which lcplot data will be generated. If null, make all lcplot data.
+num_lcplot: null
+
+# flux or mag to indicate photometric units
+data_type: flux
+# If True, use the peak_mjd values from the data as tmax, otherwise infer tmax.
+fix_tmax: False
+# If null, infer theta during sampling, otherwise, fix theta to the indicated value.
+# False will be read as fix_theta=0, and True as fix_theta=1.
+fix_theta: null
+# If null, infer AV during sampling, otherwise, fix AV to the indicated value.
+# False will be read as fix_AV=0, and True as fix_AV=1.
+fix_AV: null
+#
+# Parameters for RV_type == "global"
+# RV to use for all SNe if infer_dust_properties is False.
+RV: default
+# TODO: check this
+global_RV: null
+uniform_RV_min: 1
+uniform_RV_max: 6
+#
+# Parameters for RV_type == "pop"
+# The ~mean RV to use if infer_dust_properties is False.
+mu_R: 3
+# The ~std dev of RV to use if infer_dust_properties is False.
+sigma_R: 0.5
+# The uniform distribution limits for mu_R if infer_dust_properties is True.
+mu_R_min: 1.2
+mu_R_max: 6
+# The HalfNormal scale factor for sigma_R if infer_dust_properties is True.
+sigma_sigma_R: 2
+# If True, parameterize tau_A as a linear function of redshift tauA + z*tau_z_grad and
+# RV as global_RV + z*mu_z_grad or mu_R as mu_R + z*mu_z_grad
+vary_redshift: False
+# The uniform distribution limits for tau_z_grad if vary_redshift is True.
+tau_z_min: -0.5
+tau_z_max: 0.5
+# The heliocentric redshift below which Hubble-flow-based distances have uncertainties
+# based on redshift errors and sigma_pec, and above which the errors will be overridden
+# by fix_dist_Ds_err.
+fix_dist_limit: 0.08
+fix_dist_Ds_err: 5
+# null, split_mag, or split_sed, leading the model whether to sample dust parameters
+# for high- and low-mass galaxy populations as a single population (null), or separate
+# populations differing in M0 (split_mag) or in W0 (split_sed)
+split_variant: null
+# The log stellar mass cutoff dividing high- and low-mass galaxy populations.
+M_split: 10
+# If null, calculate Hubble-flow-based distance uncertainties using redshift errors and
+# sigma_pec, otherwise use the scalar value of muhat_err for all uncertainties.
+muhat_err: null
+# If True, sample W0, W1, and L_Sigma. Otherwise use the values of the built-in model.
+train_new_model: False
+# The rest-frame wavelength locations (Angstroms) of the model's spline knots.
+# If default use built-in model's l_knots attribute.
+l_knots: default
+# The rest-frame phase locations (days) of the model's spline knots.
+# If default use built-in model's tau_knots attribute.
+tau_knots: default
+# If True, sample at least sigma0 and tauA.
+# If RV_type=="global", sample RV
+# If RV_type=="pop", also sample mu_R and sigma_R
+# If vary_redshift, sample tau_z_grad and mu_z_grad
+# If split_variant is not null, infer above for high- and low-mass populations
+infer_dust_properties: False
+# If True, assume bandpass b's actual observer-frame transmission function
+# T'[b](\lambda) is a linear shift of the nominal function T[b](\lambda - lam_shift[b])
+# Sample lam_shift for all bandpasses.
+vary_filter_shifts: False
+# If True, assume bandpass b's actual instrumental zero-point is offset from its
+# nominal value by a constant mag_shift[b]. Sample mag_shift for all bandpasses.
+vary_offsets: False
+# If True, sample each SN's redshift with either Gaussian uncertainties or quantiles.
+photoz: False
