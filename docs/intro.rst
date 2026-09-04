@@ -44,7 +44,7 @@ relating to the residual intrinsic SN colour distribution). This is a considerab
 
 BayeSN also includes support for variational inference (VI), applying a specially developed zero lower-truncated normal
 (ZLTN) distribution to constrain AV values to be positive while allowing other parameters to be treated as a
-multivariate Gaussian, as presented in Uzsoy+2024 (to be submitted). Using VI, fitting can be further sped up to
+multivariate Gaussian, as presented in Uzsoy+2024 (MNRAS 535, 2306). Using VI, fitting can be further sped up to
 ~0.2s per object.
 
 Redshift requirement

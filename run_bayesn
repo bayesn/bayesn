@@ -27,6 +27,7 @@ parser.add_argument('--version_photometry', type=str, required=False)
 parser.add_argument('--drop_bands', type=str, required=False, nargs='*')
 parser.add_argument('--num_warmup', type=int, required=False)
 parser.add_argument('--num_samples', type=int, required=False)
+parser.add_argument('--num_nobs_bins', type=int, required=False)
 parser.add_argument('--snana', type=bool, required=False)
 parser.add_argument('--jobsplit', type=int, nargs=2)
 parser.add_argument('--outfile_prefix', type=str, required=False)
@@ -40,6 +41,12 @@ parser.add_argument('--error_floor', type=float, required=False)
 parser.add_argument('--batch_size', type=int, required=False)
 parser.add_argument('--num_lcplot', type=float, required=False)
 parser.add_argument('--save_summary', type=float, required=False)
+#CLI overrides for systematics begin here. 
+parser.add_argument('--magobs_shift_zp_params', type=float, nargs=3, required=False)
+parser.add_argument('--redshift_final_shift', type=float, required=False)
+parser.add_argument('--mwebv_scale', type=float, required=False)
+parser.add_argument('--mwebv_shift', type=float, required=False)
+
 cmd_args = parser.parse_args()
 
 if not os.path.exists(cmd_args.input):
@@ -56,5 +63,6 @@ if 'load_model' not in args.keys() and cmd_args.load_model is None:
 if 'filters' not in args.keys():
     args['filters'] = cmd_args.filters
 
-model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'])
+model = SEDmodel(load_model=args['load_model'], filter_yaml=args['filters'],
+                 fluxcal_zpt=args.get('fluxcal_zpt', 27.5), magobs_shift_zp_params=cmd_args.magobs_shift_zp_params)
 model.run(args, cmd_args)
