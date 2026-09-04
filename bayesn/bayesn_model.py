@@ -1976,8 +1976,8 @@ class SEDmodel(object):
         infer_dust_properties: bool = False,
         vary_redshift: bool = False,
         fix_tmax: bool = True,
-        vary_filter_shifts: bool = True,
-        vary_offsets: bool = True,
+        vary_filter_shifts: bool = False,
+        vary_offsets: bool = False,
         M_split: float = 10,
         split_variant: str | None = None,
         data_type: str = "flux",
@@ -2109,10 +2109,12 @@ class SEDmodel(object):
                 The upper bound of the uniform distribution of tau_z_grad.
         """
         N_sn = obs.shape[2]
-        if not train_new_model:
-            W0, W1, L_Sigma = self.W0, self.W1, self.L_Sigma
-        else:
+
+        if train_new_model:
             W0, W1, L_Sigma = self._sample_model_params()
+        else:
+            W0, W1, L_Sigma = self.W0, self.W1, self.L_Sigma
+
         if infer_dust_properties:
             dust_pop, M0, W0 = self._sample_dust_hyperparams(
                 split_variant=split_variant,
@@ -2130,11 +2132,16 @@ class SEDmodel(object):
                 W0=W0,
                 **kwargs,
             )
-        lam_shift, mag_shift = 0, 0
         if vary_filter_shifts:
             lam_shift = numpyro.sample("lam_shift", dist.Normal(0, self.used_wave_sigmas))
+        else:
+            lam_shift = 0
+
         if vary_offsets:
             mag_shift = numpyro.sample("mag_shift", dist.MultivariateNormal(0, scale_tril=self.used_calib_chcov))
+        else:
+            mag_shift = 0
+
         with numpyro.plate("SNe", N_sn) as sn_index:
             band_indices = obs[4, :, sn_index].astype(int).T
             phot_mask = obs[9, :, sn_index].T.astype(bool)
@@ -2166,9 +2173,7 @@ class SEDmodel(object):
                 **kwargs,
             )
 
-            if fix_tmax:
-                hsiao_interp, J_t, tmax = self.hsiao_interp, self.J_t, None
-            else:
+            if not fix_tmax:
                 hsiao_interp, J_t, tmax = self._sample_SN_tmax(
                     t_all_sn=obs[0],
                     sn_index=sn_index,
@@ -2176,11 +2181,11 @@ class SEDmodel(object):
                     z_sampled=z,
                     **kwargs,
                 )
+            else:
+                hsiao_interp, J_t, tmax = self.hsiao_interp, self.J_t, None
+
             phot_epoch_spectra = self._get_spectra(theta, AV, W0, W1, eps, RV, J_t, hsiao_interp)
-            if data_type == "flux":
-                data_fn = self.get_flux_batch
-            elif data_type == "mag":
-                data_fn = self.get_mag_batch
+            data_fn = self.get_flux_batch if data_type == "flux" else self.get_mag_batch
             data = data_fn(
                 model_spectra=phot_epoch_spectra,
                 M0=M0,

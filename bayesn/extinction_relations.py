@@ -157,8 +157,8 @@ class DustExtRel:
         """
         params = self.load_params(name=name, verbose=verbose)
         self.set_x(x_in=x_in, x_units=x_units)
-        x = self.x
-        zeros = jnp.zeros((self.n_subdomains, 1))
+        x = np.asarray(self.x)
+        zeros = np.zeros((self.n_subdomains, 1))
 
         undefined_intervals = self.get_undefined_intervals(x)
         if undefined_intervals != [] and verbose:
@@ -169,45 +169,52 @@ class DustExtRel:
                 f"{self.units}."
             ))
 
-        der = {"J": jnp.zeros((self.n_subdomains, len(x), self.rv_coeffs.shape[1]+1))}
+        der_A = np.zeros_like(x)
+        der_B = np.zeros_like(x)
+        der_J = np.zeros((self.n_subdomains, len(x), self.rv_coeffs.shape[1] + 1))
         # last dimension gets +1 for spline interpolation padding.
-        for var in ("A", "B"):
-            der[var] = jnp.zeros_like(x)
         for i in range(self.n_subdomains):
             wl_range = params.get("SUBDOMAINS", [self.range])[i]
-            idx = jnp.where((wl_range[0] <= x) & (x < wl_range[1]))[0]
+            idx = np.where((wl_range[0] <= x) & (x < wl_range[1]))[0]
             # Include last element if sub-domain edge coincides with domain edge.
             if wl_range[1] == self.range[1] and wl_range[1] in x:
-                idx = jnp.append(idx, jnp.where(x == wl_range[1])[0])
+                idx = np.append(idx, np.where(x == wl_range[1])[0])
             if not idx.shape[0]:
                 continue
             mod_x = x[idx]
             for var in "AB":
                 exp_term = mod_x ** params.get(f"{var}_EXP", zeros)[i]
-                poly = jnp.array(params.get(f"{var}_POLY_COEFFS", zeros)[i])
-                rem = jnp.array(params.get(f"{var}_REMAINDER_COEFFS", zeros)[i])
-                div = jnp.array(params.get(f"{var}_DIVISOR_COEFFS", zeros)[i])
-                rational_term = jnp.polyval(poly, mod_x) + jnp.nan_to_num(
-                    jnp.polyval(rem, mod_x) / jnp.polyval(div, mod_x), posinf=0,neginf=0
-                )
-                # Asymmetric Drude profile, symmetric profiles converted to polynomials
-                amp, center, fwhm, asym = jnp.array(
-                    params.get(f"{var}_DRUDE_PARAMS", jnp.zeros((self.n_subdomains, 4)))[
-                        i
-                    ]
-                )
-                gamma = 2 * fwhm / (1 + jnp.exp(asym * (1 / mod_x - center)))
-                drude_divisor = ((1 / (mod_x * center) - mod_x * center) ** 2+ (gamma / center) ** 2)
-                drude_term = jnp.nan_to_num(amp * (gamma / center) ** 2 / drude_divisor, nan=1, posinf=0, neginf=0)
-                der[var] = der[var].at[idx].add(exp_term * rational_term * drude_term)
-            if len(jnp.nonzero(self.xk[i])[0]):
+                poly = np.array(params.get(f"{var}_POLY_COEFFS", zeros)[i], dtype=np.float64)
+                rem = np.array(params.get(f"{var}_REMAINDER_COEFFS", zeros)[i], dtype=np.float64)
+                div = np.array(params.get(f"{var}_DIVISOR_COEFFS", zeros)[i], dtype=np.float64)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    rational_term = np.polyval(poly, mod_x) + np.nan_to_num(
+                        np.polyval(rem, mod_x) / np.polyval(div, mod_x), posinf=0, neginf=0
+                    )
+                    # Asymmetric Drude profile, symmetric profiles converted to polynomials
+                    amp, center, fwhm, asym = np.array(
+                        params.get(f"{var}_DRUDE_PARAMS", np.zeros((self.n_subdomains, 4)))[
+                            i
+                        ],
+                        dtype=np.float64,
+                    )
+                    gamma = 2 * fwhm / (1 + np.exp(asym * (1 / mod_x - center)))
+                    drude_divisor = ((1 / (mod_x * center) - mod_x * center) ** 2 + (gamma / center) ** 2)
+                    drude_term = np.nan_to_num(amp * (gamma / center) ** 2 / drude_divisor, nan=1, posinf=0, neginf=0)
+                term = exp_term * rational_term * drude_term
+                if var == "A":
+                    der_A[idx] += term
+                else:
+                    der_B[idx] += term
+            xk_i = np.asarray(self.xk[i])
+            if np.count_nonzero(xk_i):
                 bc_type = params.get("SPLINE_BC_TYPE", ["natural" for _ in range(self.n_subdomains)])[i]
-                der["J"] = der["J"].at[i, idx].add(spline_coeffs(
-                    mod_x, self.xk[i], invKD(self.xk[i], bc_type=bc_type)
+                der_J[i, idx] += np.asarray(spline_coeffs(
+                    mod_x, xk_i, invKD(xk_i, bc_type=bc_type)
                 ))
-        self.ax = der["A"]
-        self.bx = der["B"]
-        self.Jx = der["J"]
+        self.ax = jnp.asarray(der_A)
+        self.bx = jnp.asarray(der_B)
+        self.Jx = jnp.asarray(der_J)
     def _get_axav(self, RV: ArrayLike) -> Array:
         """
         Parameters
