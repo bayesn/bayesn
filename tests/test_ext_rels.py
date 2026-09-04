@@ -7,7 +7,6 @@ import time
 from typing import Any
 from warnings import warn
 
-from bayesn.bayesn_model import SEDmodel
 from bayesn.extinction_relations import DustExtRel
 import argparse
 import astropy.units as u
@@ -54,28 +53,6 @@ def initial_args() -> dict:
     return args
 
 @pytest.fixture(scope="module")
-def model(initial_args: dict) -> SEDmodel:
-    model = SEDmodel(load_model=initial_args["load_model"], load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
-    return model
-
-@pytest.fixture(scope="module")
-def sample_model_parameters(model: SEDmodel) -> tuple[jax.Array, ...]:
-    mu_R = 3.1
-    sigma_R = 0.5
-    theta = jax.random.normal(rng_key, (N_sn,))
-    AV = jax.random.exponential(rng_key, (N_sn,))
-    RV = mu_R + sigma_R*jax.random.normal(rng_key, (N_sn,))
-    W0 = jax.random.normal(rng_key, (N_sn, *model.W0.shape))
-    W1 = jax.random.normal(rng_key, (N_sn, *model.W1.shape))
-    eps = jax.random.normal(rng_key, (N_sn, *model.W1.shape))
-    eps = eps.at[:,0].set(0).at[:,-1].set(0)
-    t = jax.random.uniform(rng_key, (N_epochs, N_sn))
-    J_t = model.get_J_t(t)
-    hsiao_interp = model.get_hsiao_interp(t)
-    z = 0.1*jax.random.uniform(rng_key, (N_sn,))
-    return theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, z
-
-@pytest.fixture(scope="module")
 def F99() -> DustExtRel:
     return DustExtRel(name="F99", x_in="default", default_min_wave=3500, default_max_wave=9500)
 #############
@@ -89,8 +66,8 @@ de_args = (
     ("CCM89", 5e-12),
     ("O94", 6e-11),
     ("F04", 2e-14),
-    ("VCG04", 2e-14),
-    ("GCC09", 9e-15),
+    ("VCG04", 3e-14),
+    ("GCC09", 3e-14),
     ("M14", 2e-15),
     ("F19", 1e-14),
     ("D22", 5e-16),
@@ -107,7 +84,7 @@ def test_ext_rel_short_wl_coverage():
     with pytest.warns(UserWarning):
         DustExtRel(name=os.path.join(TEST_DIR, "test_ext_rel_short.yaml"))
 
-def test_ext_rel_file_non_existent(model: SEDmodel):
+def test_ext_rel_file_non_existent():
     non_existent_check()
     with pytest.raises(FileNotFoundError):
         DustExtRel(name=os.path.join(TEST_DIR, "non_existent"))

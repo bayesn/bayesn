@@ -59,10 +59,23 @@ def model(initial_args: dict) -> SEDmodel:
     model = SEDmodel(load_model=initial_args["load_model"], load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
     return model
 
+from unittest.mock import patch
+
 @pytest.fixture(scope="module")
-def custom_model(initial_args: dict) -> SEDmodel:
+def custom_model(initial_args: dict, model: SEDmodel) -> SEDmodel:
     # copy of T21_model/BAYESN.YAML but with MUR=2.61 instead of RV=2.61
-    custom_model = SEDmodel(load_model=TEST_DIR / "test_model.yaml", load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
+    def mock_load_hsiao(self, *args, **kwargs):
+        for attr in ("min_hsiao_wave", "max_hsiao_wave", "hsiao_t", "hsiao_l", "hsiao_flux", "KD_t_hsiao", "J_l_T_hsiao", "hsiao_offset"):
+            setattr(self, attr, getattr(model, attr))
+
+    def mock_load_ext_rel(self, *args, **kwargs):
+        self.mw_ext = model.mw_ext
+        self.ext_rel = model.ext_rel
+
+    with patch.object(SEDmodel, "_load_hsiao_template", mock_load_hsiao), \
+         patch.object(SEDmodel, "load_ext_rel", mock_load_ext_rel), \
+         patch.object(SEDmodel, "_load_dovekie_cov"):
+        custom_model = SEDmodel(load_model=TEST_DIR / "test_model.yaml", load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
     return custom_model
 
 @pytest.fixture(scope="module")
