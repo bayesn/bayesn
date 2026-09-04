@@ -953,10 +953,18 @@ class SEDmodel(object):
                 chi2_z = ((z_mean - zhat) / zhat_err) ** 2
             else:  # quantile prior: p_host is dCDF/dz, the finite-difference slope of the quantiles
                 zq, pl = np.asarray(self.z_icdf_grid), np.asarray(self.z_u_grid)
-                slopes = np.diff(pl) / np.diff(zq, axis=1)  # dP/dz per quantile bin
+                dz = np.diff(zq, axis=1)
+                # Repeated quantiles (flat PDF regions) give a zero-width bin and an infinite
+                # slope; fall back to the density across the SN's full quantile support there.
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    slopes = np.where(dz > 0, np.diff(pl) / dz, np.nan)
                 k = np.clip(np.sum(zq <= z_mean[:, None], axis=1) - 1, 0, pl.shape[0] - 2)
                 p_host = slopes[np.arange(len(z_mean)), k]
-                chi2_z = np.where(p_host > 0, -2.0 * np.log(p_host), 1000.0)
+                span = zq[:, -1] - zq[:, 0]
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    p_coarse = np.where(span > 0, (pl[-1] - pl[0]) / span, np.nan)
+                p_host = np.where(np.isfinite(p_host), p_host, p_coarse)
+                chi2_z = np.where(np.isfinite(p_host) & (p_host > 0), -2.0 * np.log(p_host), 1000.0)
 
         # Joint statistic, NDOF, FITPROB
         T_joint = np.array(chi2_data) + chi2_epsilon + chi2_z
@@ -2266,6 +2274,19 @@ class SEDmodel(object):
         args['lm_lam_init'] = args.get('lm_lam_init', 1.0)
         args['lm_use_linesearch'] = args.get('lm_use_linesearch', True)
         args['photoz'] = args.get('photoz', False)
+        # [lo, hi] bounds of a uniform host-z prior, applied to SNe with no host redshift PDF of
+        # their own. A prior on the fitted redshift, unrelated to the cutwin_REDSHIFT selection cut.
+        uzp = args.get('photoz_uniform_prior')
+        if uzp is not None:
+            if len(uzp) != 2 or not uzp[1] > uzp[0] > 0:
+                raise ValueError(f'photoz_uniform_prior must be [lo, hi] with 0 < lo < hi, got {uzp}')
+            uzp = (float(uzp[0]), float(uzp[1]))
+        args['photoz_uniform_prior'] = uzp
+        # Rest-frame days past tau_max an epoch may extrapolate and still be fitted. Past the last
+        # tau knot the warp is frozen at its final value, so the SED is the Hsiao template times a
+        # fixed colour; 20 d (phase 60 for T21) is a provisional tolerance for that approximation.
+        # Set to null to disable the cut.
+        args['photoz_phase_pad'] = args.get('photoz_phase_pad', 20.)
         args['wave_extrap'] = args.get('wave_extrap', 1)
         args['phase_extrap'] = args.get('phase_extrap', 2)
         args['num_zltn_iter'] = args.get('num_zltn_iter', 4000 if args['photoz'] else 1500)
@@ -3139,7 +3160,9 @@ class SEDmodel(object):
             if args['num_lcplot'] is None:
                 num_lcplot = self.data.shape[-1]
             else:
-                num_lcplot = args['num_lcplot']
+                # Cuts may leave fewer SNe than requested; bands/sn_list are post-cut, so clamp or
+                # the per-SN loop in get_flux_from_chains* indexes past the end.
+                num_lcplot = min(args['num_lcplot'], self.data.shape[-1])
 
             if args['num_lcplot'] > 0:
                 bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique().to_dict()
@@ -3148,7 +3171,8 @@ class SEDmodel(object):
                 fit_dfs = []
                 if args['photoz']:
                     # Observer-frame posterior predictive: each draw's z sets both K-correction and the MJD axis
-                    mjd_grids, f, ferr = self.get_flux_from_chains_photoz(samples, bands, num_lcplot)
+                    mjd_grids, f, ferr = self.get_flux_from_chains_photoz(
+                        samples, bands, num_lcplot, phase_pad=args['photoz_phase_pad'] or 0.)
                     for i, sn in enumerate(self.lcplot_data.CID.unique()):
                         fit_df = pd.DataFrame()
                         fit_df['MJD'] = mjd_grids[i].repeat(len(bands[i]))
@@ -3373,7 +3397,7 @@ class SEDmodel(object):
                     self.ZPT = zpt
                     self.survey_id = survey_dict.get(self.survey, 0)
                     phot_file = head_file.replace("HEAD", "PHOT")
-                    head_data = head_data.byteswap().newbyteorder()
+                    head_data = head_data.astype(head_data.dtype.newbyteorder('='))  # FITS is big-endian; pandas/JAX need native
                     phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
                     if sn_file_ind == 0:
                         # Check if sim or real data
@@ -3412,6 +3436,22 @@ class SEDmodel(object):
                         zphot_probs = [int(k.split('_Q')[-1]) / 100. for k in q_keys]
                         # a valid PDF has all-positive quantiles; SNe without one aren't photo-z targets
                         has_photoz = (q_arr[:, 0] > 0) if q_arr.shape[1] else np.zeros(n_sne_in_file, dtype=bool)
+                        if args['photoz_uniform_prior'] is not None:
+                            # SNe with no host PDF get a uniform prior instead of being dropped. The ICDF of a
+                            # uniform is linear, so map the CDF grid onto [lo, hi]; endpoints land on the bounds
+                            # so the support is exactly the requested range.
+                            lo_u, hi_u = args['photoz_uniform_prior']
+                            if not zphot_probs:  # no quantile columns at all: pick a grid for the whole file
+                                zphot_probs = list(np.linspace(0., 1., 11))
+                                q_arr = np.zeros((n_sne_in_file, len(zphot_probs)))
+                            pr = np.asarray(zphot_probs, dtype=float)
+                            flat_row = lo_u + (pr - pr[0]) / (pr[-1] - pr[0]) * (hi_u - lo_u)
+                            q_arr = np.where(has_photoz[:, None], q_arr, flat_row[None, :])
+                            n_flat = int((~has_photoz).sum())
+                            if n_flat:
+                                print(f'{n_flat} SNe have no host photo-z PDF; using a uniform prior on '
+                                      f'[{lo_u}, {hi_u}] for them')
+                            has_photoz = np.ones(n_sne_in_file, dtype=bool)
                         z_lo_arr, z_hi_arr = (q_arr[:, 0], q_arr[:, -1]) if q_arr.shape[1] else (zhel_arr, zhel_arr)
 
                     # Per-SN job/keep_list mask: SNe this job will actually process.
@@ -3436,7 +3476,7 @@ class SEDmodel(object):
                     sn_idx = sn_idx[row_keep]
 
                     phot_data = phot_data[row_keep][['MJD', 'BAND', 'FLUXCAL', 'FLUXCALERR']]
-                    phot_data = phot_data.byteswap().newbyteorder()
+                    phot_data = phot_data.astype(phot_data.dtype.newbyteorder('='))  # FITS is big-endian; pandas/JAX need native
                     phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
                     phot_df['BAND'] = phot_df['BAND'].str.decode('utf-8').str.strip()
 
@@ -3466,6 +3506,11 @@ class SEDmodel(object):
                         keep &= ~((band_hi / (1 + z_lo_obs) < self.min_wave) | (band_lo / (1 + z_hi_obs) > self.max_wave))
                         t_obs = phot_df['MJD'].values - peakmjd_arr[sn_idx]
                         keep &= (np.maximum(t_obs / (1 + z_lo_obs), t_obs / (1 + z_hi_obs)) + 10 > float(self.hsiao_t[0]))
+                        if args['photoz_phase_pad'] is not None:
+                            # Drop epochs that cannot reach the model's phase range for any z in the
+                            # prior, allowing photoz_phase_pad days of extrapolation past tau_max.
+                            keep &= (np.minimum(t_obs / (1 + z_lo_obs), t_obs / (1 + z_hi_obs))
+                                     < tau_max + args['photoz_phase_pad'])
                     else:
                         band_z_lims = {f: (self.band_lim_dict[f][0] / l_min - 1,
                                            self.band_lim_dict[f][1] / l_max - 1)
@@ -3491,8 +3536,20 @@ class SEDmodel(object):
 
                     phot_df['MAG'] = self.ZPT - 2.5 * np.log10(phot_df['flux'].values)
                     phot_df['MAGERR'] = (2.5 / np.log(10)) * phot_df['flux_err'].values / phot_df['flux'].values
-                    phot_df['redshift'] = zhel_arr[sn_idx]
-                    phot_df['redshift_error'] = zhel_err_arr[sn_idx]
+                    if args['photoz'] and q_arr.shape[1]:
+                        # This column seeds the initial band weights, and a photo-z sample may carry no
+                        # catalog redshift at all (-999), which would make them NaN. Keep the catalog
+                        # value wherever it is real and substitute the host-z prior median only where it
+                        # is not. The sampled z supersedes this in-model either way. With no quantiles at
+                        # all every SN is dropped upstream, so fall through and let the clearer
+                        # 'no host redshift PDF' error fire rather than dying in interp.
+                        zc_file = np.array([np.interp(0.5, zphot_probs, q) for q in q_arr])
+                        no_cat_z = ~(zhel_arr > 0)
+                        phot_df['redshift'] = np.where(no_cat_z, zc_file, zhel_arr)[sn_idx]
+                        phot_df['redshift_error'] = np.where(no_cat_z, 0., zhel_err_arr)[sn_idx]
+                    else:
+                        phot_df['redshift'] = zhel_arr[sn_idx]
+                        phot_df['redshift_error'] = zhel_err_arr[sn_idx]
                     phot_df['MWEBV'] = mwebv_arr[sn_idx]
                     phot_df['MWEBV'] *= mwebv_scale
                     mwebv_arr[sn_idx] *= mwebv_scale #consistency with ASCII tables
@@ -3728,6 +3785,11 @@ class SEDmodel(object):
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
             if N_sn < 1:
+                if args['photoz'] and not zphot_probs:
+                    raise ValueError(
+                        'No SNe included: photoz is set but no HOSTGAL_ZPHOT_Qnn quantile columns were '
+                        'found, so every SN was dropped for having no host redshift PDF. Set '
+                        'photoz_uniform_prior: [lo, hi] to fit them under a uniform redshift prior.')
                 raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
                                  'SNIDs in the data?')
             N_obs = np.max(n_obs)
@@ -3736,7 +3798,13 @@ class SEDmodel(object):
             if args.get('redshift_final_shift'): #
                 z_hds = [z + args.get('redshift_final_shift') for z in z_hds] 
                 z_hels = [z + args.get('redshift_final_shift') for z in z_hels]
-            distmods = self.cosmo.distmod(z_hds).value
+            if args['photoz'] and zphot_probs is not None:
+                # Photo-z fit: centre the Ds prior on the host-z median, as fit() does. Using z_hds here
+                # would put the true redshift into a fit that is meant not to know it.
+                z_c_arr = np.array([np.interp(0.5, zphot_probs, q) for q in np.asarray(zphot_quantiles)])
+                distmods = self.cosmo.distmod(z_c_arr).value
+            else:
+                distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
             if args['num_lcplot'] is None:
@@ -3831,7 +3899,14 @@ class SEDmodel(object):
                 self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :])
             else:
                 self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
-            if args['photoz'] and zphot_probs is not None:
+            if args['photoz']:
+                if zphot_probs is None:
+                    raise ValueError(
+                        'photoz is set but no host redshift PDF was found. The FITS reader takes '
+                        'HOSTGAL_ZPHOT_Qnn quantile columns; the text reader supplies none. Without a '
+                        'PDF the fit would fall back to a Gaussian on the spectroscopic redshift, '
+                        'i.e. silently run a spec-z fit. Set photoz_uniform_prior: [lo, hi] to fit '
+                        'these SNe under a uniform redshift prior instead.')
                 self.z_u_grid, self.z_icdf_grid = jnp.array(zphot_probs), jnp.array(zphot_quantiles)
             self.peak_mjds = self.fitres_table['SEARCH_PEAKMJD']
             # LC-plot data for the first num_lcplot surviving SNe, aligned with the post-cut fit order
@@ -4041,7 +4116,14 @@ class SEDmodel(object):
                 self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :])
             else:
                 self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
-            if args['photoz'] and zphot_probs is not None:
+            if args['photoz']:
+                if zphot_probs is None:
+                    raise ValueError(
+                        'photoz is not supported with data_table input: no host redshift PDF is read '
+                        'on this path, and the epoch/band cuts here are built from the catalog redshift, '
+                        'so the fit would silently be a spec-z fit. Use an SNANA FITS directory '
+                        '(version_photometry), which supports both HOSTGAL_ZPHOT_Qnn quantiles and '
+                        'photoz_uniform_prior.')
                 self.z_u_grid, self.z_icdf_grid = jnp.array(zphot_probs), jnp.array(zphot_quantiles)
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
@@ -4661,7 +4743,8 @@ class SEDmodel(object):
 
         return flux_grid
 
-    def get_flux_from_chains_photoz(self, chains, bands, num_sne, n_grid=100, num_samples=200):
+    def get_flux_from_chains_photoz(self, chains, bands, num_sne, n_grid=100, num_samples=200,
+                                    phase_pad=0.):
         """
         Observer-frame posterior-predictive model light curves for photo-z fits. Each posterior draw uses its
         own redshift for both the K-correction and the rest-frame to observer-MJD time dilation, so the plotted
@@ -4718,8 +4801,18 @@ class SEDmodel(object):
             eps_full = jnp.zeros((num_samples, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
 
-            # Shared observer-MJD grid: the rest knot range mapped at the mean fitted z
-            mjd_grid = self.peak_mjds[i] + jnp.linspace(tau_min, tau_max, n_grid) * (1 + z.mean())
+            # Shared observer-MJD grid: the union of this SN's epochs and, over every posterior draw,
+            # the observer window its own z and tmax map the model onto. Taking the union over draws
+            # rather than a single summary z keeps the grid independent of any point estimate, and
+            # extending to tau_max + phase_pad draws the curve through the extrapolated region the fit
+            # actually used, rather than stopping it at the knots.
+            sn_mask = np.asarray(self.data[-1, :, i]) > 0
+            t_obs_sn = np.asarray(self.data[0, :, i])[sn_mask]
+            zp1 = 1 + np.asarray(z)
+            lo_draw = float(np.min((tau_min + np.asarray(tmax)) * zp1))
+            hi_draw = float(np.max((tau_max + phase_pad + np.asarray(tmax)) * zp1))
+            mjd_grid = jnp.linspace(self.peak_mjds[i] + min(float(t_obs_sn.min()), lo_draw),
+                                    self.peak_mjds[i] + max(float(t_obs_sn.max()), hi_draw), n_grid)
             # Per-draw rest phase from the observer grid, tiled band-major over this SN's bands
             t_rest = (mjd_grid[:, None] - self.peak_mjds[i]) / (1 + z[None, :]) - tmax[None, :]
             t = jnp.tile(t_rest, (n_band, 1))
