@@ -25,7 +25,7 @@ from .bayesn_io import write_snana_lcfile
 from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 import functools
 from numpyro.handlers import substitute, trace
-from numpyro.infer.util import log_density, _unconstrain_reparam
+from numpyro.infer.util import log_density, _unconstrain_reparam, initialize_model, potential_energy
 import pickle
 import pandas as pd
 import jax
@@ -56,6 +56,10 @@ yaml = YAML(typ='safe')
 yaml.default_flow_style = False
 
 jax.config.update('jax_enable_x64', True)  # Enables 64 computation
+
+# unvaried value of each non-training systematic
+SYSTEMATIC_NOMINAL = {'mwebv_scale': 1.0, 'mwebv_shift': 0.0, 'mw_rv_shift': 0.0,
+                      'redshift_final_shift': 0.0}
 
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
@@ -95,6 +99,51 @@ def _prior_pot(model, args, kwargs, z_unc):
     # prior_only=True makes the model skip the likelihood, so log_density is the prior alone
     log_joint, _ = log_density(substituted, args, {**kwargs, 'prior_only': True}, {})
     return -log_joint
+
+
+def load_training_systematics(model_dir):
+    """
+    Load systematics.npz from a model directory - the model's own training run reduced to what a fit
+    needs. Returns a dict with the global-parameter mean ghat, a factor F with F F^T = Sigma_g (each
+    column one training draw), a name->slice layout, and the shift band names.
+    """
+    path = os.path.join(model_dir, 'systematics.npz')
+    if not os.path.exists(path):
+        raise FileNotFoundError(f'No systematics.npz in {model_dir} - this model does not provide training '
+                                f'systematics, so they cannot be propagated')
+    with np.load(path) as d:
+        layout = {str(nm): (int(lo), int(hi)) for nm, (lo, hi) in zip(d['layout_names'], d['layout_bounds'])}
+        return {'ghat': d['ghat'], 'F': d['F'], 'layout': layout,
+                'band_shift_names': [str(nm) for nm in d['band_shift_names']]}
+
+
+def merge_systematic_covariance(syst_files):
+    """
+    Combine the per-SN Delta-mu matrices B written by separate fitting jobs into one systematic
+    covariance. Rows are stacked in the order the files are given, which must match the order the
+    Hubble diagram rows were merged in. Writes SNANA's npz covariance format: the number of SNe,
+    then the upper triangle (including the diagonal, row-major) as float32. Columns are labelled by
+    systematic, so one covariance is written per systematic alongside the total; since the columns are
+    disjoint these sum exactly to the total.
+    """
+    B = []
+    for syst_file in syst_files:
+        with np.load(syst_file) as d:
+            B.append(d['B'])
+            labels = d['labels']
+    B = np.concatenate(B, axis=0)
+
+    def write(cov, path):  # SNANA's format: upper triangle including the diagonal, row-major, float32
+        np.savez(path, nsn=[cov.shape[0]], cov=cov[np.triu_indices_from(cov)].astype(np.float32),
+                 allow_pickle=False)
+
+    cov_file = os.path.basename(syst_files[0]).split('_SPLIT')[0] + '_COVSYS'  # {version}_{fitopt}_COVSYS.npz
+    write(B @ B.T, cov_file)
+    print(f'Merged {len(syst_files)} systematics files ({B.shape[0]} SNe) into {cov_file}.npz')
+    for label in dict.fromkeys(str(l) for l in labels):  # one file per systematic, contributions are additive
+        Bk = B[:, labels == label]
+        write(Bk @ Bk.T, f'{cov_file}_{label}')
+        print(f'  {label:20s} {Bk.shape[1]:5d} columns -> {cov_file}_{label}.npz')
 
 
 class SEDmodel(object):
@@ -264,6 +313,9 @@ class SEDmodel(object):
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
         self.data = None
         self.hsiao_interp = None
+        self._lam_shift = None  # fit-ordered per-band shifts applied when systematics propagation is on (else inert)
+        self._mag_shift = None
+        self._syst = None  # loaded training-posterior systematics (set only when systematics is enabled)
         self.RV_MW = device_put(jnp.array(3.1))
         self.sigma_pec = device_put(jnp.array(150 / 3e5))
         self.sn_list = None
@@ -272,11 +324,13 @@ class SEDmodel(object):
 
         if os.path.exists(load_model):
             print(f'Loading custom model at {load_model}')
+            self.model_dir = os.path.dirname(os.path.abspath(load_model))
             with open(load_model, 'r') as file:
                 params = yaml.load(file)
         elif load_model in built_in_models:
             print(f'Loading built-in model {load_model}')
-            with open(os.path.join(self.__root_dir__, 'model_files', load_model, 'BAYESN.YAML'), 'r') as file:
+            self.model_dir = os.path.join(self.__root_dir__, 'model_files', load_model)
+            with open(os.path.join(self.model_dir, 'BAYESN.YAML'), 'r') as file:
                 params = yaml.load(file)
         else:
             raise FileNotFoundError(f'Specified model {load_model} does not exist and does not correspond to one '
@@ -446,7 +500,7 @@ class SEDmodel(object):
             return f
 
         # Load filters------------------------------
-        band_weights, zps, offsets = [], [], []
+        band_weights, band_weights_shift, zps, offsets, zp_moments = [], [], [], [], []
         self.band_dict, self.zp_dict, self.band_lim_dict = {}, {}, {}
 
         # Prepare NULL band. This is a fake band with a very wide wavelength range used only for padded data points to
@@ -456,8 +510,10 @@ class SEDmodel(object):
         self.zp_dict['NULL_BAND'] = 10  # Arbitrary number
         self.band_lim_dict['NULL_BAND'] = band_wave[0], band_wave[-1]
         band_weights.append(np.ones_like(band_wave))
+        band_weights_shift.append(np.ones_like(band_wave))
         zps.append(10)
         offsets.append(0)
+        zp_moments.append([0., 0.])  # NULL band carries no real filter, so no zeropoint shift
 
         band_ind = 1
         for key, val in filter_dict['filters'].items():
@@ -488,6 +544,7 @@ class SEDmodel(object):
             band_weight = num / denom
 
             band_weights.append(band_weight)
+            band_weights_shift.append(band_conv_transmission)  # raw transmission for the wavelength-shift path
 
             # Get zero points
             lam = R[:, 0]
@@ -512,6 +569,9 @@ class SEDmodel(object):
 
             int1 = simpson(lam * zp * R[:, 1], x=lam)
             int2 = simpson(lam * R[:, 1], x=lam)
+            lam_micron = lam / 1e4  # SNANA's magobs polynomial is in microns
+            zp_moments.append([simpson(lam * zp * R[:, 1] * lam_micron, x=lam) / int1,
+                               simpson(lam * zp * R[:, 1] * lam_micron ** 2, x=lam) / int1])
             zp = 2.5 * np.log10(int1 / int2)
             self.band_dict[band] = band_ind
             self.band_lim_dict[band] = [band_low_lim, band_up_lim]
@@ -523,6 +583,7 @@ class SEDmodel(object):
         self.used_band_inds = np.array(list(self.band_dict.values()))
         self.zps = jnp.array(zps)
         self.offsets = jnp.array(offsets)
+        self.zp_moments = jnp.array(zp_moments)  # <lam_micron>, <lam_micron^2> per band
         self.inv_band_dict = {val: key for key, val in self.band_dict.items()}
 
         # Get the locations that should be sampled at redshift 0. We can scale these to
@@ -537,7 +598,9 @@ class SEDmodel(object):
         self.band_interpolate_locations = device_put(band_interpolate_locations)
         self.band_interpolate_spacing = band_spacing
         self.band_interpolate_weights = jnp.array(band_weights)
+        self.band_interpolate_weights_shift = jnp.array(band_weights_shift)
         self.model_wave = 10 ** model_log_wave
+        self.dlambda = jnp.diff(self.model_wave)  # model-grid spacing for the wavelength-shift path
         self.used_band_dict = {val: val for val in self.band_dict.values()}
 
         self.uv_ind1 = self.model_wave < 2700  # Need to use separate UV term for F99 law below 2700AA
@@ -592,11 +655,9 @@ class SEDmodel(object):
         int_locs = flat_locs.astype(np.int32)
         remainders = flat_locs - int_locs
 
-        self.band_interpolate_weights = np.asarray(self.band_interpolate_weights)[
-            np.asarray(self.used_band_inds), ...]
-
-        start = self.band_interpolate_weights[..., int_locs]
-        end = self.band_interpolate_weights[..., int_locs + 1]
+        biw = np.asarray(self.band_interpolate_weights)[np.asarray(self.used_band_inds), ...]
+        start = biw[..., int_locs]
+        end = biw[..., int_locs + 1]
 
         flat_result = remainders * end + (1 - remainders) * start
         weights = flat_result.reshape((-1,) + locs.shape).transpose(1, 2, 0)
@@ -604,17 +665,22 @@ class SEDmodel(object):
         weights /= np.sum(weights, axis=1)[:, None, :]
 
         # Apply MW extinction
-        av = self.RV_MW * ebv
         all_lam = (model_wave[None, :] * (1 + redshifts[:, None])).flatten(order='F')
-        mw_ext = extinction.fitzpatrick99(all_lam, 1, self.RV_MW)
-        mw_ext = mw_ext.reshape((weights.shape[0], weights.shape[1]), order='F')
-        mw_ext = mw_ext * av[:, None]
+        mw_ext = (extinction.fitzpatrick99(all_lam, 1, self.RV_MW).reshape(
+            (weights.shape[0], weights.shape[1]), order='F') * self.RV_MW * ebv[:, None])
         mw_ext = np.power(10, -0.4 * mw_ext)
+        self.mw_ext = mw_ext  # retained for the wavelength-shift path (get_flux_batch)
+        self.mw_ebv = ebv  # retained so a systematic shift in E(B-V) can be applied inside the fit
 
         weights = weights * mw_ext[..., None]
 
         # We need an extra term of 1 + z from the filter contraction.
         weights /= (1 + redshifts)[:, None, None]
+
+        # raw-transmission weights on the per-SN grid for the shift path (mw_ext and 1+z applied later in get_flux_batch)
+        biw_shift = np.asarray(self.band_interpolate_weights_shift)[np.asarray(self.used_band_inds), ...]
+        flat_shift = remainders * biw_shift[..., int_locs + 1] + (1 - remainders) * biw_shift[..., int_locs]
+        self.band_weights_shift = flat_shift.reshape((-1,) + locs.shape).transpose(1, 2, 0)
 
         return weights
 
@@ -707,7 +773,8 @@ class SEDmodel(object):
 
         return model_spectra
 
-    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights):
+    def get_flux_batch(self, M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask, J_t, hsiao_interp, weights,
+                       z=None, lam_shift=None, mag_shift=None, mw_ext=None, z_shift=0.0):
         """
         Calculates observer-frame fluxes for given parameter values
 
@@ -741,6 +808,12 @@ class SEDmodel(object):
             t % 1 to allow for linear interpolation
         weights: array_like
             Array containing band weights to use for photometry
+        z: array-like, optional
+            Per-SN redshifts, required when lam_shift is given (shifts are applied rest-frame)
+        lam_shift: array-like, optional
+            Per-band observer-frame wavelength shifts; None (default) applies no shift
+        mag_shift: array-like, optional
+            Per-band magnitude/zeropoint shifts; None (default) applies no shift
 
         Returns
         -------
@@ -758,14 +831,36 @@ class SEDmodel(object):
             jnp.arange(num_batch)
             .repeat(num_observations)
         ).astype(int)
+
+        if lam_shift is not None:  # re-evaluate band weights on the per-band, rest-frame-shifted model grid
+            lmap = jax.vmap(lambda x, xp, fp: jnp.interp(x, xp, fp, left=0), in_axes=(None, 0, 0), out_axes=0)
+            new_model_wave = (self.model_wave[None, :, None]
+                              + lam_shift[None, None, :] / (1 + z[:, None, None] + z_shift))
+            new_model_wave = new_model_wave.transpose(0, 2, 1).reshape(
+                (weights.shape[0] * weights.shape[2], weights.shape[1]), order='F')
+            new_weights = weights.transpose(0, 2, 1).reshape(
+                (weights.shape[0] * weights.shape[2], weights.shape[1]), order='F')
+            new_weights = lmap(self.model_wave, new_model_wave, new_weights)
+            new_weights = new_weights.reshape((weights.shape[0], weights.shape[2], weights.shape[1]),
+                                              order='F').transpose(0, 2, 1)
+            num = self.model_wave[None, :, None] * new_weights
+            denom = jnp.sum(0.5 * (num[:, :-1, :] + num[:, 1:, :]) * self.dlambda[None, :, None], axis=1)
+            weights = (num / denom[:, None, :]) * mw_ext[:, :, None] / (1 + z + z_shift)[:, None, None]
+
         obs_band_weights = (
             weights[batch_indices, :, band_indices.T.flatten()]
             .reshape((num_batch, num_observations, -1))
             .transpose(0, 2, 1)
         )
 
-        model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
-        model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds))
+        if lam_shift is not None:  # trapezoidal integral to match the re-evaluated weights
+            wspec = model_spectra * obs_band_weights
+            model_flux = jnp.sum(0.5 * (wspec[:, :-1, :] + wspec[:, 1:, :]) * self.dlambda[None, :, None], axis=1).T
+        else:
+            model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
+
+        mshift = mag_shift[band_indices] if mag_shift is not None else 0.
+        model_flux = model_flux * 10 ** (-0.4 * (M0 + Ds + mshift))
         zps = self.zps[band_indices]
         offsets = self.offsets[band_indices]
         zp_flux = 10 ** (zps / 2.5)
@@ -817,7 +912,14 @@ class SEDmodel(object):
         eps_full = eps_full.at[:, 1:-1, :].set(eps)
 
         # RV: per-SN from posterior (popRV) or global scalar (globalRV)
-        if 'RV' in samples:
+        if self.model_type == 'pop_RV':
+            if 'Rv' in samples:
+                RV = np.array(samples['Rv'].mean(axis=(0, 1)))
+            else:  # guide emits the RV_tform latent; map it back through the population prior
+                rvt = np.array(samples['RV_tform'].mean(axis=(0, 1)))
+                phi = float(norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R))
+                RV = np.array(self.mu_R + self.sigma_R * ndtri(phi + rvt * (1 - phi)))
+        elif 'RV' in samples:
             RV = np.array(samples['RV'].mean(axis=(0, 1)))
         else:
             RV = self.RV
@@ -1118,10 +1220,14 @@ class SEDmodel(object):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0, prior_only=False):
+    def fit_model_noeps(self, obs, weights, mw_ext=None, mw_ebv=None, mw_dA_dRV=None, dbw_dz=None, dmw_dz=None, global_params=None,
+                        fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0, prior_only=False):
         """
-        Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
-        as theta, epsilon, AV and distance modulus.
+        Numpyro model used for the eps-free Stage-1 MAP. Branches on self.model_type for RV (a single global RV for
+        fixed_RV, or a per-SN RV drawn from the mu_R/sigma_R population for pop_RV). Will fit for time of maximum as well
+        as theta, AV and distance modulus. If global_params is given, its entries (W0, W1, sigma0, tauA, RV or
+        mu_R/sigma_R, lam_shift, mag_shift) replace the corresponding self.* so the log-posterior is differentiable
+        w.r.t. them for systematics; with global_params=None the model is unchanged.
 
         Parameters
         ----------
@@ -1148,17 +1254,40 @@ class SEDmodel(object):
         -------
 
         """
+        global_params = global_params or {}
+        W0, W1 = global_params.get('W0', self.W0), global_params.get('W1', self.W1)
+        tauA, sigma0 = global_params.get('tauA', self.tauA), global_params.get('sigma0', self.sigma0)
+        lam_shift, mag_shift = global_params.get('lam_shift', self._lam_shift), global_params.get('mag_shift', self._mag_shift)
+        if 'mwebv_scale' in global_params or 'mwebv_shift' in global_params:
+            # A_lam is linear in E(B-V), so E(B-V) -> scale*E(B-V) + shift is one power of the transmission
+            scale = global_params.get('mwebv_scale', 1.0) + global_params.get('mwebv_shift', 0.0) / mw_ebv[:, None]
+            mw_ext = mw_ext ** scale
+        if 'mw_rv_shift' in global_params:  # R_V changes the law's shape, so it needs the precomputed dA/dR_V
+            mw_ext = mw_ext * 10 ** (-0.4 * global_params['mw_rv_shift'] * mw_dA_dRV)
         sample_size = obs.shape[-1]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        if self.model_type == 'pop_RV':
+            mu_R, sigma_R = global_params.get('mu_R', self.mu_R), global_params.get('sigma_R', self.sigma_R)
+            phi_alpha_R = norm.cdf((self.trunc_val - mu_R) / sigma_R)
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             theta = theta * (1 - fix_theta) + theta_val * fix_theta
-            AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
+            AV = numpyro.sample(f'AV', dist.Exponential(1 / tauA))
             AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
-            t = obs[0, ...] - tmax[None, sn_index]
+            if self.model_type == 'pop_RV':
+                RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+                RV = numpyro.deterministic('Rv', mu_R + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            else:
+                RV = global_params.get('RV', self.RV)
+            z_shift = global_params.get('redshift_final_shift', 0.0)
+            if 'redshift_final_shift' in global_params:  # z-dependent arrays, to first order
+                weights = weights + z_shift * dbw_dz
+                mw_ext = mw_ext + z_shift * dmw_dz
+            t = obs[0, ...] * (1 + obs[-5, 0, sn_index]) / (1 + obs[-5, 0, sn_index] + z_shift)
+            t = t - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -1169,18 +1298,20 @@ class SEDmodel(object):
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
             if prior_only:
                 return
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            zb = obs[-5, 0, sn_index] if lam_shift is not None else None
+            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights, z=zb, lam_shift=lam_shift, mag_shift=mag_shift,
+                                       mw_ext=mw_ext, z_shift=z_shift)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
 
-    def fit_model_globalRV_vi(self, obs, weights, prior_only=False):
+    def fit_model_vi(self, obs, weights, mw_ext=None, mw_ebv=None, mw_dA_dRV=None, dbw_dz=None, dmw_dz=None, global_params=None,
+                     prior_only=False):
         """
         Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
         tmax as well as theta, epsilon, Av and distance modulus. This model is slightly modified for ZLTN VI.
@@ -1197,15 +1328,39 @@ class SEDmodel(object):
             log-density without running the model's flux computation. Defaults to False.
 
         """
+        global_params = global_params or {}
+        W0, W1 = global_params.get('W0', self.W0), global_params.get('W1', self.W1)
+        L_Sigma = global_params.get('L_Sigma', self.L_Sigma)
+        tauA, sigma0 = global_params.get('tauA', self.tauA), global_params.get('sigma0', self.sigma0)
+        lam_shift, mag_shift = global_params.get('lam_shift', self._lam_shift), global_params.get('mag_shift', self._mag_shift)
+        if 'mwebv_scale' in global_params or 'mwebv_shift' in global_params:
+            # A_lam is linear in E(B-V), so E(B-V) -> scale*E(B-V) + shift is one power of the transmission
+            scale = global_params.get('mwebv_scale', 1.0) + global_params.get('mwebv_shift', 0.0) / mw_ebv[:, None]
+            mw_ext = mw_ext ** scale
+        if 'mw_rv_shift' in global_params:  # R_V changes the law's shape, so it needs the precomputed dA/dR_V
+            mw_ext = mw_ext * 10 ** (-0.4 * global_params['mw_rv_shift'] * mw_dA_dRV)
         sample_size = obs.shape[-1]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        if self.model_type == 'pop_RV':
+            mu_R, sigma_R = global_params.get('mu_R', self.mu_R), global_params.get('sigma_R', self.sigma_R)
+            phi_alpha_R = norm.cdf((self.trunc_val - mu_R) / sigma_R)
 
         with numpyro.plate('SNe', sample_size) as sn_index:
-            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            AV = numpyro.sample(f'AV', My_Exponential(1 / tauA))
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            if self.model_type == 'pop_RV':
+                RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+                RV = numpyro.deterministic('Rv', mu_R + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            else:
+                RV = global_params.get('RV', self.RV)
 
-            t = obs[0, ...] - tmax[None, sn_index]
+            z_shift = global_params.get('redshift_final_shift', 0.0)
+            if 'redshift_final_shift' in global_params:  # z-dependent arrays, to first order
+                weights = weights + z_shift * dbw_dz
+                mw_ext = mw_ext + z_shift * dmw_dz
+            t = obs[0, ...] * (1 + obs[-5, 0, sn_index]) / (1 + obs[-5, 0, sn_index] + z_shift)
+            t = t - tmax[None, sn_index]
             hsiao_interp = jnp.array([19 + jnp.floor(t), 19 + jnp.ceil(t), jnp.remainder(t, 1)])
             keep_shape = t.shape
             t = t.flatten(order='F')
@@ -1214,23 +1369,24 @@ class SEDmodel(object):
             eps_mu = jnp.zeros(N_knots_sig)
             eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
             eps_tform = eps_tform.T
-            eps = numpyro.deterministic('eps', jnp.matmul(self.L_Sigma, eps_tform))
+            eps = numpyro.deterministic('eps', jnp.matmul(L_Sigma, eps_tform))
             eps = eps.T
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
-            # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             band_indices = obs[-6, :, sn_index].astype(int).T
             muhat = obs[-3, 0, sn_index]
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            Ds_err = jnp.sqrt(muhat_err * muhat_err + sigma0 * sigma0)
 
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
             if prior_only:
                 return
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            zb = obs[-5, 0, sn_index] if lam_shift is not None else None
+            flux = self.get_flux_batch(self.M0, theta, AV, W0, W1, eps, Ds, RV, band_indices, mask,
+                                       J_t, hsiao_interp, weights, z=zb, lam_shift=lam_shift, mag_shift=mag_shift,
+                                       mw_ext=mw_ext, z_shift=z_shift)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
                                obs=obs[1, :, sn_index].T)
@@ -1943,6 +2099,7 @@ class SEDmodel(object):
         args['batch_size'] = args.get('batch_size', None)
         args['num_nobs_bins'] = args.get('num_nobs_bins', 1)
         args['min_bin_gain'] = args.get('min_bin_gain', 0.05)
+        args['systematics'] = args.get('systematics', False)
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2059,6 +2216,7 @@ class SEDmodel(object):
         batched_map is the vmapped per-SN fit. With num_nobs_bins=1 this reduces to a single pass over all SNe.
         """
         n_sne = self.data.shape[-1]
+        band_wts = self.band_weights_shift if self._lam_shift is not None else self.band_weights  # shift path needs raw transmission
         bs_cfg = args['batch_size']
         bins = self._choose_nobs_bins(args['num_nobs_bins'], args['min_bin_gain'])
         items = []
@@ -2073,24 +2231,243 @@ class SEDmodel(object):
                 contiguous = ceiling == self.data.shape[1] and n_real == int(batch_idx[-1] - batch_idx[0]) + 1
                 if contiguous:  # single-bin default: keep a zero-copy view of self.data
                     lo, hi = int(batch_idx[0]), int(batch_idx[-1]) + 1
-                    batch_data, batch_weights = self.data[..., lo:hi], self.band_weights[lo:hi]
+                    batch_data, batch_weights, batch_mw_ext = self.data[..., lo:hi], band_wts[lo:hi], self.mw_ext[lo:hi]
                 else:
-                    batch_data, batch_weights = self.data[:, :ceiling, batch_idx], self.band_weights[batch_idx]
+                    batch_data, batch_weights, batch_mw_ext = self.data[:, :ceiling, batch_idx], band_wts[batch_idx], self.mw_ext[batch_idx]
             else:
                 # Pad final batch by replicating the bin's first SN; padded outputs discarded.
                 batch_data = np.empty((self.data.shape[0], ceiling, bs), dtype=self.data.dtype)
-                batch_weights = np.empty((bs, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
+                batch_weights = np.empty((bs, *band_wts.shape[1:]), dtype=band_wts.dtype)
+                batch_mw_ext = np.empty((bs, *self.mw_ext.shape[1:]), dtype=self.mw_ext.dtype)
                 batch_data[:, :, :n_real] = self.data[:, :ceiling, batch_idx]
                 batch_data[:, :, n_real:] = self.data[:, :ceiling, batch_idx[0:1]]
-                batch_weights[:n_real] = self.band_weights[batch_idx]
-                batch_weights[n_real:] = self.band_weights[batch_idx[0:1]]
-            chunk = batched_map(batch_data, batch_weights)
+                batch_weights[:n_real] = band_wts[batch_idx]
+                batch_weights[n_real:] = band_wts[batch_idx[0:1]]
+                batch_mw_ext[:n_real] = self.mw_ext[batch_idx]
+                batch_mw_ext[n_real:] = self.mw_ext[batch_idx[0:1]]
+            chunk = batched_map(batch_data, batch_weights, batch_mw_ext)
             batch = {k: np.asarray(v)[:n_real] for k, v in chunk.items() if k != '_auto_latent'}
             if samples is None:  # size the full-length output once, from the first batch
                 samples = {k: np.empty((n_sne, *v.shape[1:]), dtype=v.dtype) for k, v in batch.items()}
             for k, v in batch.items():
                 samples[k][batch_idx] = v
         return samples
+
+    @staticmethod
+    def _align_shifts(vals, align):
+        # reorder per-training-band shift values into this fit's band order; 0 where a band has no match (align<0)
+        return jnp.where(align >= 0, vals[align], 0.0)
+
+    def _setup_systematics(self, args):
+        """
+        Load the training posterior, align its per-band shifts to this fit's band ordering, apply the training MEAN
+        shifts (so central distances sit at the posterior mean) and announce it loudly. A fit band absent from the
+        training set errors by default. Returns the systematics dict augmented with the fit-band alignment index that
+        the sensitivity uses later. Any variations configured under systematics_variations are appended as extra
+        g entries, each an independent column of F holding its declared 1-sigma offset from nominal.
+        """
+        syst = load_training_systematics(self.model_dir)
+        name_to_pos = {n: i for i, n in enumerate(syst['band_shift_names'])}
+        fit_band_names = [self.inv_band_dict[int(b)] for b in self.used_band_inds]
+        align, missing = [], []
+        for nm in fit_band_names:
+            pos = name_to_pos.get(nm, -1)
+            align.append(pos)
+            if pos < 0 and nm != 'NULL_BAND':
+                missing.append(nm)
+        if missing:
+            raise ValueError(f'Bands in the fit but absent from the model systematics {self.model_dir}: {missing}. '
+                             f'These have no calibration posterior - retrain, or restrict the fit to trained bands.')
+        syst['fit_align'] = np.array(align)
+        al = jnp.asarray(syst['fit_align'])
+        lo, hi = syst['layout']['lam_shift']
+        mlo, mhi = syst['layout']['mag_shift']
+        self._lam_shift = self._align_shifts(jnp.asarray(syst['ghat'][lo:hi]), al)
+        self._mag_shift = self._align_shifts(jnp.asarray(syst['ghat'][mlo:mhi]), al)
+
+        print('=' * 78)
+        print(f'SYSTEMATICS PROPAGATION ON ({self.model_dir})')
+        print('Applying training MEAN calibration offsets -> central distances differ from a shifts-off fit:')
+        for i, nm in enumerate(fit_band_names):
+            if syst['fit_align'][i] >= 0:
+                print(f'  {nm:20s} lam_shift = {float(self._lam_shift[i]):+8.3f} AA    '
+                      f'mag_shift = {float(self._mag_shift[i]):+.4f}')
+        n_sn = self.data.shape[-1]
+        self.mw_dA_dRV = np.zeros((n_sn, 1))  # broadcastable no-ops unless the shift is declared
+        self.dbw_dz = np.zeros((n_sn, 1, 1))
+        self.dmw_dz = np.zeros((n_sn, 1))
+        if 'mw_rv_shift' in args.get('systematics_variations', {}):
+            # dA/dR_V; F99 is not differentiable in jax, and a first-order treatment matches recomputing
+            # the law to 0.1% even at dR_V = 1. Only the sensitivity reads it.
+            h = 0.01
+            all_lam = (self.model_wave[None, :] * (1 + np.asarray(self.data[-5, 0, :])[:, None])).flatten(order='F')
+            A_lam = lambda rv: (extinction.fitzpatrick99(all_lam, 1, rv).reshape(
+                self.mw_ext.shape, order='F') * rv * np.asarray(self.mw_ebv)[:, None])
+            self.mw_dA_dRV = (A_lam(self.RV_MW + h) - A_lam(self.RV_MW - h)) / (2 * h)
+        if 'redshift_final_shift' in args.get('systematics_variations', {}):
+            # band weights and MW extinction are resampled from z at setup, so a redshift shift needs
+            # their z-derivatives; same first-order treatment as dA/dR_V
+            hz = 1e-4
+            z0, ebv0 = np.asarray(self.data[-5, 0, :]), np.asarray(self.mw_ebv)
+            keep = self.band_weights, self.band_weights_shift, self.mw_ext, self.mw_ebv
+
+            def at_z(zz):
+                self._calculate_band_weights(zz, ebv0)
+                return np.asarray(self.band_weights_shift), np.asarray(self.mw_ext)
+
+            bw_p, mw_p = at_z(z0 + hz)
+            bw_m, mw_m = at_z(z0 - hz)
+            self.band_weights, self.band_weights_shift, self.mw_ext, self.mw_ebv = keep
+            self.dbw_dz = (bw_p - bw_m) / (2 * hz)
+            self.dmw_dz = (mw_p - mw_m) / (2 * hz)
+
+        syst['col_labels'] = ['training'] * syst['F'].shape[1]
+        declared = args.get('systematics_variations', {})
+        n_train = syst['F'].shape[1]  # training-draw columns, dropped below unless kept
+        syst['magobs_params'], variations = None, []
+        for name, value in declared.items():
+            if name == 'training':
+                continue
+            elif name == 'magobs_shift_zp_params':  # sized by its coefficients, so the g entry is their amplitude
+                syst['magobs_params'] = value
+                variations.append((name, 0.0, 1.0))
+                if self.magobs_shift_zp_params is not None:
+                    raise ValueError('magobs_shift_zp_params is set as a data perturbation and also declared '
+                                     'in systematics_variations, which would propagate it about the '
+                                     'perturbed baseline. Use one or the other.')
+            else:
+                variations.append((name, SYSTEMATIC_NOMINAL[name], value - SYSTEMATIC_NOMINAL[name]))
+        for name, _, _ in variations:  # the MC knobs perturb the data these systematics differentiate about
+            if args.get(name) is not None:
+                raise ValueError(f'{name} is set as a data perturbation and also declared in '
+                                 f'systematics_variations, which would propagate it about the perturbed '
+                                 f'baseline. Use one or the other.')
+        for name, nominal, offset in variations:
+            n_g, n_draw = syst['F'].shape
+            F = np.zeros((n_g + 1, n_draw + 1))
+            F[:n_g, :n_draw] = syst['F']
+            F[n_g, n_draw] = offset  # independent of the training draws, so its own column
+            syst['F'] = F
+            syst['ghat'] = np.append(syst['ghat'], nominal)
+            syst['layout'][name] = (n_g, n_g + 1)
+            syst['col_labels'].append(name)
+            print(f'  {name:20s} 1 sigma offset {offset:+.4f} from nominal {nominal:+.4f}')
+        if not declared.get('training', False):  # only propagate what is explicitly declared
+            syst['F'] = syst['F'][:, n_train:]
+            syst['col_labels'] = syst['col_labels'][n_train:]
+            print(f'  {"training":20s} EXCLUDED')
+        else:
+            print(f'  {"training":20s} {n_train} posterior draws')
+        print('=' * 78)
+        return syst
+
+    def _systematic_dmu(self, zmode):
+        """
+        Propagate the training posterior to a per-SN distance systematic covariance, using this fit's own
+        outputs - no refitting. Per SN the sensitivity is implicit-differentiated through the posterior mode,
+        in the unconstrained space where the mode is interior and the Hessian positive-definite (in
+        constrained space AV's exponential prior puts the mode on the AV>=0 boundary and no PD Hessian
+        exists). zmode holds each SN's LM MAP from the fit, which a few damped-Newton steps on the potential
+        energy polish to stationarity; then
+        d mu/d g = d mu/d g|expl - a . d(grad_z pot)/dg with a = H^-1 d mu/dz. Returns B = J F, one row per
+        SN, whose column j is that SN's Delta-mu under training draw j. C_sys = B B^T; because the rows are
+        per-SN, jobs fitting different SNe can be merged by stacking their B, recovering the cross-job blocks
+        that a per-job C_sys cannot.
+        """
+        syst = self._syst
+        ghat = jnp.asarray(syst['ghat'])
+        F = np.asarray(syst['F'])
+        layout = syst['layout']
+        align = jnp.asarray(syst['fit_align'])
+        L, T = self.l_knots.shape[0], self.tau_knots.shape[0]
+        n_eps = (L - 2) * T
+        tril = jnp.tril_indices(n_eps)
+        muhat_err = 5.0
+        pop = self.model_type == 'pop_RV'
+
+        def unflatten(gv):  # g vector -> model global inputs (W-matrices order='F', shifts in fit-band order)
+            d = {}
+            a, b = layout['W0']
+            d['W0'] = gv[a:b].reshape((L, T), order='F')
+            a, b = layout['W1']
+            d['W1'] = gv[a:b].reshape((L, T), order='F')
+            a, b = layout['L_Sigma']
+            d['L_Sigma'] = jnp.zeros((n_eps, n_eps)).at[tril].set(gv[a:b])
+            d['sigma0'] = gv[layout['sigma0'][0]]
+            d['tauA'] = gv[layout['tauA'][0]]
+            if 'RV' in layout:
+                d['RV'] = gv[layout['RV'][0]]
+            if 'mu_R' in layout:
+                d['mu_R'] = gv[layout['mu_R'][0]]
+                d['sigma_R'] = gv[layout['sigma_R'][0]]
+            a, b = layout['lam_shift']
+            d['lam_shift'] = self._align_shifts(gv[a:b], align)
+            a, b = layout['mag_shift']
+            d['mag_shift'] = self._align_shifts(gv[a:b], align)
+            if 'magobs_shift_zp_params' in layout:
+                p0, p1, p2 = syst['magobs_params']
+                dm = p0 + p1 * self.zp_moments[:, 0] + p2 * self.zp_moments[:, 1]
+                d['mag_shift'] = d['mag_shift'] - gv[layout['magobs_shift_zp_params'][0]] * dm
+            for name in SYSTEMATIC_NOMINAL:
+                if name in layout:
+                    d[name] = gv[layout[name][0]]
+            return d
+
+        # one fixed key order drives both the flat vector and the unflattening back to sample sites
+        lat = ['AV', 'theta', 'tmax'] + (['RV_tform'] if pop else []) + ['eps_tform', 'Ds']
+        shapes = {k: (1, n_eps) if k == 'eps_tform' else (1,) for k in lat}
+        sizes = {k: int(np.prod(shapes[k])) for k in lat}
+        slc, off = {}, 0
+        for k in lat:
+            slc[k] = (off, off + sizes[k])
+            off += sizes[k]
+        ds_idx = slc['Ds'][0]
+        z0 = jnp.asarray(np.concatenate([np.asarray(zmode[k]).reshape(len(self.sn_list), -1) for k in lat], axis=1))
+
+        def to_dict(zf):  # flat unconstrained vector -> model sample-site shapes (plate size 1)
+            return {k: zf[lo:hi].reshape(shapes[k]) for k, (lo, hi) in slc.items()}
+
+        def sens_one(zf, data_sn, w_sn, mw_sn, ebv_sn, dA_sn, dbw_sn, dmw_sn):
+            margs = (data_sn[..., None], w_sn[None, ...], mw_sn[None, ...], ebv_sn[None], dA_sn[None, ...],
+                     dbw_sn[None, ...], dmw_sn[None, ...])
+            muhat = data_sn[-3, 0]
+            def pot(z, gv):  # unconstrained potential energy, including the bijector log-dets
+                model = lambda o, wt, mx, me, da, db, dm, **kw: self.fit_model_vi(
+                    o, wt, mx, me, da, db, dm, global_params=unflatten(gv), **kw)
+                return potential_energy(model, margs, {}, to_dict(z))
+            def mu_report(z, gv):  # reported distance = sigma0-shrunk Ds (must match postprocess)
+                s0 = gv[layout['sigma0'][0]]
+                return (z[ds_idx] * muhat_err ** 2 + muhat * s0 ** 2) / (muhat_err ** 2 + s0 ** 2)
+            # polish the LM MAP to stationarity; fixed step count and where-based damping so this vmaps
+            def newton(carry, _):
+                z, f, lam = carry
+                g = jax.grad(lambda zz: pot(zz, ghat))(z)
+                H = jax.hessian(lambda zz: pot(zz, ghat))(z)
+                zn = z - jnp.linalg.solve(H + lam * jnp.eye(H.shape[0]), g)
+                fn = pot(zn, ghat)
+                ok = jnp.isfinite(fn) & (fn <= f)
+                return (jnp.where(ok, zn, z), jnp.where(ok, fn, f), jnp.where(ok, lam / 3, lam * 4)), None
+            (zf, _, _), _ = jax.lax.scan(newton, (zf, pot(zf, ghat), 1.0), None, length=3)
+            H = jax.hessian(lambda z: pot(z, ghat))(zf)
+            a = jnp.linalg.solve(H, jax.grad(lambda z: mu_report(z, ghat))(zf))
+            adj = jax.grad(lambda gv: a @ jax.grad(lambda z: pot(z, gv))(zf))(ghat)
+            dmu_expl = jax.grad(lambda gv: mu_report(zf, gv))(ghat)
+            # the sensitivity assumes a stationary mode, so report the residual gradient alongside it
+            grad_norm = jnp.linalg.norm(jax.grad(lambda z: pot(z, ghat))(zf))
+            return dmu_expl - adj, jnp.linalg.eigvalsh(H).min(), grad_norm
+
+        J, min_eig, grad_norm = jax.vmap(sens_one, in_axes=(0, 2, 0, 0, 0, 0, 0, 0))(z0, self.data, self.band_weights_shift,
+                                                                            self.mw_ext, self.mw_ebv, self.mw_dA_dRV,
+                                                                            self.dbw_dz, self.dmw_dz)
+        J, min_eig, grad_norm = np.asarray(J), np.asarray(min_eig), np.asarray(grad_norm)
+        bad = np.where(min_eig <= 0)[0]
+        if bad.size:  # fires on badly-fit objects such as CC contaminants, whose large residuals make H indefinite
+            print(f'WARNING: non-positive-definite Hessian for {bad.size} SN(s), their systematics are unreliable: '
+                  f'{[self.sn_list[i] for i in bad]}')
+        # |grad| does not by itself flag a bad sensitivity - it is also large at the floor/ceil kinks in the
+        # Hsiao phase interpolation, where C_sys is fine - so report it rather than thresholding on it
+        print(f'Mode polish: max |grad| = {grad_norm.max():.2e}, min Hessian eigenvalue = {min_eig.min():.2e}')
+        return J @ F  # per-SN rows; C_sys = B B^T, and rows from separate jobs concatenate
 
     def run(self, args, cmd_args):
         """
@@ -2108,6 +2485,13 @@ class SEDmodel(object):
         """
         args = self.parse_yaml_input(args, cmd_args)
 
+        self._syst = None
+        if args['systematics']:  # opt-in: apply training mean shifts, propagate systematics later
+            if args['fit_method'] != 'vi' or args['laplace_method'] != 'lm':
+                raise ValueError('systematics requires fit_method=vi and laplace_method=lm, since the '
+                                 'sensitivity is evaluated at the LM MAP those produce')
+            self._syst = self._setup_systematics(args)
+
         # Set up initialisation for HMC chains
         # -------------------------
         if args['initialisation'] == 'T21':
@@ -2122,16 +2506,15 @@ class SEDmodel(object):
 
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi' \
                 and args['laplace_method'] == 'lm':
-            from numpyro.infer.util import initialize_model
             self._lm_model_info = initialize_model(
-                PRNGKey(0), self.fit_model_globalRV_noeps,
+                PRNGKey(0), self.fit_model_noeps,
                 init_strategy=init_strategy, dynamic_args=True,
-                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...], self.mw_ext[0:1, ...]),
             )
             self._vi_model_info = initialize_model(
-                PRNGKey(0), self.fit_model_globalRV_vi,
+                PRNGKey(0), self.fit_model_vi,
                 init_strategy=init_strategy, dynamic_args=True,
-                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...], self.mw_ext[0:1, ...]),
             )
 
         print(f'Preprocessing time: {time.time() - self.start_time:.2f} seconds')
@@ -2186,7 +2569,7 @@ class SEDmodel(object):
         # self.data, self.band_weights = self.data[..., 1:2], self.band_weights[1:2, ...]
 
         if args['mode'].lower() == 'fitting' and args['fit_method'] == 'mcmc':  # Use vmap to vectorise over individual fitting jobs
-            def fit_vmap_mcmc(data, weights):
+            def fit_vmap_mcmc(data, weights, mw_ext):
                 """
                 Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
                 device
@@ -2208,11 +2591,11 @@ class SEDmodel(object):
                 rng_key = PRNGKey(0)
                 mcmc = MCMC(nuts_kernel, num_samples=args['num_samples'], num_warmup=args['num_warmup'],
                             num_chains=args['num_chains'], chain_method=args['chain_method'], progress_bar=False)
-                mcmc.run(rng_key, data[..., None], weights[None, ...])
+                mcmc.run(rng_key, data[..., None], weights[None, ...], mw_ext[None, ...])
                 return {**mcmc.get_samples(group_by_chain=True), **mcmc.get_extra_fields(group_by_chain=True)}
 
             start = timeit.default_timer()
-            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_mcmc, in_axes=(2, 0)), args)
+            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_mcmc, in_axes=(2, 0, 0)), args)
             expand_dim = False
             for key, val in samples.items():
                 val = np.squeeze(val)
@@ -2226,7 +2609,7 @@ class SEDmodel(object):
                     samples[key] = val.transpose(1, 2, 0)
             end = timeit.default_timer()
         elif args['mode'].lower() == 'fitting' and args['fit_method'] == 'vi':
-            def fit_vmap_vi(data, weights):
+            def fit_vmap_vi(data, weights, mw_ext):
                 """
                 Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
                 device
@@ -2245,17 +2628,19 @@ class SEDmodel(object):
                     Samples and other information from MCMC fit
 
                 """
-                model = self.fit_model_globalRV_noeps
+                model = self.fit_model_noeps
                 sample_locs = ['AV', 'theta', 'tmax', 'eps_tform', 'Ds']
+                if self.model_type == 'pop_RV':  # per-SN RV is an extra latent in pop-RV
+                    sample_locs = sample_locs + ['RV_tform']
 
                 warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
-                    model_args = (data[..., None], weights[None, ...])
+                    model_args = (data[..., None], weights[None, ...], mw_ext[None, ...])
                     # Stage 1: Gauss-Newton LM MAP for (AV, theta, tmax, Ds) under the Exponential prior
                     mi = self._lm_model_info
                     post_fn_noeps = mi.postprocess_fn(*model_args)
-                    predict_fn_noeps = lambda z: _predict(self.fit_model_globalRV_noeps, model_args, {}, z)
-                    prior_pot_fn_noeps = lambda z: _prior_pot(self.fit_model_globalRV_noeps, model_args, {}, z)
+                    predict_fn_noeps = lambda z: _predict(self.fit_model_noeps, model_args, {}, z)
+                    prior_pot_fn_noeps = lambda z: _prior_pot(self.fit_model_noeps, model_args, {}, z)
                     # Per-SN init: prior medians for AV/theta/tmax, this SN's muhat for Ds
                     z_template_s1 = {
                         'AV': jnp.array([jnp.log(self.tauA * jnp.log(2.0))]),
@@ -2263,6 +2648,8 @@ class SEDmodel(object):
                         'theta': jnp.array([0.0]),
                         'tmax': jnp.array([0.0]),
                     }
+                    if self.model_type == 'pop_RV':  # unconstrained 0 -> RV_tform 0.5 (population median)
+                        z_template_s1['RV_tform'] = jnp.array([0.0])
                     noeps_median, _, z_unc_noeps = run_lm_laplace_gn(
                         predict_fn_noeps, prior_pot_fn_noeps, post_fn_noeps, z_template_s1,
                         maxiter=args['lm_maxiter'],
@@ -2272,8 +2659,8 @@ class SEDmodel(object):
                     # Stage 2: Gauss-Newton LM on the full VI model, warm-started from the Stage 1 MAP
                     vi_mi = self._vi_model_info
                     post_fn_vi = vi_mi.postprocess_fn(*model_args)
-                    predict_fn = lambda z: _predict(self.fit_model_globalRV_vi, model_args, {}, z)
-                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_globalRV_vi, model_args, {}, z)
+                    predict_fn = lambda z: _predict(self.fit_model_vi, model_args, {}, z)
+                    prior_pot_fn = lambda z: _prior_pot(self.fit_model_vi, model_args, {}, z)
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   'AV': noeps_median['AV']}
                     z_start_vi['eps_tform'] = jnp.zeros_like(z_start_vi['eps_tform'])
@@ -2297,7 +2684,7 @@ class SEDmodel(object):
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(model, init_loc_fn=init_strategy)
                     svi = SVI(model, laplace_guide, optimizer, loss=Trace_ELBO(5))
-                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False)
+                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], mw_ext[None, ...], progress_bar=False)
                     params, losses = svi_result.params, svi_result.losses
                     laplace_median = laplace_guide.median(params)
 
@@ -2305,7 +2692,7 @@ class SEDmodel(object):
                 new_init_dict = {k: jnp.array([laplace_median[k][0]]) for k in sample_locs if k in laplace_median}
                 if 'eps_tform' not in new_init_dict:
                     new_init_dict['eps_tform'] = jnp.zeros((1, (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]))
-                model = self.fit_model_globalRV_vi
+                model = self.fit_model_vi
                 zltn_guide = AutoMultiZLTNGuide(model, init_loc_fn=init_to_value(values=new_init_dict),
                                                 init_scale_tril=warm_scale_tril)
 
@@ -2315,18 +2702,23 @@ class SEDmodel(object):
                     decay_base = (args['zltn_lr_final'] / args['zltn_lr']) ** (1.0 / args['num_zltn_iter'])
                     step_size = lambda t: args['zltn_lr'] * decay_base ** t
                 svi = SVI(model, zltn_guide, Adam(step_size), Trace_ELBO(args['zltn_particles']))
-                svi_result = svi.run(PRNGKey(123), args['num_zltn_iter'], data[..., None], weights[None, ...], progress_bar=False)
+                svi_result = svi.run(PRNGKey(123), args['num_zltn_iter'], data[..., None], weights[None, ...],
+                                     mw_ext[None, ...], progress_bar=False)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(zltn_guide, params=params, num_samples=4 * args['num_samples'])
                 samples = predictive(PRNGKey(123), data=None)
                 samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
+                if self._syst is not None:  # LM MAP, warm-starts the mode-based sensitivity later
+                    samples.update({f'zmode_{k}': v for k, v in z_unc_vi.items()})
                 return {**samples}
 
             start = timeit.default_timer()
-            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_vi, in_axes=(2, 0)), args)
+            samples = self._fit_in_nobs_bins(jax.vmap(fit_vmap_vi, in_axes=(2, 0, 0)), args)
             expand_dim = False
             for key, val in samples.items():
+                if key.startswith('zmode_'):  # per-SN LM MAP, not posterior draws
+                    continue
                 val = np.squeeze(val)
                 if len(val.shape) == 1:  # In case fitting only one object
                     expand_dim = True
@@ -2350,6 +2742,16 @@ class SEDmodel(object):
             mcmc.print_summary()
             samples = mcmc.get_samples(group_by_chain=True)
         print(f'Total inference runtime: {end - start:.2f} seconds')
+        if self._syst is not None:  # propagate training-posterior systematics from this fit's VI outputs, and save
+            zmode = {k[6:]: samples.pop(k) for k in list(samples) if k.startswith('zmode_')}
+            B = self._systematic_dmu(zmode)
+            pre = os.path.join(args['outputdir'], args['outfile_prefix'])
+            np.savetxt(f'{pre}.COV', B @ B.T)
+            np.savez(f'{pre}_syst.npz', B=B, sn_list=np.array(self.sn_list, dtype=str),
+                     labels=np.array(self._syst['col_labels'], dtype=str))
+            print(f'Systematic covariance: {B.shape[0]}x{B.shape[0]} written to {args["outfile_prefix"]}.COV '
+                  f'(+ per-SN Delta-mu over {B.shape[1]} training draws in {args["outfile_prefix"]}_syst.npz, '
+                  f'C_sys = B B^T)')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
@@ -2852,6 +3254,7 @@ class SEDmodel(object):
 
         mwebv_scale = args.get("mwebv_scale", 1)
         mwebv_shift = args.get("mwebv_shift", 0)
+        z_final_shift = args.get("redshift_final_shift") or 0.0
 
         if 'version_photometry' in args.keys():  # If using all files in directory
             data_dir = args['version_photometry']
@@ -2937,8 +3340,8 @@ class SEDmodel(object):
                                     else head_data['SNID'].astype(str))
                     snid_decoded = np.char.strip(snid_decoded)
                     peakmjd_arr = head_data[args['peakmjd_key']]
-                    zhel_arr = head_data['REDSHIFT_HELIO']
-                    zcmb_arr = head_data['REDSHIFT_FINAL']
+                    zhel_arr = head_data['REDSHIFT_HELIO'] + z_final_shift
+                    zcmb_arr = head_data['REDSHIFT_FINAL'] + z_final_shift
                     zhel_err_arr = head_data['REDSHIFT_HELIO_ERR'] if 'REDSHIFT_HELIO_ERR' in head_names else np.full(n_sne_in_file, 5e-4)
                     zcmb_err_arr = head_data['REDSHIFT_FINAL_ERR'] if 'REDSHIFT_FINAL_ERR' in head_names else np.full(n_sne_in_file, 5e-4)
                     vpec_arr = head_data['VPEC'] if 'VPEC' in head_names else np.full(n_sne_in_file, 0.0)
@@ -3120,8 +3523,8 @@ class SEDmodel(object):
                     sn_name = str(sn_name)
                     if args['SNID_keep_list'] is not None and sn_name not in args['SNID_keep_list']:
                         continue
-                    zhel = meta['REDSHIFT_HELIO']
-                    zcmb = meta['REDSHIFT_FINAL']
+                    zhel = meta['REDSHIFT_HELIO'] + z_final_shift
+                    zcmb = meta['REDSHIFT_FINAL'] + z_final_shift
                     zhel_err = meta.get('REDSHIFT_HELIO_ERR', 5e-4)  # Assume some low z error if not specified
                     zcmb_err = meta.get('REDSHIFT_FINAL_ERR', 5e-4)  # Assume some low z error if not specified
                     vpec, vpec_err = meta.get('VPEC', 0.), meta.get('VPEC_ERR', self.sigma_pec * 3e5)
@@ -3235,9 +3638,6 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = all_lcs[0].shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
-            if args.get('redshift_final_shift'): #
-                z_hds = [z + args.get('redshift_final_shift') for z in z_hds] 
-                z_hels = [z + args.get('redshift_final_shift') for z in z_hels]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
@@ -3332,6 +3732,7 @@ class SEDmodel(object):
             self.used_band_dict = used_band_dict
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
+            self.zp_moments = self.zp_moments[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = self.fitres_table['SEARCH_PEAKMJD']
             self.lcplot_data = lcplot_data
@@ -3378,7 +3779,7 @@ class SEDmodel(object):
                                                 # just rename it so it's always the same
                         data = data.rename(columns={'BAND': 'FLT'})
                     data = data[~data.FLT.isin(args['drop_bands'])]  # Skip certain bands
-                    zhel = meta['REDSHIFT_HELIO']
+                    zhel = meta['REDSHIFT_HELIO'] + z_final_shift
                     data['t'] = (data.MJD - peak_mjd) / (1 + zhel)
                     # If filter not in map_dict, assume one-to-one mapping------
                     map_dict = args['map']
@@ -3437,7 +3838,7 @@ class SEDmodel(object):
                 cutflag_snana.append(meta.get('CUTFLAG_SNANA', 'NULL'))
                 z_hels.append(zhel)
                 z_hel_errs.append(meta.get('REDSHIFT_HELIO_ERR', row.REDSHIFT_CMB_ERR))
-                z_hds.append(row.REDSHIFT_CMB)
+                z_hds.append(row.REDSHIFT_CMB + z_final_shift)
                 z_hd_errs.append(row.REDSHIFT_CMB_ERR)
                 vpecs.append(meta.get('VPEC', 0.))
                 vpec_errs.append(meta.get('VPEC_ERR', self.sigma_pec))
@@ -3467,9 +3868,6 @@ class SEDmodel(object):
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
-            if args.get('redshift_final_shift'):
-                z_hds = [z + args.get('redshift_final_shift') for z in z_hds]
-                z_hels = [z + args.get('redshift_final_shift') for z in z_hels]
             distmods = self.cosmo.distmod(z_hds).value
             dist_mod_col = all_lcs[0].columns.get_loc('dist_mod')
             print('Saving light curves to standard grid...')
@@ -3513,6 +3911,7 @@ class SEDmodel(object):
             self.used_band_dict = used_band_dict
             self.zps = self.zps[self.used_band_inds]
             self.offsets = self.offsets[self.used_band_inds]
+            self.zp_moments = self.zp_moments[self.used_band_inds]
             self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             self.peak_mjds = np.array(peak_mjds)
             self.lcplot_data = lcplot_data
