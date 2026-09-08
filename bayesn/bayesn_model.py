@@ -627,15 +627,19 @@ class SEDmodel(object):
 
         return device_put(weights)  # jax array so it can be indexed under tracing in single-object fits
 
-    def _calculate_band_weights_jax(self, redshifts, ebv=None):
+    def _calculate_band_weights_jax(self, redshifts, ebv):
         """
         Differentiable (JAX) band weights for photo-z fitting: recomputed each sampler step from the sampled
-        redshifts, with Milky Way extinction evaluated at those redshifts (using self.ebv), for each SN
+        redshifts, with Milky Way extinction evaluated at those redshifts, for each SN
 
         Parameters
         ----------
         redshifts: array-like
             Array of redshifts for each SN
+        ebv: array-like
+            Milky Way E(B-V) for each SN, the same length as redshifts. Required rather than defaulted to
+            self.ebv, which holds the whole dataset and silently broadcasts against a per-SN redshift when
+            this is called from inside the plate.
 
         Returns
         -------
@@ -672,7 +676,7 @@ class SEDmodel(object):
         # MW extinction at sampled z: gather the F99 curve on the same band_wave locations
         mw_a99 = (remainders * self.mw_a99_grid[int_locs + 1]
                   + (1 - remainders) * self.mw_a99_grid[int_locs]).reshape(locs.shape)
-        av = self.RV_MW * (self.ebv if ebv is None else ebv)
+        av = self.RV_MW * ebv
         mw_ext = jnp.power(10., -0.4 * av[:, None] * mw_a99)
         weights = weights * mw_ext[..., None]
 
@@ -903,7 +907,7 @@ class SEDmodel(object):
         if self.photoz:  # evaluate the model at the fitted redshift (band weights + time dilation)
             z_mean = np.array(samples['z'].mean(axis=(0, 1)))
             t = obs_times / (1 + z_mean[None, :]) - tmax_mean[None, :]
-            weights = self._calculate_band_weights_jax(z_mean)
+            weights = self._calculate_band_weights_jax(z_mean, self.ebv)
         else:
             t = obs_times - tmax_mean[None, :]
             weights = self.band_weights
@@ -1435,7 +1439,7 @@ class SEDmodel(object):
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
             muhat = obs[-3, 0, sn_index]
-            weights = self._calculate_band_weights_jax(z)
+            weights = self._calculate_band_weights_jax(z, ebv=obs[-2, 0, sn_index])
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
@@ -1493,7 +1497,7 @@ class SEDmodel(object):
                                                                      order='F').transpose(1, 2, 0)
             eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             muhat = obs[-3, 0, sn_index]
-            weights = self._calculate_band_weights_jax(z)
+            weights = self._calculate_band_weights_jax(z, ebv=obs[-2, 0, sn_index])
             mask = obs[-1, :, sn_index].T.astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
@@ -1565,7 +1569,7 @@ class SEDmodel(object):
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
-            weights = self._calculate_band_weights_jax(z)
+            weights = self._calculate_band_weights_jax(z, ebv=obs[-2, 0, sn_index])
             mask = obs[-1, :, sn_index].T.astype(bool)
             flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
@@ -2983,7 +2987,7 @@ class SEDmodel(object):
 
         self.ebv = data[-2, 0, :]
         if photoz:
-            band_weights = self._calculate_band_weights_jax(data[-5, 0, :])
+            band_weights = self._calculate_band_weights_jax(data[-5, 0, :], self.ebv)
         else:
             band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
 
@@ -3896,7 +3900,7 @@ class SEDmodel(object):
             self.offsets = self.offsets[self.used_band_inds]
             self.ebv = self.data[-2, 0, :]
             if args['photoz']:
-                self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :])
+                self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :], self.ebv)
             else:
                 self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             if args['photoz']:
@@ -4113,7 +4117,7 @@ class SEDmodel(object):
             self.offsets = self.offsets[self.used_band_inds]
             self.ebv = self.data[-2, 0, :]
             if args['photoz']:
-                self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :])
+                self.band_weights = self._calculate_band_weights_jax(self.data[-5, 0, :], self.ebv)
             else:
                 self.band_weights = self._calculate_band_weights(self.data[-5, 0, :], self.data[-2, 0, :])
             if args['photoz']:
