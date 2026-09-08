@@ -2292,17 +2292,18 @@ class SEDmodel(object):
             if syst['fit_align'][i] >= 0:
                 print(f'  {nm:20s} lam_shift = {float(self._lam_shift[i]):+8.3f} AA    '
                       f'mag_shift = {float(self._mag_shift[i]):+.4f}')
-        # dA/dR_V for the MW R_V systematic; F99 is not differentiable in jax, and a first-order
-        # treatment matches recomputing the law to 0.1% even at dR_V = 1. Only the sensitivity reads it.
-        h = 0.01
-        all_lam = (self.model_wave[None, :] * (1 + np.asarray(self.data[-5, 0, :])[:, None])).flatten(order='F')
-        A_lam = lambda rv: (extinction.fitzpatrick99(all_lam, 1, rv).reshape(
-            self.mw_ext.shape, order='F') * rv * np.asarray(self.mw_ebv)[:, None])
-        self.mw_dA_dRV = (A_lam(self.RV_MW + h) - A_lam(self.RV_MW - h)) / (2 * h)
-
         n_sn = self.data.shape[-1]
-        self.dbw_dz = np.zeros((n_sn, 1, 1))  # broadcastable no-ops unless the shift is declared
+        self.mw_dA_dRV = np.zeros((n_sn, 1))  # broadcastable no-ops unless the shift is declared
+        self.dbw_dz = np.zeros((n_sn, 1, 1))
         self.dmw_dz = np.zeros((n_sn, 1))
+        if 'mw_rv_shift' in args.get('systematics_variations', {}):
+            # dA/dR_V; F99 is not differentiable in jax, and a first-order treatment matches recomputing
+            # the law to 0.1% even at dR_V = 1. Only the sensitivity reads it.
+            h = 0.01
+            all_lam = (self.model_wave[None, :] * (1 + np.asarray(self.data[-5, 0, :])[:, None])).flatten(order='F')
+            A_lam = lambda rv: (extinction.fitzpatrick99(all_lam, 1, rv).reshape(
+                self.mw_ext.shape, order='F') * rv * np.asarray(self.mw_ebv)[:, None])
+            self.mw_dA_dRV = (A_lam(self.RV_MW + h) - A_lam(self.RV_MW - h)) / (2 * h)
         if 'redshift_final_shift' in args.get('systematics_variations', {}):
             # band weights and MW extinction are resampled from z at setup, so a redshift shift needs
             # their z-derivatives; same first-order treatment as dA/dR_V
@@ -2460,7 +2461,7 @@ class SEDmodel(object):
                                                                             self.dbw_dz, self.dmw_dz)
         J, min_eig, grad_norm = np.asarray(J), np.asarray(min_eig), np.asarray(grad_norm)
         bad = np.where(min_eig <= 0)[0]
-        if bad.size:  # never seen in validation, but must not pass silently
+        if bad.size:  # fires on badly-fit objects such as CC contaminants, whose large residuals make H indefinite
             print(f'WARNING: non-positive-definite Hessian for {bad.size} SN(s), their systematics are unreliable: '
                   f'{[self.sn_list[i] for i in bad]}')
         # |grad| does not by itself flag a bad sensitivity - it is also large at the floor/ceil kinks in the
