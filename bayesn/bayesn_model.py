@@ -2116,19 +2116,24 @@ class SEDmodel(object):
         args['save_fit_errors'] = args.get('save_fit_errors', False)
         args['lc_cuts'] = args.get('lc_cuts', {})
         args['save_summary'] = args.get('save_summary', False)
-        args['keep_list'] = args.get('keep_list')
-        if args['keep_list'] is not None:
-            keep_list = pd.read_csv(args['keep_list'], comment='#', sep=r'\s+')
-            if keep_list.shape[1] == 1:
-                keep_list = pd.read_csv(args['keep_list'], header=None)[0].astype(str).values
+        args['sncid_list_file'] = args.get('sncid_list_file')
+        args['opt_sncid_list'] = args.get('opt_sncid_list', 0)
+        if args['sncid_list_file'] is not None:
+            cid_list = pd.read_csv(args['sncid_list_file'], comment='#', sep=r'\s+')
+            if cid_list.shape[1] == 1:
+                cid_list = pd.read_csv(args['sncid_list_file'], header=None)[0].astype(str).values
             else:
-                if 'CID' in keep_list.columns:
-                    keep_list = keep_list.CID.values
-                elif 'SNID' in keep_list.columns:
-                    keep_list = keep_list.SNID.values
-            args['SNID_keep_list'] = keep_list.astype(str)
+                if 'CID' in cid_list.columns:
+                    cid_list = cid_list.CID.values
+                elif 'SNID' in cid_list.columns:
+                    cid_list = cid_list.SNID.values
+            args['sncid_list'] = set(cid_list.astype(str))  # set so membership stays cheap for long lists
         else:
-            args['SNID_keep_list'] = None
+            args['sncid_list'] = None
+        if args['opt_sncid_list'] & 1:  # SNANA zeroes every other SN cut so each FITOPT fits one event set
+            if args['sncid_list'] is None:
+                raise ValueError('opt_sncid_list requests CID-only selection but no sncid_list_file was given')
+            args['lc_cuts'], args['sim_prescale'] = {}, 1
         args['error_floor'] = args.get('error_floor', 0.0)
         args['num_lcplot'] = args.get('num_lcplot', 0)
         if args['jobsplit'] is not None:
@@ -2940,7 +2945,8 @@ class SEDmodel(object):
         data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
         data = data.at[9, :, 0].set(np.ones_like(t))
 
-        band_weights = self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :])
+        # data is a jax array, so the weights must be too or the traced band indices cannot index them
+        band_weights = jnp.asarray(self._calculate_band_weights(data[-5, 0, :], data[-2, 0, :]))
 
         # Update dust parameters if specified manually
         if RV == 'uniform':
@@ -2984,8 +2990,9 @@ class SEDmodel(object):
         muhat = self.cosmo.distmod(z).value
         muhat_err = 5
         Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-        samples['mu'] = np.random.normal((samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
-            np.power(Ds_err, 2), np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
+        samples['mu'] = np.random.default_rng(0).normal(  # fixed seed so repeat fits agree
+            (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) / np.power(Ds_err, 2),
+            np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
         samples['delM'] = samples['Ds'] - samples['mu']
         if fix_tmax:
             samples['tmax'] = jnp.zeros_like(samples['tmax'])
@@ -3085,7 +3092,8 @@ class SEDmodel(object):
         if args['mode'] == 'fitting':
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            samples['mu'] = np.random.normal(
+            # fixed seed so the sigma0 draw is identical across fits and cancels in any systematic difference
+            samples['mu'] = np.random.default_rng(0).normal(
                 (samples['Ds'] * np.power(muhat_err, 2) + muhat * np.power(self.sigma0, 2)) /
                 np.power(Ds_err, 2),
                 np.sqrt((np.power(self.sigma0, 2) * np.power(muhat_err, 2)) / np.power(Ds_err, 2)))
@@ -3212,7 +3220,7 @@ class SEDmodel(object):
                 pickle.dump(samples, file)
 
             with open(os.path.join(args['outputdir'], 'input.yaml'), 'w') as file:
-                yaml.dump(args, file)
+                yaml.dump({k: v for k, v in args.items() if k != 'sncid_list'}, file)  # derived, and not yaml-safe
         end = time.time()
         print(f'Postprocess time: {end - start:.2f} seconds')
         return
@@ -3267,12 +3275,13 @@ class SEDmodel(object):
                 dir_list = dir_list + pdp  # Add any private data directories
                 found_in = []
                 for dir in dir_list:
-                    root_split = dir.split('/')
-                    root, remainder = root_split[0], ''.join(root_split[1:])
-                    if not os.path.isabs(dir):
-                        root = os.environ.get(root, 'NULL')
-                    if os.path.exists(os.path.join(root, remainder, data_dir)):
-                        found_in.append(os.path.join(root, remainder, data_dir))
+                    if os.path.isabs(dir):
+                        path = os.path.join(dir, data_dir)
+                    else:  # leading element is an environment variable, e.g. SNDATA_ROOT/SIM
+                        root_split = dir.split('/')
+                        path = os.path.join(os.environ.get(root_split[0], 'NULL'), *root_split[1:], data_dir)
+                    if os.path.exists(path):
+                        found_in.append(path)
                 if len(found_in) == 0:
                     raise ValueError(f'Requested photometry {data_dir} was not found in any of the usual public '
                                      f'locations, maybe you need to specify an additional private data location')
@@ -3354,11 +3363,11 @@ class SEDmodel(object):
                     zpec_arr = np.sqrt((1 + vpec_arr / c) / (1 - vpec_arr / c)) - 1
                     zhd_arr = (1 + zcmb_arr) / (1 + zpec_arr) - 1
 
-                    # Per-SN job/keep_list mask: SNe this job will actually process.
+                    # Per-SN job/CID-list mask: SNe this job will actually process.
                     job_per_sn = np.zeros(n_sne_in_file, dtype=bool)
                     job_per_sn[idx] = True
-                    if args['SNID_keep_list'] is not None:
-                        job_per_sn &= np.array([s in args['SNID_keep_list'] for s in snid_decoded])
+                    if args['sncid_list'] is not None:
+                        job_per_sn &= np.array([s in args['sncid_list'] for s in snid_decoded])
 
                     # Per-row keep mask, built from PTROBS bounds of kept SNe only.
                     # Boolean-indexing the memmap'd phot_data lets the OS page in
@@ -3521,7 +3530,7 @@ class SEDmodel(object):
                     if isinstance(sn_name, bytes):
                         sn_name = sn_name.decode('utf-8')
                     sn_name = str(sn_name)
-                    if args['SNID_keep_list'] is not None and sn_name not in args['SNID_keep_list']:
+                    if args['sncid_list'] is not None and sn_name not in args['sncid_list']:
                         continue
                     zhel = meta['REDSHIFT_HELIO'] + z_final_shift
                     zcmb = meta['REDSHIFT_FINAL'] + z_final_shift
@@ -3633,8 +3642,8 @@ class SEDmodel(object):
                 self.survey_id = survey_dict.get(self.survey, 0)
             N_sn = len(all_lcs)
             if N_sn < 1:
-                raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
-                                 'SNIDs in the data?')
+                raise ValueError('No SNe included, perhaps you provided an sncid_list_file which does not '
+                                 'match any of the SNIDs in the data?')
             N_obs = np.max(n_obs)
             N_col = all_lcs[0].shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
@@ -3760,7 +3769,7 @@ class SEDmodel(object):
                 if isinstance(sn, bytes):
                     sn = sn.decode('utf-8')
                 sn = str(sn)
-                if args['SNID_keep_list'] is not None and sn not in args['SNID_keep_list']:
+                if args['sncid_list'] is not None and sn not in args['sncid_list']:
                     continue
                 data_root = args['data_root']
                 for file in sn_files:
@@ -3861,10 +3870,10 @@ class SEDmodel(object):
                 snrmax1s.append(snrmax1)
                 snrmax2s.append(snrmax2)
                 snrmax3s.append(snrmax3)
-            N_sn = sn_list.shape[0]
+            N_sn = len(all_lcs)  # SNe actually read, which is fewer than the table when a CID list is given
             if len(n_obs) < 1:
-                raise ValueError('No SNe included, perhaps you provided a keep_list which does not match any of the '
-                                 'SNIDs in the data?')
+                raise ValueError('No SNe included, perhaps you provided an sncid_list_file which does not '
+                                 'match any of the SNIDs in the data?')
             N_obs = np.max(n_obs)
             N_col = lc.shape[1] - 2
             all_data = np.zeros((N_sn, N_obs, N_col))
@@ -3900,7 +3909,6 @@ class SEDmodel(object):
                 mag_data[-1, (flux_data[1, ...] <= 0)] = 0  # Set mask row
                 mag_data[2, (flux_data[1, ...] <= 0)] = 1 / jnp.sqrt(2 * np.pi)
             # ---------------------------------------------------------------------
-            sne = sn_list['SNID'].values
             self.sn_list = sne
             if 'training' in args['mode'].lower():
                 self.data = device_put(mag_data)
@@ -4502,6 +4510,10 @@ class SEDmodel(object):
             tmax = chains['tmax'][..., i].flatten(order='F')
             if 'RV' in chains.keys():
                 RV = chains['RV'][..., i].flatten(order='F')
+            elif 'RV_tform' in chains.keys():  # popRV guide emits the latent, map it back through the population prior
+                rvt = chains['RV_tform'][..., i].flatten(order='F')
+                phi = float(norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R))
+                RV = np.array(self.mu_R + self.sigma_R * ndtri(phi + rvt * (1 - phi)))
             else:
                 RV = None
             mu = chains['mu'][..., i].flatten(order='F')
@@ -4514,10 +4526,12 @@ class SEDmodel(object):
 
             theta, AV, mu, eps, del_M, tmax = theta[:num_samples], AV[:num_samples], mu[:num_samples], \
                                         eps[:num_samples, ...], del_M[:num_samples, ...], tmax[:num_samples, ...]
-            if 'RV' in chains.keys():
+            if RV is not None:
                 RV = RV[:num_samples, ...]
             if mean:
                 theta, AV, mu, eps, del_M, tmax = theta.mean()[None], AV.mean()[None], mu.mean()[None], eps.mean(axis=0)[None], del_M.mean()[None], tmax.mean()[None]
+                if RV is not None:
+                    RV = RV.mean()[None]
 
             if self.band_weights is not None:
                 self.band_weights = band_weights[i:i + 1, ...]
