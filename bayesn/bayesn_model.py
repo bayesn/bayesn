@@ -1402,6 +1402,8 @@ class SEDmodel(object):
         """
         sample_size = obs.shape[-1]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        if self.model_type == 'pop_RV':
+            phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
@@ -1410,6 +1412,12 @@ class SEDmodel(object):
             AV = AV * (1 - fix_AV) + AV_val * fix_AV
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
+            if self.model_type == 'pop_RV':
+                RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+                RV = numpyro.deterministic('RV',
+                                           self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            else:
+                RV = self.RV
             band_indices = obs[-6, :, sn_index].astype(int).T
             zhat = obs[-5, 0, sn_index]
             zhat_err = obs[-4, 0, sn_index]
@@ -1444,7 +1452,7 @@ class SEDmodel(object):
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
@@ -1470,11 +1478,19 @@ class SEDmodel(object):
 
         """
         sample_size = obs.shape[-1]
+        if self.model_type == 'pop_RV':
+            phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample('theta', dist.Normal(0, 1.0))
             AV = numpyro.sample('AV', dist.Exponential(1 / self.tauA))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            if self.model_type == 'pop_RV':
+                RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+                RV = numpyro.deterministic('RV',
+                                           self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            else:
+                RV = self.RV
             band_indices = obs[-6, :, sn_index].astype(int).T
             zhat = obs[-5, 0, sn_index]
             zhat_err = obs[-4, 0, sn_index]
@@ -1504,7 +1520,7 @@ class SEDmodel(object):
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             if prior_only:
                 return
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample('obs', dist.Normal(flux, obs[2, :, sn_index].T),
@@ -1530,11 +1546,19 @@ class SEDmodel(object):
         """
         sample_size = obs.shape[-1]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
+        if self.model_type == 'pop_RV':
+            phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
+            if self.model_type == 'pop_RV':
+                RV_tform = numpyro.sample('RV_tform', dist.Uniform(0, 1))
+                RV = numpyro.deterministic('RV',
+                                           self.mu_R + self.sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)))
+            else:
+                RV = self.RV
             zhat = obs[-5, 0, sn_index]
             zhat_err = obs[-4, 0, sn_index]
             if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
@@ -1571,7 +1595,7 @@ class SEDmodel(object):
             eps = eps_full.at[:, 1:-1, :].set(eps)
             weights = self._calculate_band_weights_jax(z, ebv=obs[-2, 0, sn_index])
             mask = obs[-1, :, sn_index].T.astype(bool)
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
+            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, RV, band_indices, mask,
                                        J_t, hsiao_interp, weights)
             with numpyro.handlers.mask(mask=mask):
                 numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
@@ -2633,6 +2657,9 @@ class SEDmodel(object):
                     z_kwargs = {'z_icdf': z_icdf} if self.z_icdf_grid is not None else {}
                     # z-latent starts at unconstrained 0 (Normal mean / Uniform prior midpoint)
                     extra_template = {z_loc: jnp.array([0.0])}
+                    if self.model_type == 'pop_RV':  # per-SN RV latent; unconstrained 0 -> RV_tform 0.5 (population median)
+                        sample_locs = sample_locs + ['RV_tform']
+                        extra_template['RV_tform'] = jnp.array([0.0])
                 else:
                     noeps_model = self.fit_model_globalRV_noeps
                     vi_model = self.fit_model_globalRV_vi
@@ -2717,6 +2744,9 @@ class SEDmodel(object):
                         samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
                     else:
                         samples['z'] = data[-5, 0] + data[-4, 0] * samples['ztform']
+                if 'RV_tform' in samples:  # surface RV the same way, mapped back through the population prior
+                    phi_alpha_R = norm.cdf((self.trunc_val - self.mu_R) / self.sigma_R)
+                    samples['RV'] = self.mu_R + self.sigma_R * ndtri(phi_alpha_R + samples['RV_tform'] * (1 - phi_alpha_R))
                 samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
                 return {**samples}
@@ -3242,6 +3272,9 @@ class SEDmodel(object):
             self.fitres_table['THETAERR'] = samples['theta'].std(axis=(0, 1))
             self.fitres_table['AV'] = samples['AV'].mean(axis=(0, 1))
             self.fitres_table['AVERR'] = samples['AV'].std(axis=(0, 1))
+            if 'RV' in samples:  # per-SN RV is only inferred under a population RV model
+                self.fitres_table['RV'] = samples['RV'].mean(axis=(0, 1))
+                self.fitres_table['RVERR'] = samples['RV'].std(axis=(0, 1))
             self.fitres_table['PEAKMJD'] = samples['peak_MJD'].mean(axis=(0, 1))
             self.fitres_table['PEAKMJDERR'] = samples['peak_MJD'].std(axis=(0, 1))
             if args['photoz']:  # fitted photo-z posterior (catalog zHEL/zHD columns keep the host prior)
