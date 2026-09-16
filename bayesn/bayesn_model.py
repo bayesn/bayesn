@@ -1380,24 +1380,15 @@ class SEDmodel(object):
         self.ds = ds
         self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
         self.lcplot_data = ds.make_lcplot_data(args["num_lcplot"])
-        sn_data, obs_data = ds.make_bayesn_data(
+        self.data = device_put(ds.make_bayesn_data(
             data_type=args["data_type"],
             band_dict=None,  # uses 1-based order in ds.unique_bands
             N_obs_max=args.get("N_obs_max"),
             cosmo=self.cosmo,
             negative_flux_mag_val=-99,
-        )
-        # TODO: Eventually sn_data and obs_data should be assigned as attributes and the
-        # numpyro model should look for them as arguments, but for now we can recreate
-        # the old (10, N_obs_max, N_sn) array to maintain compatibility.
-        # self.sn_data = device_put(jnp.array(sn_data))
-        # self.obs_data = device_put(jnp.array(obs_data))
-        big_data_block = np.zeros((10, obs_data.shape[1], obs_data.shape[2]))
-        big_data_block[np.array([0, 1, 2, 4, 9])] = obs_data
-        big_data_block[np.array([3, 5, 6, 7, 8])] = sn_data[:,None,:]*obs_data[4, :, :]
-        self.data = device_put(big_data_block)
+        ))
 
-        t = self.data[0, ...]
+        t = self.data.mjd
         self.J_t = self.get_J_t(t)
         self.hsiao_interp = self.get_hsiao_interp(t)
         self.band_weights = self._calculate_band_weights(
@@ -1970,7 +1961,7 @@ class SEDmodel(object):
     #########################
     def _model(
         self,
-        obs: ArrayLike,
+        obs: NamedTuple,
         weights: ArrayLike,
         train_new_model: bool = False,
         infer_dust_properties: bool = False,
@@ -1984,7 +1975,6 @@ class SEDmodel(object):
         photoz: bool = False,
         **kwargs: Any,
     ) -> None:
-        # TODO: Split functionality by primary use cases (fitting / training)
         """
         Modular numpyro sampling functions are defined and organized based on common
         use cases. The input kwargs are then parsed and the appropriate functions are
@@ -1992,20 +1982,15 @@ class SEDmodel(object):
 
         Parameters
         ----------
-        obs: ArrayLike shape (10, N_max_epochs, N_sn)
-            Data to fit, produced and attached to SEDmodel by process_dataset
-            The first dimension indexes 10 parameters, they are
-                phase: scalars
-                flux or mag: scalars
-                flux_err or mag_err: positive scalars
-                host-galaxy mass: positive scalars
-                band_indices: integers
-                redshift: scalars
-                    Heliocentric redshift
-                redshift_error: positive scalars
-                muhat: scalars
-                MWEBV: scalars
-                mask: bool
+        obs:
+            The required keys can be grouped by data type and shape.
+            Integer
+                N_sn
+            Arrays with shape (N_sn,)
+                host_logmass, z_hel, z_hel_err, muhat, MWEBV
+            Arrays with shape (N_max_epochs, N_sn)
+                mjd, flux, flux_err, band_indices, mask
+            The flux and flux_err names are used even when the data are in mags.
         weights: ArrayLike shape (N_sn, N_wl, N_bandpasses)
             Band weights based on filter responses and MW extinction curves for
             numerical flux integrals. Produced by SEDmodel._calculate_band_weights.
@@ -2108,7 +2093,7 @@ class SEDmodel(object):
             tau_z_max: default 0.5
                 The upper bound of the uniform distribution of tau_z_grad.
         """
-        N_sn = obs.shape[2]
+        N_sn = obs.N_sn
 
         if train_new_model:
             W0, W1, L_Sigma = self._sample_model_params()
@@ -2119,7 +2104,7 @@ class SEDmodel(object):
             dust_pop, M0, W0 = self._sample_dust_hyperparams(
                 split_variant=split_variant,
                 vary_redshift=vary_redshift,
-                mass=obs[3, 0],
+                mass=obs.host_logmass,
                 M_split=M_split,
                 W0=W0,
                 **kwargs,
@@ -2127,7 +2112,7 @@ class SEDmodel(object):
         else:
             dust_pop, M0, W0 = self._get_fixed_dust_hyperparams(
                 split_variant=split_variant,
-                mass=obs[3, 0],
+                mass=obs.host_logmass,
                 M_split=M_split,
                 W0=W0,
                 **kwargs,
@@ -2143,31 +2128,33 @@ class SEDmodel(object):
             mag_shift = 0
 
         with numpyro.plate("SNe", N_sn) as sn_index:
-            band_indices = obs[4, :, sn_index].astype(int).T
-            phot_mask = obs[9, :, sn_index].T.astype(bool)
+            band_indices = obs.band_indices[:, sn_index].astype(int)
+            phot_mask = obs.mask[:, sn_index].astype(bool)
             if photoz:
                 z = self._sample_z(
-                    obs[5, 0, sn_index],
-                    obs[6, 0, sn_index],
+                    obs.z_hel[sn_index],
+                    obs.z_hel_err[sn_index],
                     sn_index=sn_index,
                     z_icdf=kwargs.get("z_icdf"),
                 )
             else:
-                z = obs[5, 0, sn_index]
+                z = obs.z_hel[sn_index]
             if vary_filter_shifts or photoz:
                 # In either case, observer frame transmissions need re-calculation
                 # If we decide to sample E(B-V)_MW one day, that will also require
                 # re-calculation.
-                weights = self._calculate_band_weights(z, obs[8, 0, sn_index], lam_shift)
+                weights = self._calculate_band_weights(z, obs.MWEBV[sn_index], lam_shift)
             AV, RV = self._sample_split_SN_dust_params(
                 dust_pop=dust_pop,
                 redshift=z,
-                z_obs=obs[5, 0, sn_index],
+                z_obs=obs.z_hel[sn_index],
                 **kwargs,
             )
             theta, eps, Ds = self._sample_SN_params(
                 N_sn=N_sn,
-                sn_obs=obs[..., sn_index],
+                redshift=obs.z_hel[sn_index],
+                redshift_error=obs.z_hel_err[sn_index],
+                muhat=obs.muhat[sn_index],
                 L_Sigma=L_Sigma,
                 sigma0=dust_pop.sigma0,
                 **kwargs,
@@ -2175,9 +2162,9 @@ class SEDmodel(object):
 
             if not fix_tmax:
                 hsiao_interp, J_t, tmax = self._sample_SN_tmax(
-                    t_all_sn=obs[0],
+                    t_all_sn=obs.mjd,
                     sn_index=sn_index,
-                    z_obs=obs[5, 0, sn_index],
+                    z_obs=obs.z_hel[sn_index],
                     z_sampled=z,
                     **kwargs,
                 )
@@ -2190,8 +2177,8 @@ class SEDmodel(object):
                 model_spectra=phot_epoch_spectra,
                 M0=M0,
                 Ds=Ds,
-                z=obs[5, 0],
-                ebv=obs[8, 0],
+                z=obs.z_hel,
+                ebv=obs.MWEBV,
                 band_indices=band_indices,
                 mask=phot_mask,
                 weights=weights,
@@ -2202,8 +2189,8 @@ class SEDmodel(object):
             with numpyro.handlers.mask(mask=phot_mask):
                 numpyro.sample(
                     f"obs",
-                    dist.Normal(data, obs[2, :, sn_index].T),
-                    obs=obs[1, :, sn_index].T,
+                    dist.Normal(data, obs.flux_err[..., sn_index]),
+                    obs=obs.flux[..., sn_index],
                 )
 
     def _sample_model_params(self) -> tuple[Array, Array, Array]:
@@ -2607,7 +2594,10 @@ class SEDmodel(object):
     def _sample_SN_params(
         self,
         N_sn: int,
-        sn_obs: ArrayLike,
+        redshift: ArrayLike,
+        redshift_error: ArrayLike,
+        muhat: ArrayLike,
+        # sn_obs: ArrayLike,
         L_Sigma: ArrayLike,
         sigma0: float | ArrayLike,
         fix_theta: float | None = None,
@@ -2621,17 +2611,16 @@ class SEDmodel(object):
         Parameters
         ----------
         N_sn:
-            Total number of SN in self.data.
+            Total number of SN.
             This information is required because eps is delivered as a matrix of shape
             (N_sn, N_l_knots, N_tau_knots) where the N_sn broadcasting is handled by
             calling this function within a numpyro plate.
-        sn_obs: ArrayLike
-            Slice of self.data of shape (10, N_max_epochs).
-            The first dimension spans
-                phase, flux, flux error, host-galaxy mass, band indices, host-galaxy z,
-                host-galaxy z error, cosmological distance modulus, MW E(B-V), masking
-            N_max_epochs is the greatest number of observations for a single SN across
-            all SN in self.data.
+        redshift:
+            Heliocentric redshift. Array of length N_sn
+        redshift_error:
+            Error on heliocentric redshift. Array of length N_sn
+        muhat:
+            Redshift/cosmology-based distance. Array of length N_sn
         L_Sigma:
             The covariance matrix for the prior of epsilon.
             The shape is (N_knots, N_knots) array where N_knots is the product of
@@ -2655,7 +2644,7 @@ class SEDmodel(object):
             eps:
             Ds:
         """
-        redshift, redshift_error, muhat = sn_obs[5:8, 0]
+        # redshift, redshift_error, muhat = sn_obs[5:8, 0]
 
         if fix_theta is not None:
             theta = jnp.array([float(fix_theta)])
@@ -3022,7 +3011,7 @@ class SEDmodel(object):
         sigmaepsilon_init = 0.1 * jnp.ones(self.N_knots_sig)
         L_Omega_init = jnp.eye(self.N_knots_sig)
 
-        N_sn = self.data.shape[-1]
+        N_sn = self.data.N_sn
 
         # Prepare initial guesses
         param_init = {}
@@ -3040,7 +3029,7 @@ class SEDmodel(object):
             param_init["mu_R"] = jnp.array(3.0)
             param_init["sigma_R"] = jnp.array(0.5)
             param_init["RV_tform"] = jnp.array(
-                np.random.uniform(0, 1, self.data.shape[-1])
+                np.random.uniform(0, 1, self.data.N_sn)
             )
         else:
             param_init["RV"] = jnp.array(3.0)
@@ -3063,8 +3052,8 @@ class SEDmodel(object):
         )
         param_init["L_Omega"] = jnp.array(L_Omega_init)
 
-        param_init["Ds_tform"] = jnp.array(np.random.normal(np.zeros_like(self.data[-3, 0, :]), 1))
-        param_init["Ds"] = jnp.array(np.random.normal(self.data[-3, 0, :], sigma0_))
+        param_init["Ds_tform"] = jnp.array(np.random.normal(np.zeros_like(self.data.muhat), 1))
+        param_init["Ds"] = jnp.array(np.random.normal(self.data.muhat, sigma0_))
 
         param_init["lam_shift"] = jnp.zeros(self.band_weights.shape[-1])
         param_init["mag_shift"] = jnp.zeros(self.band_weights.shape[-1] - 1) + 0.005
@@ -3085,11 +3074,7 @@ class SEDmodel(object):
             dictionary of command line arguments, which overrides yaml file if specified
         """
         args = self.parse_args(args, cmd_args)
-        if args.get("version_photometry") is not None:
-            self._depr_process_dataset_version_photometry(args)
-        else:
-            self._depr_process_dataset_data_table(args)
-        # self.process_dataset(args)
+        self.process_dataset(args)
 
         # Set up initialisation for HMC chains
         # -------------------------
@@ -3115,6 +3100,7 @@ class SEDmodel(object):
             from numpyro.infer.util import initialize_model
             noeps_model = self.fit_model_photoz_noeps if args['photoz'] else self.fit_model_globalRV_noeps
             vi_model = self.fit_model_photoz_vi if args['photoz'] else self.fit_model_globalRV_vi
+            # TODO: fix data to use new ObsData format
             self._lm_model_info = initialize_model(
                 PRNGKey(0), noeps_model,
                 init_strategy=init_strategy, dynamic_args=True,
@@ -3135,8 +3121,10 @@ class SEDmodel(object):
             step_size=step_size,
         )
         print(f"Preprocessing time: {time.time() - self.start_time:.2f} seconds")
-        print(f"self.data shape: {self.data.shape} dtype: {self.data.dtype} "
-            f"size: {self.data.nbytes / 1024**2:.1f} MiB")
+        # z_hel and mjd chosen as representatives.
+        print(f"self.data SN-arrays shape: {self.data.z_hel.shape} dtype: {self.data.z_hel.dtype}")
+        print(f"self.data phot-arrays shape: {self.data.mjd.shape} dtype: {self.data.mjd.dtype}")
+        print(f"self.data size: {sum(arr.nbytes for arr in self.data)/ 1024**2:.1f} MiB")
         print(f"self.band_weights shape: {self.band_weights.shape} dtype: {self.band_weights.dtype} "
             f"size: {self.band_weights.nbytes / 1024**2:.1f} MiB")
         print(f"Current mode: {args['mode']}")
@@ -3185,7 +3173,7 @@ class SEDmodel(object):
 
             start = timeit.default_timer()
             vmap = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0, 3))
-            n_sne = self.data.shape[-1]
+            n_sne = self.data.N_sn
             if args["photoz"] and self.z_icdf_grid is not None:
                 z_icdf_all = np.asarray(self.z_icdf_grid)
             else:
@@ -3331,7 +3319,7 @@ class SEDmodel(object):
 
             start = timeit.default_timer()
             batched_map = jax.vmap(fit_vmap_vi, in_axes=(2, 0, 0))
-            n_sne = self.data.shape[-1]
+            n_sne = self.data.N_sn
             # per-SN host photo-z quantiles threaded through the vmap (dummy zeros otherwise)
             if args['photoz'] and self.z_icdf_grid is not None:
                 z_icdf_all = np.asarray(self.z_icdf_grid)
@@ -3341,6 +3329,7 @@ class SEDmodel(object):
             n_batches = (n_sne + batch_size - 1) // batch_size
 
             chunks = []
+            # TODO: Fix batches to use new ObsData format
             for b in tqdm(range(n_batches), desc='VI batches', disable=n_batches == 1):
                 lo, hi = b * batch_size, min((b + 1) * batch_size, n_sne)
                 n_real = hi - lo
@@ -3351,7 +3340,7 @@ class SEDmodel(object):
                 else:
                     # Pad final batch by replicating SN 0; padded outputs discarded.
                     batch_data = np.empty(
-                        (*self.data.shape[:-1], batch_size), dtype=self.data.dtype)
+                        (*self.data.N_sn, batch_size), dtype=self.data.dtype)
                     batch_weights = np.empty(
                         (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
                     batch_zicdf = np.empty((batch_size, z_icdf_all.shape[1]), dtype=z_icdf_all.dtype)
@@ -3871,8 +3860,8 @@ class SEDmodel(object):
             with open(args["outputdir"] / "bayesn.yaml", "w") as file:
                 yaml.dump(yaml_data, file)
 
-        z_HEL = self.data[5, 0, :]
-        muhat = self.data[7, 0, :]
+        z_HEL = self.data.z_hel
+        muhat = self.data.muhat
 
         if args["mode"].startswith("fit"):
             muhat_err = 5
@@ -3905,7 +3894,7 @@ class SEDmodel(object):
             # Create lcplot file
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
             if args["num_lcplot"] is None:
-                num_lcplot = self.data.shape[-1]
+                num_lcplot = self.data.N_sn
             else:
                 num_lcplot = args["num_lcplot"]
 
@@ -3916,8 +3905,8 @@ class SEDmodel(object):
                     t,
                     bands,
                     samples,
-                    self.data[5, 0, :],
-                    self.data[8, 0, :],
+                    self.data.z_hel,
+                    self.data.MWEBV,
                     num_samples=None,
                     num_sne=num_lcplot,
                     mag=False,
@@ -3926,7 +3915,7 @@ class SEDmodel(object):
                 f, ferr = f.mean(axis=1), f.std(axis=1)
 
                 self.lcplot_data["DATA_FLAG"] = 1
-                z_hel = self.data[5, 0, :]
+                z_hel = self.data.z_hel
                 fit_dfs = []
                 for i, sn in enumerate(self.lcplot_data.CID.unique()):
                     fit_df = pd.DataFrame()
@@ -4032,9 +4021,9 @@ class SEDmodel(object):
                 "ABORT_IF_ZERO": 1,
                 "SURVEY": self.survey,
                 "IDSURVEY": int(self.survey_id),
-                "NEVT_TOT": self.data.shape[-1],
-                "NEVT_LC_CUTS": self.data.shape[-1],
-                "NEVT_LCFIT_CUTS": int(self.data.shape[-1] - drop_count),
+                "NEVT_TOT": self.data.N_sn,
+                "NEVT_LC_CUTS": self.data.N_sn,
+                "NEVT_LCFIT_CUTS": int(self.data.N_sn - drop_count),
                 "CPU_MINUTES": round(cpu_time / 60, 2),
             }
             with open(f"{args['outfile_prefix']}.YAML", "w") as file:
@@ -4110,7 +4099,7 @@ class SEDmodel(object):
         """
         from scipy.stats import chi2 as chi2_dist
 
-        n_sne = self.data.shape[-1]
+        n_sne = self.data.N_sn
 
         # --- 1. Posterior means ---
         theta_mean = np.array(samples['theta'].mean(axis=(0, 1)))
@@ -4136,10 +4125,10 @@ class SEDmodel(object):
             RV = self.RV
 
         # --- 2. Rebuild J_t and hsiao_interp at posterior mean tmax ---
-        obs_times = self.data[0, ...]
+        obs_times = self.data.mjd
         if self.photoz:  # evaluate the model at the fitted redshift (band weights + time dilation)
             z_mean = np.array(samples['z'].mean(axis=(0, 1)))
-            zhat = np.asarray(self.data[-5, 0, :])
+            zhat = np.asarray(self.data.zhel)
             t = obs_times * (1 + zhat[None, :]) / (1 + z_mean[None, :]) - tmax_mean[None, :]
             weights = self._calculate_band_weights(z_mean, self.ebv_mw, lam_shift=0)
         else:
@@ -4149,8 +4138,8 @@ class SEDmodel(object):
         keep_shape = t.shape
         J_t = self.get_J_t(t)
         # --- 3. Inputs in (N_obs, n_sne) convention ---
-        band_indices = self.data[4, :, :].astype(int)
-        mask = self.data[9, :, :].astype(bool)
+        band_indices = self.data.band_indices.astype(int)
+        mask = self.data.mask.astype(bool)
 
         # --- 4. Model flux — batched over SN axis to keep peak memory bounded ---
         bs = batch_size if batch_size is not None else n_sne
@@ -4169,8 +4158,8 @@ class SEDmodel(object):
         model_flux = np.concatenate(chunks, axis=-1)
 
         # --- 5. chi2_data ---
-        obs_flux = self.data[1, :, :]
-        obs_err = self.data[2, :, :]
+        obs_flux = self.data.flux
+        obs_err = self.data.flux_err
         residuals_sq = (obs_flux - model_flux) ** 2
         chi2_per_obs = jnp.where(mask, residuals_sq / obs_err ** 2, 0.0)
         chi2_data = jnp.sum(chi2_per_obs, axis=0)
@@ -4183,7 +4172,7 @@ class SEDmodel(object):
         chi2_z = 0.0
         if self.photoz:
             if self.z_icdf_grid is None:  # Gaussian prior: pull^2 (drop the log-norm const, as SNANA does)
-                zhat_err = np.asarray(self.data[-4, 0, :])
+                zhat_err = np.asarray(self.data.z_hel_err)
                 chi2_z = ((z_mean - zhat) / zhat_err) ** 2
             else:  # quantile prior: p_host is dCDF/dz, the finite-difference slope of the quantiles
                 zq, pl = np.asarray(self.z_icdf_grid), np.asarray(self.z_u_grid)
