@@ -25,6 +25,7 @@ from jax.typing import ArrayLike
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from typing import NamedTuple
 
 from bayesn import io
 from bayesn import utils, constants
@@ -1549,24 +1550,51 @@ class SNDataset:
             phot = self.photometry
             phot_idx = self.phot_idx
 
-        sn_data = np.array([
-            meta["host_logmass"], meta["z_helio"], meta["z_helio_err"],
-            np.array(cosmo.distmod(meta["z_hubble"])), meta["mwebv"]
-        ])
-
         N_sn = len(meta["snid"])  # may be less than self.N_sn if SNe were removed.
         N_obs = np.diff(phot_idx)
-        obs_data = np.zeros((5, N_obs_max, N_sn))  # pads with 0s
+        mjd, flux, band_indices, mask = [np.zeros((N_obs_max, N_sn)) for _ in range(4)]
         # Errors of 0 are unphysical, so padded values are replaced with ~0.4
-        obs_data[2] = 1/np.sqrt(2*np.pi)
+        flux_err = np.full((N_obs_max, N_sn), 1/np.sqrt(2*np.pi))
         for sn_idx in range(N_sn):
             i = slice(phot_idx[sn_idx], phot_idx[sn_idx+1])
-            obs_data[:, :N_obs[sn_idx], sn_idx] = np.array([
-                phot["phase"][i], phot[data_type][i], phot[f"{data_type}_err"][i],
-                self.get_band_indices(band_dict, phot[i]), np.ones(N_obs[sn_idx])
-            ])
+            mjd[:N_obs[sn_idx], sn_idx] = phot["phase"][i]
+            flux[:N_obs[sn_idx], sn_idx] = phot[data_type][i]
+            flux_err[:N_obs[sn_idx], sn_idx] = phot[f"{data_type}_err"][i]
+            band_indices[:N_obs[sn_idx], sn_idx] = self.get_band_indices(band_dict, phot[i])
+            mask[:N_obs[sn_idx], sn_idx] = np.ones(N_obs[sn_idx])
         if data_type == "mag":  # need to do more masking
-            mask = obs_data[1] == negative_flux_mag_val
-            obs_data[:2, mask] = 0  # phase, mag
-            obs_data[3:, mask] = 0  # band_indices, mask
-        return sn_data, obs_data
+            neg_mask = flux == negative_flux_mag_val
+            mjd[neg_mask] = 0
+            flux[neg_mask] = 0
+            band_indices[neg_mask] = 0
+            mask[neg_mask] = 0
+        return ObsData(
+            N_sn=N_sn,
+            host_logmass=meta["host_logmass"],
+            z_hel=meta["z_helio"],
+            z_hel_err=meta["z_helio_err"],
+            muhat=np.array(cosmo.distmod(meta["z_hubble"])),
+            MWEBV=meta["mwebv"],
+            mjd=mjd,
+            flux=flux,
+            flux_err=flux_err,
+            band_indices=band_indices,
+            mask=mask
+        )
+
+
+class ObsData(NamedTuple):
+    """Light-weight container for data used by SEDmodel._model."""
+    N_sn: int
+    # Arrays with shape (N_sn,)
+    host_logmass: ArrayLike
+    z_hel: ArrayLike
+    z_hel_err: ArrayLike
+    muhat: ArrayLike
+    MWEBV: ArrayLike
+    # Arrays with shape (N_sn, N_max_epochs)
+    mjd: ArrayLike
+    flux: ArrayLike
+    flux_err: ArrayLike
+    band_indices: ArrayLike
+    mask: ArrayLike
