@@ -1,0 +1,7 @@
+J_not not_j.dat 13.6060 NOT NOTCam J-band
+H_not not_h.dat 13.5633 NOT NOTCam H-band
+Ks_not not_ks.dat 12.7954 NOT NOTCam Ks-band
+Jnot not_j_eff.dat 13.6060 NOT NOTCam effective J-band
+Hnot not_h_eff.dat 13.5633 NOT NOTCam effective H-band
+Ksnot not_ks_eff.dat 12.7954 NOT NOTCam effective Ks-band
+Knot not_k_eff.dat 12.8350 NOT NOTCam effective K-band
