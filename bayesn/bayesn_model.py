@@ -4,6 +4,7 @@ BayeSN Optical+NIR SED model.
 """
 
 import os
+import re
 import subprocess
 import sys
 
@@ -117,6 +118,31 @@ def load_training_systematics(model_dir):
                 'band_shift_names': [str(nm) for nm in d['band_shift_names']]}
 
 
+def write_systematics(stem, B, sn_list, labels, fmt):
+    """
+    Write a fit's per-SN Delta-mu matrix B as {stem}.syst.npz and/or {stem}.syst.txt. The text form is a
+    header row of column labels (first entry CID) followed by one row per SN; both carry the same arrays.
+    """
+    if len(labels) != B.shape[1]:
+        raise ValueError(f'{len(labels)} column labels for {B.shape[1]} columns of B')
+    if fmt in ('npz', 'both'):
+        np.savez(f'{stem}.syst.npz', B=B, sn_list=np.array(sn_list, dtype=str), labels=np.array(labels, dtype=str))
+    if fmt in ('txt', 'both'):
+        with open(f'{stem}.syst.txt', 'w') as f:
+            f.write(' '.join(['CID'] + list(labels)) + '\n')
+            for sn, row in zip(sn_list, B):
+                f.write(' '.join([str(sn)] + [f'{v:.10e}' for v in row]) + '\n')
+
+
+def read_systematics(path):
+    """Read a .syst.npz or .syst.txt file back to (B, sn_list, labels)."""
+    if path.endswith('.npz'):
+        with np.load(path) as d:
+            return d['B'], d['sn_list'], d['labels']
+    rows = np.loadtxt(path, dtype=str, ndmin=2)
+    return rows[1:, 1:].astype(float), rows[1:, 0], rows[0, 1:]
+
+
 def merge_systematic_covariance(syst_files):
     """
     Combine the per-SN Delta-mu matrices B written by separate fitting jobs into one systematic
@@ -126,20 +152,25 @@ def merge_systematic_covariance(syst_files):
     systematic, so one covariance is written per systematic alongside the total; since the columns are
     disjoint these sum exactly to the total.
     """
-    B = []
+    by_stem = {}  # a job may have written both formats; the npz is authoritative
     for syst_file in syst_files:
-        with np.load(syst_file) as d:
-            B.append(d['B'])
-            labels = d['labels']
+        stem = re.sub(r'\.syst\.(npz|txt)$', '', syst_file)
+        if stem not in by_stem or syst_file.endswith('.npz'):
+            by_stem[stem] = syst_file
+    B = []
+    for syst_file in by_stem.values():
+        Bi, _, labels = read_systematics(syst_file)
+        B.append(Bi)
     B = np.concatenate(B, axis=0)
 
     def write(cov, path):  # SNANA's format: upper triangle including the diagonal, row-major, float32
         np.savez(path, nsn=[cov.shape[0]], cov=cov[np.triu_indices_from(cov)].astype(np.float32),
                  allow_pickle=False)
 
-    cov_file = os.path.basename(syst_files[0]).split('_SPLIT')[0] + '_COVSYS'  # {version}_{fitopt}_COVSYS.npz
+    stem = os.path.basename(next(iter(by_stem)))
+    cov_file = re.sub(r'_SPLIT\d+$', '', stem) + '_COVSYS'  # {version}_{fitopt}_COVSYS.npz, split or not
     write(B @ B.T, cov_file)
-    print(f'Merged {len(syst_files)} systematics files ({B.shape[0]} SNe) into {cov_file}.npz')
+    print(f'Merged {len(by_stem)} systematics files ({B.shape[0]} SNe) into {cov_file}.npz')
     for label in dict.fromkeys(str(l) for l in labels):  # one file per systematic, contributions are additive
         Bk = B[:, labels == label]
         write(Bk @ Bk.T, f'{cov_file}_{label}')
@@ -2100,6 +2131,9 @@ class SEDmodel(object):
         args['num_nobs_bins'] = args.get('num_nobs_bins', 1)
         args['min_bin_gain'] = args.get('min_bin_gain', 0.05)
         args['systematics'] = args.get('systematics', False)
+        args['syst_format'] = args.get('syst_format', 'npz')
+        if args['syst_format'] not in ('npz', 'txt', 'both'):
+            raise ValueError(f"syst_format must be npz, txt or both, not {args['syst_format']}")
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
@@ -2750,13 +2784,12 @@ class SEDmodel(object):
         if self._syst is not None:  # propagate training-posterior systematics from this fit's VI outputs, and save
             zmode = {k[6:]: samples.pop(k) for k in list(samples) if k.startswith('zmode_')}
             B = self._systematic_dmu(zmode)
-            pre = os.path.join(args['outputdir'], args['outfile_prefix'])
-            np.savetxt(f'{pre}.COV', B @ B.T)
-            np.savez(f'{pre}_syst.npz', B=B, sn_list=np.array(self.sn_list, dtype=str),
-                     labels=np.array(self._syst['col_labels'], dtype=str))
-            print(f'Systematic covariance: {B.shape[0]}x{B.shape[0]} written to {args["outfile_prefix"]}.COV '
-                  f'(+ per-SN Delta-mu over {B.shape[1]} training draws in {args["outfile_prefix"]}_syst.npz, '
-                  f'C_sys = B B^T)')
+            write_systematics(os.path.join(args['outputdir'], args['outfile_prefix']), B, self.sn_list,
+                              self._syst['col_labels'], args['syst_format'])
+            exts = ['npz', 'txt'] if args['syst_format'] == 'both' else [args['syst_format']]
+            written = ', '.join(f'{args["outfile_prefix"]}.syst.{e}' for e in exts)
+            print(f'Systematics: per-SN Delta-mu over {B.shape[1]} columns written to {written}; '
+                  f'merge jobs with --merge_systematics')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,

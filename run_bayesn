@@ -46,6 +46,7 @@ parser.add_argument('--save_summary', type=float, required=False)
 #CLI overrides for systematics begin here. 
 parser.add_argument('--systematics', action='store_true', default=None)
 parser.add_argument('--merge_systematics', type=str, nargs='+', required=False)
+parser.add_argument('--syst_format', type=str, choices=['npz', 'txt', 'both'], required=False)
 parser.add_argument('--magobs_shift_zp_params', type=float, nargs=3, required=False)
 parser.add_argument('--redshift_final_shift', type=float, required=False)
 parser.add_argument('--mwebv_scale', type=float, required=False)
