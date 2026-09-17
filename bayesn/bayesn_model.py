@@ -74,7 +74,7 @@ from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 from .spline_utils import invKD, spline_coeffs, spline_coeffs_step
 from .extinction_relations import DustExtRel
 from .io import write_snana_lcfile, read_snana_spectra
-from bayesn.datasets import SNDataset
+from bayesn.datasets import SNDataset, ObsData
 from bayesn.utils import _predict, _prior_pot
 import bayesn.zltn_utils as zltn
 from bayesn import constants
@@ -1074,7 +1074,7 @@ class SEDmodel(object):
         Otherwise, populate args with the model's appropriate kwargs as if they
         were in the yaml.
 
-        The supported modes and (TODO: their corresponding kwargs) are
+        The supported modes are
             "fitting"
             "training_popRv"
             "training_globalRv"
@@ -1397,6 +1397,14 @@ class SEDmodel(object):
             lam_shifts=np.zeros(len(self.ds.unique_bands)+1),
         )
 
+    def get_sn_slice_of_data(self, slice_: slice):
+        if not isinstance(self.data, ObsData):
+            raise ValueError("The data attribute has not been set yet.")
+        return ObsData(
+            N_sn=len(range(self.data.N_sn)[slice_])
+            **{name: getattr(self.data, name)[slice_] for name in self.data._fields
+                if name != "N_sn"
+            })
     ###############################
     ### Astronomical Quantities ###
     ###############################
@@ -3100,16 +3108,15 @@ class SEDmodel(object):
             from numpyro.infer.util import initialize_model
             noeps_model = self.fit_model_photoz_noeps if args['photoz'] else self.fit_model_globalRV_noeps
             vi_model = self.fit_model_photoz_vi if args['photoz'] else self.fit_model_globalRV_vi
-            # TODO: fix data to use new ObsData format
             self._lm_model_info = initialize_model(
                 PRNGKey(0), noeps_model,
                 init_strategy=init_strategy, dynamic_args=True,
-                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+                model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
             )
             self._vi_model_info = initialize_model(
                 PRNGKey(0), vi_model,
                 init_strategy=init_strategy, dynamic_args=True,
-                model_args=(self.data[..., 0:1], self.band_weights[0:1, ...]),
+                model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
             )
 
         regularize_mass_matrix = fitting_mode
@@ -3325,27 +3332,26 @@ class SEDmodel(object):
                 z_icdf_all = np.asarray(self.z_icdf_grid)
             else:
                 z_icdf_all = np.zeros((n_sne, 1))
-            batch_size = args['batch_size'] if args['batch_size'] is not None else n_sne
+            batch_size = args.get("batch_size", n_sne)
             n_batches = (n_sne + batch_size - 1) // batch_size
 
             chunks = []
-            # TODO: Fix batches to use new ObsData format
             for b in tqdm(range(n_batches), desc='VI batches', disable=n_batches == 1):
                 lo, hi = b * batch_size, min((b + 1) * batch_size, n_sne)
                 n_real = hi - lo
                 if n_real == batch_size:
-                    batch_data = self.data[..., lo:hi]
+                    batch_data = self.get_sn_slice_of_data(slice(lo, hi))
                     batch_weights = self.band_weights[lo:hi]
                     batch_zicdf = z_icdf_all[lo:hi]
                 else:
                     # Pad final batch by replicating SN 0; padded outputs discarded.
                     batch_data = np.empty(
-                        (*self.data.N_sn, batch_size), dtype=self.data.dtype)
+                        (*self.data.N_sn, batch_size), dtype=self.data.z_hel.dtype)
                     batch_weights = np.empty(
                         (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
                     batch_zicdf = np.empty((batch_size, z_icdf_all.shape[1]), dtype=z_icdf_all.dtype)
-                    batch_data[..., :n_real] = self.data[..., lo:hi]
-                    batch_data[..., n_real:] = self.data[..., 0:1]
+                    batch_data[..., :n_real] = self.get_sn_slice_of_data(slice(lo, hi))
+                    batch_data[..., n_real:] = self.get_sn_slice_of_data(slice(0, 1))
                     batch_weights[:n_real] = self.band_weights[lo:hi]
                     batch_weights[n_real:] = self.band_weights[0:1]
                     batch_zicdf[:n_real] = z_icdf_all[lo:hi]

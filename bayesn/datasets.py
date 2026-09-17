@@ -71,6 +71,9 @@ default_values: dict[str, str | Number] = {
 
 # needs to be list for pandas column indexing.
 req_phot_cols = ("snid", "flt", "mjd")
+
+default_arr_str = lambda: np.zeros(shape=(0,), dtype=float)
+default_arr_float = lambda: np.zeros(shape=(0,), dtype=float)
 ######################
 ### Global methods ###
 ######################
@@ -215,29 +218,29 @@ class SNDataset:
     sim: bool = False
 
     # string metadata arrays
-    snid:          np.ndarray = np.array([], dtype=str)
+    snid:          np.ndarray = dataclasses_field(default_factory=default_arr_str)
     # For SNANA compatibility
-    field:         np.ndarray = np.array([], dtype=str)
-    idsurvey:      np.ndarray = np.array([], dtype=str)
-    cutflag_snana: np.ndarray = np.array([], dtype=str)
+    field:         np.ndarray = dataclasses_field(default_factory=default_arr_str)
+    idsurvey:      np.ndarray = dataclasses_field(default_factory=default_arr_str)
+    cutflag_snana: np.ndarray = dataclasses_field(default_factory=default_arr_str)
 
     # numeric metadata arrays
-    ra:                np.ndarray = np.array([], dtype=float)
-    dec:               np.ndarray = np.array([], dtype=float)
-    peak_mjd:          np.ndarray = np.array([], dtype=float)
-    sn_type:           np.ndarray = np.array([], dtype=float)
-    z_helio:           np.ndarray = np.array([], dtype=float)
-    z_cmb:             np.ndarray = np.array([], dtype=float)
-    z_hubble:          np.ndarray = np.array([], dtype=float)
-    z_helio_err:       np.ndarray = np.array([], dtype=float)
-    z_cmb_err:         np.ndarray = np.array([], dtype=float)
-    z_hubble_err:      np.ndarray = np.array([], dtype=float)
-    mwebv:             np.ndarray = np.array([], dtype=float)
-    mwebv_err:         np.ndarray = np.array([], dtype=float)
-    host_logmass:      np.ndarray = np.array([], dtype=float)
-    host_logmass_err:  np.ndarray = np.array([], dtype=float)
-    vpec:              np.ndarray = np.array([], dtype=float)
-    vpec_err:          np.ndarray = np.array([], dtype=float)
+    ra:                np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    dec:               np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    peak_mjd:          np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    sn_type:           np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_helio:           np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_cmb:             np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_hubble:          np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_helio_err:       np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_cmb_err:         np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    z_hubble_err:      np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    mwebv:             np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    mwebv_err:         np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    host_logmass:      np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    host_logmass_err:  np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    vpec:              np.ndarray = dataclasses_field(default_factory=default_arr_float)
+    vpec_err:          np.ndarray = dataclasses_field(default_factory=default_arr_float)
     # For SNANA compatibility
     sim_gentypes:      np.ndarray | None = None
     sim_template_ids:  np.ndarray | None = None
