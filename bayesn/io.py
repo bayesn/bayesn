@@ -175,16 +175,15 @@ def read_snana_ascii_meta(
     fh.close()
     lines = [
         line.split(comment)[0].rstrip("\n") for line in lines
-        if len(line.split()) > 1
-        and len(line.split(":")) >= 2
-        and line.split()[0] != tablename+":"
-        and not line.startswith(comment)
+        if len(line.split(":")) >= 2
+        and not line.lstrip().startswith(comment)
+        and not line.lstrip().startswith(tablename)
     ]
-    lines = [" ".join(l.split()) for l in lines]
+    lines = [" ".join(l.split()) for l in lines]  # convert all white-space to " "
 
     keys, vals = [[] for _ in range(2)]
-    raw_keys = [l.split()[0].rstrip(":") for l in lines]
-    raw_vals = [":".join(l.split(":")[1:]).strip() for l in lines]
+    raw_keys = [l.split(":")[0].strip() for l in lines]
+    raw_vals = [":".join(l.split(":")[1:]).strip() for l in lines]  # retain ":" after first
     # raw_vals is string which may or may not contain numeric substrings.
     # If any numeric substrings are found, then assume non-numeric text is comments,
     # units, or +/- signs which can be safely dropped.
@@ -201,6 +200,8 @@ def read_snana_ascii_meta(
     # otherwise have its numeric component read as the value, 1234.
     non_numeric_fields = ("SNID", "IAUC", "SURVEY")
     for i in range(len(raw_vals)):
+        if raw_keys[i] == "END":
+            continue
         if raw_keys[i] in non_numeric_fields:
             keys.append(raw_keys[i])
             vals.append(raw_vals[i])
@@ -230,6 +231,13 @@ def read_snana_ascii_meta(
                     f"will be assigned to {raw_keys[i]}_ERR. Other values are not "
                     "supported."
                 )
+            if len(float_vals) > 1 and " " not in raw_vals[i]:
+                warn(UserWarning(
+                    f"In file {fname}, the value in {lines[i]} has multiple numeric "
+                    "substrings but does not include spaces. This could lead to "
+                    "substrings like +/- or +- attaching unintended sign symbols to "
+                    f"the error, which is currently being read as {vals[-1]}."
+                ))
         else:
             keys.append(raw_keys[i])
             vals.append(raw_vals[i])
