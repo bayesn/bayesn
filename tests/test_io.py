@@ -56,36 +56,39 @@ class TestRead:
 
     class TestReadSNANAAsciiMeta:
         def test_non_numeric_fields(self):
-            raw = StringIO("SNID: 1\nIAUC: one2\nSURVEY: 002")
+            raw = StringIO(
+                "SNID: 1\n"
+                "IAUC: 1:2\n" # extra ":"
+                "SURVEY:002"  # lack of space
+            )
             meta = io.read_snana_ascii_meta(raw)
-            assert isinstance(meta["SNID"], str)
-            assert isinstance(meta["IAUC"], str)
-            assert isinstance(meta["SURVEY"], str)
             assert meta["SNID"] == "1"
-            assert meta["IAUC"] == "one2"
+            assert meta["IAUC"] == "1:2"
             assert meta["SURVEY"] == "002"
 
         def test_ignored_lines(self):
             raw = StringIO(
-                "# Header comment\n"  # ignored by comment="#"
-                "RA: 123.45 # in J2000\n"  # "in J2000" ignored because following "#"
-                "IMPORTANT_KEY 25\n"  # ignored because no ":"
-                "OBS: data data data\n"  # ignored by tablename="OBS"
-                "END:\n"  # hard-coded (for now) to be ignored
+                "# Header comment\n"       # ignored by comment="#"
+                "RA: 123.45 # in J2000\n"  # "in J2000" ignored because follows "#"
+                "IMPORTANT_KEY 25\n"       # ignored because no ":"
+                "OBS: data data data\n"    # ignored by tablename="OBS"
+                "END:\n"                   # hard-coded (for now) to be ignored
             )
             meta = io.read_snana_ascii_meta(raw)
             assert meta == odict({"RA": 123.45})
 
         def test_float_regex(self):
             raw = StringIO(
-                "RA: +45 and trailing text\n"        # +int
-                "DECL: leading text and -12\n"       # -int
-                "REDSHIFT_HELIO: 0.031 +/- 2e-3\n"   # unsigned float, eng not w/ -power
-                "REDSHIFT_CMB: +0.03037 +- .002\n"   # +float and float starting with .
-                "VPEC: 2.5e+2 plus or minus 1e2\n"   # eng not w/ + or unsigned power
-                "REDSHIFT_HUBBLE: ~3 over 100\n"     # should be parsed as two floats
+                "RA: +45 and trailing text\n"       # +int
+                "DECL: leading text and -12\n"      # -int
+                "REDSHIFT_HELIO: 0.031 +/- 2e-3\n"  # unsigned float, eng not w/ -power
+                "REDSHIFT_CMB: +0.03037 +- .002\n"  # +float and float starting with .
+                "VPEC: 2.5e+2 plus or minus 1e2\n"  # eng not w/ + or unsigned power
+                "REDSHIFT_HUBBLE: ~3 over 100\n"    # should be parsed as two floats
+                "MWEBV: 0.1+/-0.05\n"               # no spaces will attach the sign
             )
-            meta = io.read_snana_ascii_meta(raw)
+            with pytest.warns(UserWarning, match="In file <_io.StringIO"):
+                meta = io.read_snana_ascii_meta(raw)
             assert meta["RA"] == 45
             assert meta["DECL"] == -12
             assert meta["REDSHIFT_HELIO"] == 0.031
@@ -96,6 +99,8 @@ class TestRead:
             assert meta["VPEC_ERR"] == 100.
             assert meta["REDSHIFT_HUBBLE"] == 3
             assert meta["REDSHIFT_HUBBLE_ERR"] == 100
+            assert meta["MWEBV"] == 0.1
+            assert meta["MWEBV_ERR"] == -0.05
 
         def test_stat_and_sys(self):
             raw = StringIO("REDSHIFT_CMB: 0.05 +/- 0.003 (stat) +/- 0.004 (sys)")

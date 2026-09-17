@@ -1199,14 +1199,12 @@ class SEDmodel(object):
             return args.pop("RV")
 
         # If rv_type is not provided and is not in the mode, infer its value.
+        err = "rv_type is not specified. "
         uniform = ("uniform_RV_min" in args or "uniform_RV_max" in args)
         pop = ("mu_R" in args or "sigma_R" in args)
         glbl = ("RV" in args)
         if uniform + pop + glbl > 1:
-            err = (
-                "rv_type is not specified, and the rv_type cannot be inferred from the"
-                " other arguments. "
-            )
+            err +=  "The yaml implies multiple RV types with its specified arguments: "
             if uniform:
                 err += "uniform_RV_min/max suggest uniform. "
             if pop:
@@ -1218,19 +1216,23 @@ class SEDmodel(object):
         elif uniform:
             detected_RV_type = "uniform"
             if verbose:
-                print("Inferring uniform RV based on uniform_RV_min/max.")
+                print(err+"Inferring uniform RV based on uniform_RV_min/max.")
         elif pop:
             detected_RV_type = "pop"
             if verbose:
-                print("Inferring pop RV based on mu_R/sigma_R.")
+                print(err+"Inferring pop RV based on mu_R/sigma_R.")
         elif glbl:
             detected_RV_type = "global"
             if verbose:
-                print("Inferring global RV based on RV.")
+                print(err+"Inferring global RV based on RV.")
         else:
-            detected_RV_type = "global"
+            detected_RV_type = self.RV_type
             if verbose:
-                print(f"Inferring global RV with RV={self.RV} as a default")
+                print(err+
+                    "The rv_type cannot be inferred from the other arguments. "
+                    "The run will proceed with rv_type={self.RV_type} based on the "
+                    f"loaded model {self.model_name}."
+                )
         return detected_RV_type
 
     def _check_args_valid(self, args: dict) -> None:
