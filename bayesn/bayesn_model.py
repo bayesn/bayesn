@@ -1230,7 +1230,7 @@ class SEDmodel(object):
             if verbose:
                 print(err+
                     "The rv_type cannot be inferred from the other arguments. "
-                    "The run will proceed with rv_type={self.RV_type} based on the "
+                    f"The run will proceed with rv_type={self.RV_type} based on the "
                     f"loaded model {self.model_name}."
                 )
         return detected_RV_type
@@ -1402,11 +1402,8 @@ class SEDmodel(object):
     def get_sn_slice_of_data(self, slice_: slice):
         if not isinstance(self.data, ObsData):
             raise ValueError("The data attribute has not been set yet.")
-        return ObsData(
-            N_sn=len(range(self.data.N_sn)[slice_])
-            **{name: getattr(self.data, name)[slice_] for name in self.data._fields
-                if name != "N_sn"
-            })
+        return ObsData(*[arr[..., slice_] for arr in self.data])
+        # return ObsData(**{name: getattr(self.data, name)[slice_] for name in self.data._fields})
     ###############################
     ### Astronomical Quantities ###
     ###############################
@@ -1750,8 +1747,8 @@ class SEDmodel(object):
 
         model_flux = jnp.sum(model_spectra * obs_band_weights, axis=1).T
         mag_shift = jnp.empty(self.used_band_inds.shape[0]).at[:].set(mag_shift)
-        zps = self.used_zps[band_indices]
-        model_flux *= 10 ** (-0.4 * (M0 + Ds + zps + mag_shift - self.ZPT))
+        zps = (self.used_zps + mag_shift)[band_indices]
+        model_flux *= 10 ** (-0.4 * (M0 + Ds + zps - self.ZPT))
         model_flux *= mask
         return model_flux
 
@@ -2103,7 +2100,7 @@ class SEDmodel(object):
             tau_z_max: default 0.5
                 The upper bound of the uniform distribution of tau_z_grad.
         """
-        N_sn = obs.N_sn
+        N_sn = obs.z_hel.shape[0]
 
         if train_new_model:
             W0, W1, L_Sigma = self._sample_model_params()
@@ -2208,9 +2205,9 @@ class SEDmodel(object):
 
         Returns
         -------
-        W0: numpryo Sample if train_new_model, else jax.Array
-        W1: same type W0
-        L_Sigma: same type as W0
+        W0: numpyro Sample
+        W1: numpyro Sample
+        L_Sigma: numpyro Sample
         """
         W_mu = jnp.zeros(self.N_knots)
         W0 = numpyro.sample("W0", dist.MultivariateNormal(W_mu, jnp.eye(self.N_knots)))
@@ -2614,6 +2611,7 @@ class SEDmodel(object):
         muhat_err: float | None = None,
         fix_dist_limit: float = 0.08,
         fix_dist_Ds_err: float = 5,
+        fix_eps: bool = False,
         **kwargs: Any,
     ) -> tuple[Array, Array, Array]:
         """ Sample theta, eps, Ds for each SN.
@@ -2661,25 +2659,25 @@ class SEDmodel(object):
         else:
             theta = numpyro.sample(f"theta", dist.Normal(0, 1.0))
 
-        eps_mu = jnp.zeros(self.N_knots_sig)
-        eps_tform = numpyro.sample(
-            "eps_tform", dist.MultivariateNormal(eps_mu, jnp.eye(self.N_knots_sig))
-        )
-        eps_tform = eps_tform.T
-        eps = numpyro.deterministic("eps", jnp.matmul(L_Sigma, eps_tform))
-        eps = eps.T
-        eps = jnp.reshape(
-            eps,
-            (N_sn, self.N_knots_sig_l, self.tau_knots.shape[0]),
-            order="F",
-        )
-        eps_full = jnp.zeros(
-            (N_sn, self.l_knots.shape[0], self.tau_knots.shape[0])
-        )
-        eps = eps_full.at[:, 1:-1, :].set(eps)
+        eps_full = jnp.zeros((N_sn, self.l_knots.shape[0], self.tau_knots.shape[0]))
+        if not fix_eps:
+            eps_mu = jnp.zeros(self.N_knots_sig)
+            eps_tform = numpyro.sample(
+                "eps_tform", dist.MultivariateNormal(eps_mu, jnp.eye(self.N_knots_sig))
+            )
+            eps_tform = eps_tform.T
+            eps = numpyro.deterministic("eps", jnp.matmul(L_Sigma, eps_tform))
+            eps = eps.T
+            eps = jnp.reshape(
+                eps,
+                (N_sn, self.N_knots_sig_l, self.tau_knots.shape[0]),
+                order="F",
+            )
+            eps = eps_full.at[:, 1:-1, :].set(eps)
+        else:
+            eps = eps_full
 
         # x * x seems more performant than x ** 2 or jnp.power(x, 2)
-        # Should this be just 5?
         if muhat_err is None:
             muhat_err = (
                 5
@@ -2740,7 +2738,7 @@ class SEDmodel(object):
         return hsiao_interp, J_t, tmax
 
 
-    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0):
+    def fit_model_globalRV_noeps(self, obs, weights, fix_tmax=False, fix_theta=False, theta_val=0, fix_AV=False, AV_val=0, **kwargs):
         """
         Numpyro model used for fitting latent SN properties with single global RV. Will fit for time of maximum as well
         as theta, epsilon, AV and distance modulus.
@@ -2763,34 +2761,49 @@ class SEDmodel(object):
         Returns
         -------
         """
-        sample_size = obs.shape[-1]
+        sample_size = obs.z_hel.shape[0]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
-            theta = theta * (1 - fix_theta) + theta_val * fix_theta
+            if fix_theta:
+                theta = theta_val
             AV = numpyro.sample(f'AV', dist.Exponential(1 / self.tauA))
-            AV = AV * (1 - fix_AV) + AV_val * fix_AV
+            if fix_AV:
+                AV = AV_val
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
             tmax = tmax * (1 - fix_tmax)
-            t = obs[0, ...] - tmax[None, sn_index]
+            t = obs.mjd - tmax[sn_index]
             hsiao_interp = self.get_hsiao_interp(t)
             J_t = self.get_J_t(t)
             eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            band_indices = obs[-6, :, sn_index].astype(int).T
-            muhat = obs[-3, 0, sn_index]
-            mask = obs[-1, :, sn_index].T.astype(bool)
+            band_indices = obs.band_indices[:,sn_index].astype(int)
+            muhat = obs.muhat[sn_index]
+            mask = obs.mask[:, sn_index].astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             # Ds = numpyro.sample('Ds', dist.ImproperUniform(dist.constraints.greater_than(0), (), event_shape=()))
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
-            with numpyro.handlers.mask(mask=mask):
-                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
-                               obs=obs[1, :, sn_index].T)
 
-    def fit_model_globalRV_vi(self, obs, weights, prior_only=False):
+            phot_epoch_spectra = self._get_spectra(theta, AV, self.W0, self.W1, eps, self.RV, J_t, hsiao_interp)
+            flux = self.get_flux_batch(
+                model_spectra=phot_epoch_spectra,
+                M0=self.M0,
+                Ds=Ds,
+                z=obs.z_hel,
+                ebv=obs.MWEBV,
+                band_indices=band_indices,
+                mask=mask,
+                weights=weights,
+                lam_shift=0,
+                mag_shift=0,
+                num_batch=sample_size,
+            )
+            with numpyro.handlers.mask(mask=mask):
+                numpyro.sample(f'obs', dist.Normal(flux, obs.flux_err[:, sn_index]),
+                               obs=obs.flux[:, sn_index])
+
+    def fit_model_globalRV_vi(self, obs, weights, prior_only=False, **kwargs):
         """
         Numpyro model used for fitting SN properties assuming fixed global properties from a trained model. Will fit for
         tmax as well as theta, epsilon, Av and distance modulus. This model is slightly modified for ZLTN VI.
@@ -2806,13 +2819,13 @@ class SEDmodel(object):
             compute the prior log-density without the cost or memory footprint
             of running the model's flux computation.
         """
-        sample_size = obs.shape[-1]
+        sample_size = obs.z_hel.shape[0]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
         with numpyro.plate('SNe', sample_size) as sn_index:
-            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            AV = numpyro.sample(f'AV', zltn.My_Exponential(1 / self.tauA))
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
-            t = obs[0, ...] - tmax[None, sn_index]
+            t = obs.mjd - tmax[None, sn_index]
             hsiao_interp = self.get_hsiao_interp(t)
             J_t = self.get_J_t(t)
             eps_mu = jnp.zeros(N_knots_sig)
@@ -2824,22 +2837,34 @@ class SEDmodel(object):
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
             # eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            band_indices = obs[-6, :, sn_index].astype(int).T
-            muhat = obs[-3, 0, sn_index]
-            mask = obs[-1, :, sn_index].T.astype(bool)
+            band_indices = obs.band_indices[:, sn_index].astype(int)
+            muhat = obs.muhat[sn_index]
+            mask = obs.mask[:, sn_index].astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
 
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))  # Ds_err
             if prior_only:
                 return
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            phot_epoch_spectra = self._get_spectra(theta, AV, self.W0, self.W1, eps, self.RV, J_t, hsiao_interp)
+            flux = self.get_flux_batch(
+                model_spectra=phot_epoch_spectra,
+                M0=self.M0,
+                Ds=Ds,
+                z=obs.z_hel,
+                ebv=obs.MWEBV,
+                band_indices=band_indices,
+                mask=mask,
+                weights=weights,
+                lam_shift=0,
+                mag_shift=0,
+                num_batch=sample_size,
+            )
             with numpyro.handlers.mask(mask=mask):
-                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
-                               obs=obs[1, :, sn_index].T)
+                numpyro.sample(f'obs', dist.Normal(flux, obs.flux_err[:, sn_index]),
+                               obs=obs.flux[:, sn_index])
 
-    def fit_model_photoz_noeps(self, obs, weights, z_icdf=None):
+    def fit_model_photoz_noeps(self, obs, weights, z_icdf=None, **kwargs):
         """
         Photo-z model without epsilon, for Stage-1 LM of the VI fit. Same latent set as
         fit_model_photoz (AV, theta, tmax, redshift, Ds) minus the eps residuals, with the
@@ -2854,15 +2879,15 @@ class SEDmodel(object):
         z_icdf: array-like, optional
             Single per-SN host photo-z quantile row, passed through the vmap for the quantile prior
         """
-        sample_size = obs.shape[-1]
+        sample_size = obs.z_hel.shape[0]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
             theta = numpyro.sample('theta', dist.Normal(0, 1.0))
             AV = numpyro.sample('AV', dist.Exponential(1 / self.tauA))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
-            band_indices = obs[-6, :, sn_index].astype(int).T
-            zhat = obs[-5, 0, sn_index]
-            zhat_err = obs[-4, 0, sn_index]
+            band_indices = obs.band_indices[:, sn_index].astype(int)
+            zhat = obs.z_hel[sn_index]
+            zhat_err = obs.z_hel_err[sn_index]
             if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
                 u = numpyro.sample('u', dist.Uniform(self.z_u_grid[0], self.z_u_grid[-1]))
                 if z_icdf is not None:  # single per-SN row passed in (VI vmaps over SNe)
@@ -2874,23 +2899,35 @@ class SEDmodel(object):
                 ztform = numpyro.sample('ztform', dist.Normal(0, 1))
                 z = numpyro.deterministic('z', zhat + zhat_err * ztform)
             # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            t = obs.mjd * (1 + zhat) / (1 + z) - tmax[None, sn_index]
             hsiao_interp = self.get_hsiao_interp(t)
             J_t = self.get_J_t(t)
             eps = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
-            muhat = obs[-3, 0, sn_index]
-            weights = self._calculate_band_weights(z, self.ebv_mw, lam_shifts=0)
-            mask = obs[-1, :, sn_index].T.astype(bool)
+            muhat = obs.muhat[sn_index]
+            weights = self._calculate_band_weights(z, obs.MWEBV[sn_index], 0)
+            mask = obs.mask[:, sn_index].astype(bool)
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            phot_epoch_spectra = self._get_spectra(theta, AV, self.W0, self.W1, eps, self.RV, J_t, hsiao_interp)
+            flux = self.get_flux_batch(
+                model_spectra=phot_epoch_spectra,
+                M0=self.M0,
+                Ds=Ds,
+                z=obs.z_hel,
+                ebv=obs.MWEBV,
+                band_indices=band_indices,
+                mask=mask,
+                weights=weights,
+                lam_shift=0,
+                mag_shift=0,
+                num_batch=sample_size,
+            )
             with numpyro.handlers.mask(mask=mask):
-                numpyro.sample('obs', dist.Normal(flux, obs[2, :, sn_index].T),
-                               obs=obs[1, :, sn_index].T)
+                numpyro.sample(f'obs', dist.Normal(flux, obs.flux_err[:, sn_index]),
+                               obs=obs.flux[:, sn_index])
 
-    def fit_model_photoz_vi(self, obs, weights, z_icdf=None, prior_only=False):
+    def fit_model_photoz_vi(self, obs, weights, z_icdf=None, prior_only=False, **kwargs):
         """
         Photo-z model modified for ZLTN VI: AV sampled first with real support so the guide's
         first-positive dimension handles it, and no fix_* pins.
@@ -2906,15 +2943,15 @@ class SEDmodel(object):
             If True, return after sampling all latents and skip the data-likelihood (the band-weight
             recompute, get_flux_batch and the obs sample). Used by _prior_pot in the LM Stage-2 solve.
         """
-        sample_size = obs.shape[-1]
+        sample_size = obs.z_hel.shape[0]
         N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
 
         with numpyro.plate('SNe', sample_size) as sn_index:
-            AV = numpyro.sample(f'AV', My_Exponential(1 / self.tauA))
+            AV = numpyro.sample(f'AV', zltn.My_Exponential(1 / self.tauA))
             theta = numpyro.sample(f'theta', dist.Normal(0, 1.0))
             tmax = numpyro.sample('tmax', dist.Uniform(-10, 10))
-            zhat = obs[-5, 0, sn_index]
-            zhat_err = obs[-4, 0, sn_index]
+            zhat = obs.z_hel[sn_index]
+            zhat_err = obs.z_hel_err[sn_index]
             if self.z_icdf_grid is not None:  # per-SN host photo-z PDF via ICDF-reparam
                 u = numpyro.sample('u', dist.Uniform(self.z_u_grid[0], self.z_u_grid[-1]))
                 if z_icdf is not None:  # single per-SN row passed in (VI vmaps over SNe)
@@ -2927,15 +2964,15 @@ class SEDmodel(object):
                 z = numpyro.deterministic('z', zhat + zhat_err * ztform)
             eps_mu = jnp.zeros(N_knots_sig)
             eps_tform = numpyro.sample('eps_tform', dist.MultivariateNormal(eps_mu, jnp.eye(N_knots_sig)))
-            muhat = obs[-3, 0, sn_index]
+            muhat = obs.muhat[sn_index]
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
             Ds = numpyro.sample('Ds', dist.Normal(muhat, Ds_err))
             if prior_only:
                 return
-            band_indices = obs[-6, :, sn_index].astype(int).T
+            band_indices = obs.band_indices[:, sn_index].astype(int)
             # Rest-frame phase from the observer frame at the sampled z (time dilation)
-            t = obs[0, ...] * (1 + zhat) / (1 + z) - tmax[None, sn_index]
+            t = obs.mjd * (1 + zhat) / (1 + z) - tmax[None, sn_index]
             hsiao_interp = self.get_hsiao_interp(t)
             J_t = self.get_J_t(t)
             eps_tform = eps_tform.T
@@ -2944,13 +2981,25 @@ class SEDmodel(object):
             eps = jnp.reshape(eps, (sample_size, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F')
             eps_full = jnp.zeros((sample_size, self.l_knots.shape[0], self.tau_knots.shape[0]))
             eps = eps_full.at[:, 1:-1, :].set(eps)
-            weights = self._calculate_band_weights(z, self.ebv_mw, lam_shifts=0)
-            mask = obs[-1, :, sn_index].T.astype(bool)
-            flux = self.get_flux_batch(self.M0, theta, AV, self.W0, self.W1, eps, Ds, self.RV, band_indices, mask,
-                                       J_t, hsiao_interp, weights)
+            weights = self._calculate_band_weights(z, obs.MWEBV[sn_index], lam_shifts=0)
+            mask = obs.mask[:, sn_index].astype(bool)
+            phot_epoch_spectra = self._get_spectra(theta, AV, self.W0, self.W1, eps, self.RV, J_t, hsiao_interp)
+            flux = self.get_flux_batch(
+                model_spectra=phot_epoch_spectra,
+                M0=self.M0,
+                Ds=Ds,
+                z=obs.z_hel,
+                ebv=obs.MWEBV,
+                band_indices=band_indices,
+                mask=mask,
+                weights=weights,
+                lam_shift=0,
+                mag_shift=0,
+                num_batch=sample_size,
+            )
             with numpyro.handlers.mask(mask=mask):
-                numpyro.sample(f'obs', dist.Normal(flux, obs[2, :, sn_index].T),
-                               obs=obs[1, :, sn_index].T)
+                numpyro.sample(f'obs', dist.Normal(flux, obs.flux_err[:, sn_index]),
+                               obs=obs.flux[:, sn_index])
 
     def initial_guess(self, args: dict, reference_model: str | Path = "T21_model") -> dict[str, Array]:
         """
@@ -3021,7 +3070,7 @@ class SEDmodel(object):
         sigmaepsilon_init = 0.1 * jnp.ones(self.N_knots_sig)
         L_Omega_init = jnp.eye(self.N_knots_sig)
 
-        N_sn = self.data.N_sn
+        N_sn = self.data.z_hel.shape[0]
 
         # Prepare initial guesses
         param_init = {}
@@ -3039,7 +3088,7 @@ class SEDmodel(object):
             param_init["mu_R"] = jnp.array(3.0)
             param_init["sigma_R"] = jnp.array(0.5)
             param_init["RV_tform"] = jnp.array(
-                np.random.uniform(0, 1, self.data.N_sn)
+                np.random.uniform(0, 1, self.data.z_hel.shape[0])
             )
         else:
             param_init["RV"] = jnp.array(3.0)
@@ -3108,17 +3157,23 @@ class SEDmodel(object):
             and args['laplace_method'] == 'lm'
         ):
             from numpyro.infer.util import initialize_model
+            # noeps_args = copy.deepcopy(args).update({"fix_eps": True})
+            # vi_args = copy.deepcopy(args).update({"AV_dist": zltn.My_Exponential, "muhat_err": 5, "prior_only": True})
             noeps_model = self.fit_model_photoz_noeps if args['photoz'] else self.fit_model_globalRV_noeps
             vi_model = self.fit_model_photoz_vi if args['photoz'] else self.fit_model_globalRV_vi
             self._lm_model_info = initialize_model(
                 PRNGKey(0), noeps_model,
+                # PRNGKey(0), self._model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
+                # model_kwargs=noeps_args,
             )
             self._vi_model_info = initialize_model(
                 PRNGKey(0), vi_model,
+                # PRNGKey(0), self._model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
+                # model_kwargs=vi_args,
             )
 
         regularize_mass_matrix = fitting_mode
@@ -3174,15 +3229,17 @@ class SEDmodel(object):
                 )
                 if args["photoz"] and self.z_icdf_grid is not None:
                     args["z_icdf"] = z_icdf
-                mcmc.run(rng_key, data[..., None], weights[None, ...],  **args)
+                # Vmapping over SN axis, need to pad back to expected shapes.
+                padded_data = ObsData(*[arr[..., None] for arr in data])
+                mcmc.run(rng_key, padded_data, weights[None, ...],  **args)
                 return {
                     **mcmc.get_samples(group_by_chain=True),
                     **mcmc.get_extra_fields(group_by_chain=True),
                 }
 
             start = timeit.default_timer()
-            vmap = jax.vmap(fit_vmap_mcmc, in_axes=(2, 0, 3))
-            n_sne = self.data.N_sn
+            vmap = jax.vmap(fit_vmap_mcmc, in_axes=(-1, 0, 0))
+            n_sne = self.data.z_hel.shape[0]
             if args["photoz"] and self.z_icdf_grid is not None:
                 z_icdf_all = np.asarray(self.z_icdf_grid)
             else:
@@ -3234,26 +3291,29 @@ class SEDmodel(object):
                     z_kwargs = {}
                     extra_template = {}
 
+                # Vmapping over SN axis, need to pad back to expected shapes.
+                padded_data = ObsData(*[arr[..., None] for arr in data])
+
                 warm_scale_tril = None
                 if args['laplace_method'] == 'lm':
-                    model_args = (data[..., None], weights[None, ...])
+                    model_args = (padded_data, weights[None, ...])
                     # Stage 1: Gauss-Newton LM MAP for (AV, theta, tmax, [redshift], Ds)
                     # under the Exponential prior.
                     mi = self._lm_model_info
-                    pot_fn_noeps = mi.potential_fn(data[..., None], weights[None, ...], **z_kwargs)
-                    post_fn_noeps = mi.postprocess_fn(data[..., None], weights[None, ...], **z_kwargs)
+                    pot_fn_noeps = mi.potential_fn(padded_data, weights[None, ...], **z_kwargs)
+                    post_fn_noeps = mi.postprocess_fn(padded_data, weights[None, ...], **z_kwargs)
                     predict_fn_noeps = lambda z: _predict(noeps_model, model_args, {}, z)
                     prior_pot_fn_noeps = lambda z: _prior_pot(noeps_model, model_args, {}, z)
                     # Per-SN init: prior medians for AV/theta/tmax, this SN's muhat for Ds.
                     z_template_s1 = {
                         'AV': jnp.array([jnp.log(self.tauA * jnp.log(2.0))]),
-                        'Ds': data[-3, 0:1],
+                        'Ds': padded_data.muhat[0:1],
                         'theta': jnp.array([0.0]),
                         'tmax': jnp.array([0.0]),
                         **extra_template,
                     }
                     noeps_median, _, z_unc_noeps = run_lm_laplace_gn(
-                        predict_fn_noeps, prior_pot_fn_noeps, z_template_s1,
+                        predict_fn_noeps, prior_pot_fn_noeps, post_fn_noeps, z_template_s1,
                         maxiter=args['lm_maxiter'],
                         lam_init=args['lm_lam_init'],
                         use_linesearch=args['lm_use_linesearch'],
@@ -3261,8 +3321,8 @@ class SEDmodel(object):
                     # Stage 2: Gauss-Newton LM on the full VI model, warm-started from the Stage 1 MAP
                     vi_mi = self._vi_model_info
                     post_fn_vi = vi_mi.postprocess_fn(*model_args, **z_kwargs)
-                    predict_fn = lambda z: _predict(vi_model, vi_args, z_kwargs, z)
-                    prior_pot_fn = lambda z: _prior_pot(vi_model, vi_args, z_kwargs, z)
+                    predict_fn = lambda z: _predict(vi_model, model_args, z_kwargs, z)
+                    prior_pot_fn = lambda z: _prior_pot(vi_model, model_args, z_kwargs, z)
                     z_start_vi = {**vi_mi.param_info.z, **z_unc_noeps,
                                   "AV": noeps_median["AV"]}
                     z_start_vi["eps_tform"] = jnp.zeros_like(z_start_vi["eps_tform"])
@@ -3286,7 +3346,7 @@ class SEDmodel(object):
                     optimizer = Adam(0.01)
                     laplace_guide = AutoLaplaceApproximation(noeps_model, init_loc_fn=init_strategy)
                     svi = SVI(noeps_model, laplace_guide, optimizer, loss=Trace_ELBO(5))
-                    svi_result = svi.run(PRNGKey(123), 15000, data[..., None], weights[None, ...], progress_bar=False, **z_kwargs)
+                    svi_result = svi.run(PRNGKey(123), 15000, padded_data, weights[None, ...], progress_bar=False, **z_kwargs)
                     params, losses = svi_result.params, svi_result.losses
                     laplace_median = laplace_guide.median(params)
 
@@ -3311,7 +3371,7 @@ class SEDmodel(object):
                     decay_base = (args['zltn_lr_final'] / args['zltn_lr']) ** (1.0 / args['num_zltn_iter'])
                     step_size = lambda t: args['zltn_lr'] * decay_base ** t
                 svi = SVI(vi_model, zltn_guide, Adam(step_size), Trace_ELBO(args["zltn_particles"]))
-                svi_result = svi.run(PRNGKey(123), args["num_zltn_iter"], data[..., None], weights[None, ...], progress_bar=False, **z_kwargs)
+                svi_result = svi.run(PRNGKey(123), args["num_zltn_iter"], padded_data, weights[None, ...], progress_bar=False, **z_kwargs)
                 params, losses = svi_result.params, svi_result.losses
                 predictive = Predictive(
                     zltn_guide, params=params, num_samples=4 * args["num_samples"]
@@ -3321,20 +3381,20 @@ class SEDmodel(object):
                     if self.z_icdf_grid is not None:
                         samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
                     else:
-                        samples['z'] = data[-5, 0] + data[-4, 0] * samples['ztform']
+                        samples['z'] = data.zhel + data.z_hel_err * samples['ztform']
                 samples['eps'] = jnp.matmul(self.L_Sigma[None, ...], samples['eps_tform'].transpose(0, 2, 1))
                 # samples['losses'] = losses
                 return {**samples}
 
             start = timeit.default_timer()
-            batched_map = jax.vmap(fit_vmap_vi, in_axes=(2, 0, 0))
-            n_sne = self.data.N_sn
+            batched_map = jax.vmap(fit_vmap_vi, in_axes=(-1, 0, 0))
+            n_sne = self.data.z_hel.shape[0]
             # per-SN host photo-z quantiles threaded through the vmap (dummy zeros otherwise)
             if args['photoz'] and self.z_icdf_grid is not None:
                 z_icdf_all = np.asarray(self.z_icdf_grid)
             else:
                 z_icdf_all = np.zeros((n_sne, 1))
-            batch_size = args.get("batch_size", n_sne)
+            batch_size = args["batch_size"] if args.get("batch_size") else n_sne
             n_batches = (n_sne + batch_size - 1) // batch_size
 
             chunks = []
@@ -3348,7 +3408,7 @@ class SEDmodel(object):
                 else:
                     # Pad final batch by replicating SN 0; padded outputs discarded.
                     batch_data = np.empty(
-                        (*self.data.N_sn, batch_size), dtype=self.data.z_hel.dtype)
+                        (*self.data.z_hel.shape[0], batch_size), dtype=self.data.z_hel.dtype)
                     batch_weights = np.empty(
                         (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
                     batch_zicdf = np.empty((batch_size, z_icdf_all.shape[1]), dtype=z_icdf_all.dtype)
@@ -3894,7 +3954,7 @@ class SEDmodel(object):
             if "tmax" in samples:  # Convert tmax samples into peak_MJD samples
                 # Time dilation at the fitted z for photo-z, else the fixed catalog z
                 z_dilation = samples["z"] if args["photoz"] else z_HEL[None, None, :]
-                samples["peak_MJD"] = self.peak_mjds[None, None, :] + samples["tmax"] * (1 + z_dilation)
+                samples["peak_MJD"] = self.ds.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
             fitprob, fitchi2, ndof = self.get_fitprob(samples, batch_size=args.get("batch_size"))
@@ -3902,13 +3962,13 @@ class SEDmodel(object):
             # Create lcplot file
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
             if args["num_lcplot"] is None:
-                num_lcplot = self.data.N_sn
+                num_lcplot = self.data.z_hel.shape[0]
             else:
                 num_lcplot = args["num_lcplot"]
 
             if num_lcplot > 0:
                 bands_by_cid = self.lcplot_data.groupby("CID")["FLT"].unique().to_dict()
-                bands = [list(bands_by_cid.get(sn, [])) for sn in self.sn_list]
+                bands = [list(bands_by_cid.get(sn, [])) for sn in self.ds.snid]
                 f = self.get_flux_from_chains(
                     t,
                     bands,
@@ -3927,7 +3987,7 @@ class SEDmodel(object):
                 fit_dfs = []
                 for i, sn in enumerate(self.lcplot_data.CID.unique()):
                     fit_df = pd.DataFrame()
-                    fit_df["MJD"] = (self.peak_mjds[i] + t * (1 + z_hel[i])).repeat(
+                    fit_df["MJD"] = (self.ds.peak_mjd[i] + t * (1 + z_hel[i])).repeat(
                         len(bands[i])
                     )
                     fit_df["FLUXCAL"] = f[i, : len(bands[i]), :].flatten(order="F")
@@ -4029,9 +4089,9 @@ class SEDmodel(object):
                 "ABORT_IF_ZERO": 1,
                 "SURVEY": self.survey,
                 "IDSURVEY": int(self.survey_id),
-                "NEVT_TOT": self.data.N_sn,
-                "NEVT_LC_CUTS": self.data.N_sn,
-                "NEVT_LCFIT_CUTS": int(self.data.N_sn - drop_count),
+                "NEVT_TOT": self.data.z_hel.shape[0],
+                "NEVT_LC_CUTS": self.data.z_hel.shape[0],
+                "NEVT_LCFIT_CUTS": int(self.data.z_hel.shape[0] - drop_count),
                 "CPU_MINUTES": round(cpu_time / 60, 2),
             }
             with open(f"{args['outfile_prefix']}.YAML", "w") as file:
@@ -4046,6 +4106,9 @@ class SEDmodel(object):
                 pickle.dump(samples, file)
 
             dump_args = copy.deepcopy(args)
+            for k, v in dump_args.items():
+                if isinstance(v, Path):
+                    dump_args[k] = str(v)
             with open(args["outputdir"] / "input.yaml", "w") as file:
                 if args.get("AV_dist") == dist.Exponential:
                     dump_args["AV_dist"] = "dist.Exponential"
@@ -4107,7 +4170,7 @@ class SEDmodel(object):
         """
         from scipy.stats import chi2 as chi2_dist
 
-        n_sne = self.data.N_sn
+        n_sne = self.data.z_hel.shape[0]
 
         # --- 1. Posterior means ---
         theta_mean = np.array(samples['theta'].mean(axis=(0, 1)))
@@ -4155,13 +4218,24 @@ class SEDmodel(object):
         chunks = []
         for lo in range(0, n_sne, bs):
             hi = min(lo + bs, n_sne)
-            chunk = self.get_flux_batch(
-                self.M0, theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1,
-                eps_full[lo:hi], Ds_mean[lo:hi],
-                RV[lo:hi] if rv_is_array else RV,
-                band_indices[:, lo:hi], mask[:, lo:hi],
-                J_t[lo:hi], hsiao_interp[:, :, lo:hi], self.band_weights[lo:hi],
+            chunk_spectra = self._get_spectra(
+                theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1, eps_full[lo:hi],
+                RV[lo:hi] if rv_is_array else RV, J_t[lo:hi], hsiao_interp[:, :, lo:hi]
             )
+            chunk = self.get_flux_batch(
+                model_spectra=chunk_spectra, M0=self.M0, Ds=Ds_mean[lo:hi],
+                z=self.data.z_hel[lo:hi], ebv=self.data.MWEBV[lo:hi],
+                band_indices=band_indices[:, lo:hi], mask=mask[:, lo:hi],
+                weights=self.band_weights[lo:hi], lam_shift=0, mag_shift=0,
+                num_batch=hi-lo,
+            )
+            # chunk = self.get_flux_batch(
+            #     self.M0, theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1,
+            #     eps_full[lo:hi], Ds_mean[lo:hi],
+            #     RV[lo:hi] if rv_is_array else RV,
+            #     band_indices[:, lo:hi], mask[:, lo:hi],
+            #     J_t[lo:hi], hsiao_interp[:, :, lo:hi], self.band_weights[lo:hi],
+            # )
             chunks.append(np.asarray(chunk))
         model_flux = np.concatenate(chunks, axis=-1)
 
@@ -4679,7 +4753,7 @@ class SEDmodel(object):
             "ebv_mw": (ebv_mw, None, N),
             "RV": (RV, lambda x: self.RV, N),
             "lam_shift": (lam_shift, self.sample_lam_shift, len(self.used_wave_sigmas)),
-            "mag_shift": (mag_shift, self.sample_mag_shift, len(self.used_calib_cov)+1),
+            "mag_shift": (mag_shift, self.sample_mag_shift, len(self.used_calib_cov)),
         }
         for key, val in param_dict.items():
             param_dict[key] = clean_input(val[0], val[1], val[2], key)
