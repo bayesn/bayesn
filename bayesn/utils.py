@@ -5,6 +5,7 @@ from pathlib import Path
 from astropy.coordinates import EarthLocation, SkyCoord
 import astropy.units as u
 import numpy as np
+import numpyro.distributions as dist
 from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
 from jax.typing import ArrayLike

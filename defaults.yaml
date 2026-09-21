@@ -60,6 +60,8 @@ num_lcplot: null
 data_type: flux
 # If True, use the peak_mjd values from the data as tmax, otherwise infer tmax.
 fix_tmax: False
+# If True, eps will be set to 0 at all knots, otherwise infer eps.
+fix_eps: False
 # If null, infer theta during sampling, otherwise, fix theta to the indicated value.
 # False will be read as fix_theta=0, and True as fix_theta=1.
 fix_theta: null

@@ -1572,7 +1572,6 @@ class SNDataset:
             band_indices[neg_mask] = 0
             mask[neg_mask] = 0
         return ObsData(
-            N_sn=N_sn,
             host_logmass=meta["host_logmass"],
             z_hel=meta["z_helio"],
             z_hel_err=meta["z_helio_err"],
@@ -1588,7 +1587,6 @@ class SNDataset:
 
 class ObsData(NamedTuple):
     """Light-weight container for data used by SEDmodel._model."""
-    N_sn: int
     # Arrays with shape (N_sn,)
     host_logmass: ArrayLike
     z_hel: ArrayLike
