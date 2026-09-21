@@ -73,7 +73,7 @@ from typing import Any, NamedTuple
 from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 from .spline_utils import invKD, spline_coeffs, spline_coeffs_step
 from .extinction_relations import DustExtRel
-from .io import write_snana_lcfile, read_snana_spectra
+from .io import write_snana_lcfile, read_snana_spectra, read_snana_ascii
 from bayesn.datasets import SNDataset, ObsData
 from bayesn.utils import _predict, _prior_pot
 import bayesn.zltn_utils as zltn
@@ -3176,19 +3176,18 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in memory when making plots
 
         """
-        meta, lcdata = sncosmo.read_snana_ascii(path, default_tablename="OBS")
-        lcdata = lcdata["OBS"].to_pandas()
+        meta, lcdata = read_snana_ascii(path)
 
         t = lcdata.MJD.values
-        flux = lcdata.FLUXCAL.values
-        flux_err = lcdata.FLUXCALERR.values
+        flux = lcdata.flux.values
+        flux_err = lcdata.flux_err.values
         filters = lcdata.FLT.values
         peak_mjd = meta[peakmjd_key]
         z = meta["REDSHIFT_HELIO"]
         ebv_mw = meta["MWEBV"]
-        zpt = meta.get('ZP_FLUXCAL', self.ZPT)  # header ZP overrides the configured default
+        zpt = meta.get("ZP_FLUXCAL", self.ZPT)  # header ZP overrides the configured default
         if zpt != self.ZPT:
-            print(f'Using ZP_FLUXCAL={zpt} from data header')
+            print(f"Using ZP_FLUXCAL={zpt} from data header")
         self.ZPT = zpt
         if z_prior_err is None:
             z_prior_err = meta.get("REDSHIFT_HELIO_ERR", 0.)
@@ -3224,6 +3223,7 @@ class SEDmodel(object):
         filters: ArrayLike,
         z: float,
         ext_rel: str | None = None,
+        host_logmass: Number = -9,
         ebv_mw: float = 0,
         peak_mjd: float | None = None,
         filt_map: dict = {},
@@ -3339,6 +3339,7 @@ class SEDmodel(object):
             keep = np.maximum(p1, p2) + 10 > float(self.hsiao_t[0])
         else:
             keep = (t > self.tau_knots.min()) & (t < self.tau_knots.max())
+            z_prior_err = 0
         flux, flux_err, filters, t = flux[keep], flux_err[keep], filters[keep], t[keep]
 
         if verbose and any(~keep):
@@ -3394,27 +3395,29 @@ class SEDmodel(object):
                 "the wrong peak MJD?"
             )
         # Set up and populate data array
-        data = jnp.zeros((10, n_data, 1))
-        data = data.at[0, :, 0].set(t)
-        data = data.at[1, :, 0].set(flux)
-        data = data.at[2, :, 0].set(flux_err)
-        data = data.at[4, :, 0].set(band_indices)
-        data = data.at[5, :, 0].set(np.full_like(t, z))
-        if photoz:
-            data = data.at[6, :, 0].set(np.full_like(t, z_prior_err))
-        data = data.at[7, :, 0].set(np.full_like(t, self.cosmo.distmod(z).value))
-        data = data.at[8, :, 0].set(np.full_like(t, ebv_mw))
-        data = data.at[9, :, 0].set(np.ones_like(t))
-        self.ebv_mw = data[8,0,:]
+        self.data = ObsData(
+            host_logmass=jnp.full(1, -9),
+            z_hel=jnp.full(1, z),
+            z_hel_err=jnp.full(1, z_prior_err),
+            muhat=jnp.full(1, self.cosmo.distmod(z).value),
+            MWEBV=jnp.full(1, ebv_mw),
+            mjd=jnp.array(t[:, None]),
+            flux=jnp.array(flux[:, None]),
+            flux_err=jnp.array(flux_err[:, None]),
+            band_indices=jnp.array(band_indices[:, None]),
+            mask=jnp.ones_like(t)[:, None]
+        )
 
-        self.band_weights = weights = self._calculate_band_weights(
-            data[5, 0, :],
-            self.ebv_mw,
+        self.band_weights = self._calculate_band_weights(
+            self.data.z_hel,
+            self.data.MWEBV,
             lam_shifts=0
         )
 
         kwargs["mode"] = "fitting"
-        kwargs = self.parse_args(kwargs)
+        # Required for parse_args to nnot throw an error.
+        kwargs.update({"data_root": ".", "data_table": None})
+        kwargs = self.parse_args(kwargs, {})
         self.RV_type = kwargs["rv_type"] = self._get_rv_type(kwargs)
         kwargs["muhat_err"] = 5
 
@@ -3433,8 +3436,8 @@ class SEDmodel(object):
 
         mcmc.run(
             rng,
-            data,
-            weights,
+            self.data,
+            self.band_weights,
             **kwargs,
             extra_fields=("potential_energy",),
         )
@@ -3856,7 +3859,7 @@ class SEDmodel(object):
             z_mean = np.array(samples['z'].mean(axis=(0, 1)))
             zhat = np.asarray(self.data.z_hel)
             t = obs_times * (1 + zhat[None, :]) / (1 + z_mean[None, :]) - tmax_mean[None, :]
-            weights = self._calculate_band_weights(z_mean, self.ebv_mw, lam_shift=0)
+            weights = self._calculate_band_weights(z_mean, self.data.MWEBV, lam_shift=0)
         else:
             t = obs_times - tmax_mean[None, :]
             weights = self.band_weights
