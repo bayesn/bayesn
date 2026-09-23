@@ -15,6 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpyro.handlers import trace, seed
+from numpyro.infer.util import log_density
 import pandas as pd
 import pytest
 try:
@@ -359,23 +360,24 @@ class TestYaml:
         mode_args = copy.deepcopy(initial_args)
         mode_args["mode"] = "fitting"
         mode_args["train_new_model"] = True
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="mode is fitting but train_new_model"):
             model._parse_mode(mode_args)
 
     def test_parse_mode_training(self, initial_args: dict, model: SEDmodel):
         for mode in (
-            "training_popRv",
+            "training_pop_rv",
             "training_globalRv",
-            "training_uniformRv",
         ):
             mode_args = copy.deepcopy(initial_args)
             mode_args["mode"] = mode
-            if "rv_type" in mode_args:
-                mode_args.pop("rv_type")
+            mode_args.pop("shared_RV", None)
             mode_args = model._parse_mode(mode_args)
             for key, val in self.expected_values.items():
                 assert mode_args[key] == val[1]
-            assert mode_args["rv_type"] == mode.split('_')[1].replace("Rv", "")
+            if "global" in mode:
+                assert mode_args["shared_RV"]
+            elif "pop" in mode:
+                assert not mode_args["shared_RV"]
 
     def test_parse_mode_dust(self, initial_args: dict, model: SEDmodel):
         for mode in (
@@ -386,10 +388,9 @@ class TestYaml:
         ):
             mode_args = copy.deepcopy(initial_args)
             mode_args["mode"] = mode
-            if 'rv_type' in mode_args:
-                mode_args.pop("rv_type")
+            mode_args.pop("shared_RV", None)
             mode_args = model._parse_mode(mode_args)
-            assert mode_args["rv_type"] == "pop"
+            assert not mode_args["shared_RV"]
             for key, val in self.expected_values.items():
                 comparison = val[2]
                 if key == "vary_redshift" and mode == "dust_redshift":
@@ -400,26 +401,33 @@ class TestYaml:
             elif "split_sed" in mode:
                 assert mode_args["split_variant"] == "split_sed"
 
-    def test_parse_mode_dust_rv_not_pop(self, initial_args: dict, model: SEDmodel):
+    def test_parse_mode_dust_rv_shared_RV(self, initial_args: dict, model: SEDmodel):
         mode_args = copy.deepcopy(initial_args)
         mode_args["mode"] = "dust"
-        mode_args["rv_type"] = "global"
-        with pytest.raises(ValueError):
+        mode_args["shared_RV"] = True
+        with pytest.raises(ValueError, match="mode is dust but shared_RV"):
             model._parse_mode(mode_args)
 
-    @pytest.mark.parametrize("mode", ("dust", "training_uniformRV"))
-    def test_parse_mode_conflicting_rv_types(self, initial_args: dict, model: SEDmodel, mode: str):
+    def test_parse_mode_conflicting_rv_types(self, initial_args: dict, model: SEDmodel):
         mode_args = copy.deepcopy(initial_args)
-        mode_args["mode"] = mode
-        mode_args["rv_type"] = "global"
-        with pytest.raises(ValueError):
+        mode_args["mode"] = "training_popRV"
+        mode_args["shared_RV"] = True
+        with pytest.raises(ValueError, match="shared_RV was provided as True"):
             model._parse_mode(mode_args)
 
-    def test_parse_mode_no_rv_type(self, initial_args: dict, model: SEDmodel):
+    def test_parse_mode_warning(self, initial_args: dict, model: SEDmodel):
         mode_args = copy.deepcopy(initial_args)
-        mode_args["mode"] = "fit_Rv"
-        with pytest.raises(ValueError):
+        mode_args["mode"] = "fit global rv"
+        mode_args.pop("shared_RV", None)
+        with pytest.warns(UserWarning, match="shared_RV was inferred as True"):
             model._parse_mode(mode_args)
+
+    def test_parse_mode_not_global_or_pop(self, initial_args: dict, model: SEDmodel):
+        mode_args = copy.deepcopy(initial_args)
+        mode_args["mode"] = "fit_rv"
+        mode_args["shared_RV"] = True
+        with pytest.warns(UserWarning, match="The indicated mode fit_rv contains"):
+            model._parse_mode(mode_args, verbose=True)
 
     def test_parse_args(self, loaded_model_and_args: tuple[SEDmodel, dict]):
         # If regenerating the pickled results, remove your personal directory structure
@@ -604,11 +612,7 @@ class TestFlux:
         converted_mag = converted_mag.at[jnp.where(data["flux"] == 0)].set(0)
         assert jnp.isclose(converted_mag, data["mag"], atol=0).all()
 
-class TestModelTrace:
-    # These tests are very sensitive to the current code structure.
-    # Even changing the order of numpyro.sample statements will lead to test failure.
-    # Generate new pkl traces with caution, and only after you believe things are good.
-
+class TestModelLogDensity:
     # Instantiating a bunch of different model_kwarg dicts to compare traces under
     # different configurations. The tests need to span possible use cases rather than
     # comprise sensible use cases.
@@ -616,43 +620,80 @@ class TestModelTrace:
         "fix_theta": {"fix_theta": 0},
         "fix_AV": {"fix_AV": 0.5},
         "fix_tmax": {"fix_tmax": True},
+        "fix_eps": {"fix_eps": True},
         "training": {"train_new_model": True},
-        "split_mag": {"split_variant": "split_mag"},
-        "split_sed": {"split_variant": "split_sed"},
+        "split_mag": {"split_variant": "split_mag", "shared_RV": False, "RV": "normal"},
+        "split_sed": {"split_variant": "split_sed", "shared_RV": False, "RV": "normal"},
         "vary_filter_shifts": {"vary_filter_shifts": True},
         "vary_offsets": {"vary_offsets": True},
         "vary_redshift": {"infer_dust_properties": True, "vary_redshift": True},
-        "uniform": {},
-        "pop": {"infer_dust_properties": True},
-        "global": {"infer_dust_properties": True},
+        "RV4": {"infer_dust_properties": False, "shared_RV": True, "RV": 4.},
+        "normal": {"infer_dust_properties": True, "shared_RV": False, "RV": "normal"},
+        "normal_shared": {"infer_dust_properties": False, "shared_RV": True, "RV": "normal"},
+        "uniform": {"infer_dust_properties": True, "shared_RV": False, "RV": "uniform"},
+        "uniform_shared": {"infer_dust_properties": False, "shared_RV": True, "RV": "uniform"},
         "mag": {"data_type": "mag"},
         "photoz": {"photoz": True},
     }
-    RV_types = []
-    for key in variants:
-        if key == "uniform":
-            RV_types.append("uniform")
-        elif key in ("pop", "vary_redshift"):
-            RV_types.append("pop")
-        else:
-            RV_types.append("global")
-
-    @pytest.mark.parametrize("variant,RV_type", zip((variants.keys()), RV_types))
-    def test_trace(self, loaded_model_and_args: tuple[SEDmodel, dict], variant: str, RV_type: str):
+    @pytest.mark.parametrize("variant", variants.keys())
+    def test_log_joint_density(
+        self,
+        loaded_model_and_args: tuple[SEDmodel, dict],
+        variant: str,
+    ) -> None:
+        """ Evaluate a model trace at fixed parameters to avoid RNG sensitivity.
+        Compare log probabilities at each site to identify syntactic changes.
+        These will fail if the sampled sites change names or the distributions change.
+        These should not fail under syntactically equivalent refactoring, even if the
+        order of RNG calls changes.
+        """
         model, args = loaded_model_and_args
         kwargs = copy.deepcopy(args)
         kwargs.update(self.variants[variant])
-        model.RV_type = RV_type
-        test_trace = trace(
-                seed(model._model, jax.random.PRNGKey(0))
-            ).get_trace(model.data, model.band_weights, **kwargs)
-        with open(PICKLE_DIR / f"T21_trace.{variant}.pkl", "rb") as file:
-            ref_trace = pickle.load(file)
-        for test, ref in zip(test_trace.values(), ref_trace.values()):
-            if test["type"] == "sample" and ref["type"] == "sample" and test["name"]:
-                assert (np.array(test["kwargs"]["rng_key"]) == np.array(ref["kwargs"]["rng_key"])).all()
-            assert (test["value"] == ref["value"]).all()
-        model.RV_type = "global"
+
+        # Uncomment this block to make new pickles.
+        # Please only do this if you're sure you know what you're doing.
+        # --------------------------------------------------------------
+        # test_trace = trace(seed(model._model, jax.random.PRNGKey(0))).get_trace(model.data, model.band_weights, **kwargs)
+        # ref_params = {}
+        # for name in test_trace:
+        #     if test_trace[name]["type"] == "sample":
+        #         ref_params[name] = test_trace[name]["value"]
+        # log_joint, model_trace = log_density(
+        #     model._model,
+        #     (model.data, model.band_weights),
+        #     kwargs,
+        #     ref_params,
+        # )
+        # ref_data = {"total_log_joint": log_joint, "site_log_probs": {}, "params": ref_params}
+        # for name in model_trace:
+        #     if model_trace[name]["type"] != "sample":
+        #         continue
+        #     ref_data["site_log_probs"][name] = model_trace[name]["fn"].log_prob(model_trace[name]["value"]).sum()
+        # with open(PICKLE_DIR / f"T21_log_probs_{variant}.pkl", "wb") as f:
+        #     pickle.dump(ref_data, f)
+
+        with open(PICKLE_DIR / f"T21_log_probs_{variant}.pkl", "rb") as f:
+            ref_data = pickle.load(f)
+            ref_params = ref_data["params"]
+            ref_site_log_probs = ref_data["site_log_probs"]
+            ref_total_log_joint = ref_data["total_log_joint"]
+
+        log_joint, model_trace = log_density(
+            model._model,
+            (model.data, model.band_weights),
+            kwargs,
+            ref_params,
+        )
+
+        # 1. Total unnormalized log posterior density check
+        assert jnp.isclose(log_joint, ref_total_log_joint, rtol=1e-5), "total log joint mismatch"
+
+        # 2. Site-by-site log probability check (matched by name, invariant to call order)
+        for name, expected_lp in ref_site_log_probs.items():
+            assert name in model_trace, f"Missing expected sample site: {name}"
+            site_lp = model_trace[name]["fn"].log_prob(model_trace[name]["value"]).sum()
+            assert jnp.isclose(site_lp, expected_lp, rtol=1e-5), f"Log prob mismatch at site '{name}'"
 
 class TestUtils:
     def test_inv_band_dict(self, model: SEDmodel):
