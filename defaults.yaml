@@ -17,6 +17,7 @@ lm_use_linesearch: True
 zltn_lr: 0.02
 zltn_lr_final: 0.002
 zltn_particles: 10
+num_zltn_iter: 1500
 stage2_tmax_prior_std: 1.0
 lm_solver: gn
 batch_size: null
@@ -69,23 +70,32 @@ fix_theta: null
 # False will be read as fix_AV=0, and True as fix_AV=1.
 fix_AV: null
 #
-# Parameters for RV_type == "global"
-# RV to use for all SNe if infer_dust_properties is False.
+# If shared_RV == True, all SNe will use the same value for RV. This value depends on
+# the RV kwarg, which can be a number or the strings "default", "uniform" or "normal".
+# If shared_RV == False, each SNe will have its own RV, sampled from a distribution
+# specified by the RV kwarg and others.
+shared_RV: True
+# If RV is a number, use that value for all SNe when infer_dust_properties is False.
+# If RV is "default", RV will be a number inferred from the pre-trained model's RV or
+# mu_R attribute. If RV is "uniform" or "normal", RV value(s) will be sampled from those
+# distributions.
 RV: default
-# TODO: check this
-global_RV: null
+# Parameters for the sampled distribution if RV == "uniform"
 uniform_RV_min: 1
 uniform_RV_max: 6
-#
-# Parameters for RV_type == "pop"
-# The ~mean RV to use if infer_dust_properties is False.
+# If RV == "uniform" and infer_dust_properties is True, uniform_RV_min/max will be
+# sampled from a normal distribution centred on the value with scale factor
+# sigma_uniform_R.
+sigma_uniform_R: 0.5
+# Parameters for the sampled distribution if RV == "normal"
 mu_R: 3
-# The ~std dev of RV to use if infer_dust_properties is False.
 sigma_R: 0.5
-# The uniform distribution limits for mu_R if infer_dust_properties is True.
+# If RV == "normal" and infer_dust_properties is True, mu_R will be sampled from a
+# uniform distribution between mu_R_min and mu_R_max.
 mu_R_min: 1.2
 mu_R_max: 6
-# The HalfNormal scale factor for sigma_R if infer_dust_properties is True.
+# If RV == "normal" and infer_dust_properties is True, sigma_R will be sampled from a
+# HalfNormal distribution with scale factor sigma_sigma_R.
 sigma_sigma_R: 2
 # If True, parameterize tau_A as a linear function of redshift tauA + z*tau_z_grad and
 # RV as global_RV + z*mu_z_grad or mu_R as mu_R + z*mu_z_grad
