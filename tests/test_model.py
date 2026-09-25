@@ -10,6 +10,7 @@ from unittest.mock import patch
 from warnings import warn
 
 from bayesn.bayesn_model import SEDmodel, default_kwargs
+from bayesn import io
 import argparse
 import astropy.units as u
 import jax
@@ -697,3 +698,386 @@ class TestUtils:
         inv_dict = model.inv_band_dict
         for key, val in model.band_dict.items():
             assert val in inv_dict and inv_dict[val] == key
+
+
+class TestSimulation:
+    def test_simulate_spectrum(self, model: SEDmodel):
+        orig_wave = model.model_wave
+        orig_J_l_T = model.J_l_T
+        try:
+            t = np.array([0.0, 5.0])
+            N = 2
+            l_o, spec, pdict = model.simulate_spectrum(
+                t=t,
+                N=N,
+                dl=20,
+                z=0.03,
+                mu="z",
+                ebv_mw=0.02,
+                RV=3.1,
+                del_M=0.0,
+                AV=0.1,
+                theta=0.2,
+                eps=0,
+            )
+            assert l_o.shape == (N, len(model.model_wave))
+            assert spec.shape == (N, len(model.model_wave), len(t))
+            assert jnp.all(spec > 0)
+            assert "del_M" in pdict and "AV" in pdict and "theta" in pdict
+        finally:
+            model.model_wave = orig_wave
+            model.J_l_T = orig_J_l_T
+            model._load_hsiao_template()
+            model.load_ext_rel(model.ext_rel.name)
+
+    def test_simulate_spectrum_2d_and_3d_eps(self, model: SEDmodel):
+        orig_wave = model.model_wave
+        orig_J_l_T = model.J_l_T
+        try:
+            t = np.array([0.0])
+            N = 2
+            eps_2d = np.zeros((model.l_knots.shape[0], model.tau_knots.shape[0]))
+            _, spec_2d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_2d, dl=50)
+            assert spec_2d.shape[0] == N
+
+            eps_3d = np.zeros((N, model.l_knots.shape[0], model.tau_knots.shape[0]))
+            _, spec_3d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_3d, dl=50)
+            assert spec_3d.shape[0] == N
+        finally:
+            model.model_wave = orig_wave
+            model.J_l_T = orig_J_l_T
+            model._load_hsiao_template()
+            model.load_ext_rel(model.ext_rel.name)
+
+    def test_simulate_spectrum_errors(self, model: SEDmodel):
+        t = np.array([0.0])
+        N = 2
+        with pytest.raises(ValueError, match="del_M"):
+            model.simulate_spectrum(t=t, N=N, del_M=np.array([0.1, 0.2, 0.3]))
+        with pytest.raises(ValueError, match="AV"):
+            model.simulate_spectrum(t=t, N=N, AV=np.array([0.1, 0.2, 0.3]))
+        with pytest.raises(ValueError, match="theta"):
+            model.simulate_spectrum(t=t, N=N, theta=np.array([0.1, 0.2, 0.3]))
+        with pytest.raises(ValueError, match="epsilon"):
+            model.simulate_spectrum(t=t, N=N, eps=1)
+        with pytest.raises(ValueError, match="ebv_mw"):
+            model.simulate_spectrum(t=t, N=N, ebv_mw=np.array([0.1, 0.2, 0.3]))
+        with pytest.raises(ValueError, match="RV"):
+            model.simulate_spectrum(t=t, N=N, RV=np.array([1.0, 2.0, 3.0]))
+        with pytest.raises(ValueError, match="z"):
+            model.simulate_spectrum(t=t, N=N, z=np.array([0.01, 0.02, 0.03]))
+        with pytest.raises(ValueError, match="mu"):
+            model.simulate_spectrum(t=t, N=N, mu=np.array([30.0, 31.0, 32.0]))
+
+    def test_simulate_light_curve_mag_and_flux(self, model: SEDmodel):
+        model._set_used_bands(bands=["g_PS1", "r_PS1"])
+        bw = model._calculate_band_weights(np.array([0.02, 0.03]), np.array([0.01, 0.02]))
+        t = np.array([-5.0, 0.0, 10.0])
+        N = 2
+
+        mag_data, mag_err, pdict = model.simulate_light_curve(
+            t=t, N=N, bands=["g_PS1", "r_PS1"], band_weights=bw, mag=True, yerr=0.05, err_type="mag"
+        )
+        assert mag_data.shape == (len(t) * 2, N)
+        assert mag_err.shape == (len(t) * 2, N)
+        assert jnp.all(jnp.isfinite(mag_data))
+
+        flux_data, flux_err, _ = model.simulate_light_curve(
+            t=t, N=N, bands=["g_PS1", "r_PS1"], band_weights=bw, mag=False, yerr=0.05, err_type="flux"
+        )
+        assert flux_data.shape == (len(t) * 2, N)
+        assert flux_err.shape == (len(t) * 2, N)
+        assert jnp.all(jnp.isfinite(flux_data))
+
+    def test_simulate_light_curve_aligned_bands(self, model: SEDmodel):
+        model._set_used_bands(bands=["g_PS1", "r_PS1"])
+        t = np.array([0.0, 5.0])
+        bands = ["g_PS1", "r_PS1"]
+        data, _, _ = model.simulate_light_curve(t=t, N=1, bands=bands, mag=True)
+        assert data.shape == (len(t), 1)
+
+    def test_simulate_light_curve_parameters(self, model: SEDmodel):
+        model._set_used_bands(bands=["g_PS1"])
+        t = np.array([0.0])
+        data, _, pdict = model.simulate_light_curve(
+            t=t,
+            N=1,
+            bands=["g_PS1"],
+            tmax=1.5,
+            del_M=0.05,
+            AV=0.15,
+            theta=-0.1,
+            eps=0,
+            mu="z",
+            z=0.02,
+            mag=True,
+        )
+        assert data.shape == (1, 1)
+        assert "tmax" in pdict and "mu" in pdict
+
+    def test_simulate_light_curve_write_to_files(self, model: SEDmodel, tmp_path: Path):
+        model._set_used_bands(bands=["g_PS1", "r_PS1"])
+        t = np.array([0.0, 5.0])
+        model.simulate_light_curve(
+            t=t,
+            N=1,
+            bands=["g_PS1", "r_PS1"],
+            write_to_files=True,
+            output_dir=tmp_path,
+            yerr=0.05,
+            mag=True,
+        )
+        created_files = list(tmp_path.glob("*.snana.dat"))
+        assert len(created_files) > 0
+        sn_dict, obs_df = io.read_snana_ascii(created_files[0])
+        assert "SNID" in sn_dict
+        assert len(obs_df) == len(t)
+
+
+class TestPhotometryChains:
+    def test_get_flux_from_chains(self, model: SEDmodel, tmp_path: Path):
+        model._set_used_bands(bands=["g_PS1"])
+        n_l = model.l_knots.shape[0] - 2
+        n_tau = model.tau_knots.shape[0]
+        chains = {
+            "theta": np.zeros((1, 2, 1)),
+            "AV": np.ones((1, 2, 1)) * 0.1,
+            "tmax": np.zeros((1, 2, 1)),
+            "mu": np.ones((1, 2, 1)) * 34.0,
+            "delM": np.zeros((1, 2, 1)),
+            "eps": np.zeros((1, 2, n_l * n_tau, 1)),
+        }
+        t = np.array([0.0, 5.0])
+        bands = ["g_PS1"]
+
+        # In-memory dict with mag=True
+        f_mag = model.get_flux_from_chains(
+            t=t, bands=bands, chains=chains, zs=np.array([0.02]), ebv_mws=np.array([0.01]),
+            mag=True, num_samples=2
+        )
+        assert f_mag.shape == (1, 2, 1, len(t))
+
+        # In-memory dict with mag=False and mean=True
+        f_flux_mean = model.get_flux_from_chains(
+            t=t, bands=bands, chains=chains, zs=np.array([0.02]), ebv_mws=np.array([0.01]),
+            mag=False, mean=True
+        )
+        assert f_flux_mean.shape == (1, 1, 1, len(t))
+
+        # From saved pickle file
+        pkl_path = tmp_path / "test_chains.pkl"
+        with open(pkl_path, "wb") as f:
+            pickle.dump(chains, f)
+        f_from_file = model.get_flux_from_chains(
+            t=t, bands=bands, chains=str(pkl_path), zs=np.array([0.02]), ebv_mws=np.array([0.01]),
+            num_samples=1, num_sne=1
+        )
+        assert f_from_file.shape == (1, 1, 1, len(t))
+
+    def test_get_fitprob(self, loaded_model_and_args):
+        model, args = loaded_model_and_args
+        with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
+            ref_data = pickle.load(f)
+
+        n_sn = model.dataset.N_sn
+        samples = {
+            "theta": np.zeros((1, 1, n_sn)),
+            "AV": np.ones((1, 1, n_sn)) * 0.1,
+            "tmax": np.zeros((1, 1, n_sn)),
+            "Ds": np.ones((1, 1, n_sn)) * 34.0,
+            "eps_tform": np.array(ref_data["params"]["eps_tform"])[None, None, ...],
+        }
+
+        fitprob, fitchi2, ndof = model.get_fitprob(samples)
+        assert fitprob.shape == (n_sn,)
+        assert fitchi2.shape == (n_sn,)
+        assert ndof.shape == (n_sn,)
+        assert np.all(fitprob >= 0.0) and np.all(fitprob <= 1.0)
+        assert np.all(fitchi2 >= 0.0)
+
+
+class TestPostprocess:
+    def test_postprocess_fitting(self, loaded_model_and_args, tmp_path: Path):
+        model, args = loaded_model_and_args
+        with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
+            ref_data = pickle.load(f)
+
+        n_sn = model.dataset.N_sn
+        samples = {}
+        for k, v in ref_data["params"].items():
+            samples[k] = v[None, None, ...]
+        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
+
+        run_args = copy.deepcopy(args)
+        run_args["outputdir"] = tmp_path
+        run_args["save_summary"] = False
+        run_args["num_lcplot"] = 0
+
+        model.postprocess(samples, run_args)
+        assert "mu" in samples
+        assert "delM" in samples
+        assert (tmp_path / f"{run_args['outfile_prefix']}.FITRES.TEXT").exists()
+
+    def test_postprocess_photoz(self, loaded_model_and_args, tmp_path: Path):
+        model, args = loaded_model_and_args
+        with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
+            ref_data = pickle.load(f)
+
+        n_sn = model.dataset.N_sn
+        samples = {}
+        for k, v in ref_data["params"].items():
+            samples[k] = v[None, None, ...]
+        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
+        samples["z"] = np.ones((1, 1, n_sn)) * 0.03
+
+        run_args = copy.deepcopy(args)
+        run_args["outputdir"] = tmp_path
+        run_args["photoz"] = True
+        run_args["save_summary"] = False
+        run_args["num_lcplot"] = 0
+
+        model.postprocess(samples, run_args)
+        np.testing.assert_allclose(samples["mu"], samples["Ds"])
+
+    def test_postprocess_train_new_model(self, loaded_model_and_args, tmp_path: Path):
+        model, args = loaded_model_and_args
+        with open(PICKLE_DIR / "T21_log_probs_training.pkl", "rb") as f:
+            ref_data = pickle.load(f)
+
+        n_sn = model.dataset.N_sn
+        samples = {}
+        for k, v in ref_data["params"].items():
+            samples[k] = v[None, None, ...]
+        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
+
+        run_args = copy.deepcopy(args)
+        run_args["outputdir"] = tmp_path
+        run_args["train_new_model"] = True
+        run_args["save_summary"] = False
+        run_args["num_lcplot"] = 0
+
+        model.postprocess(samples, run_args)
+        assert (tmp_path / "initial_chains.pkl").exists()
+        assert (tmp_path / "bayesn.yaml").exists()
+
+    def test_fix_W1_theta_sign_degen(self, model: SEDmodel):
+        theta = np.array([-1.0, 2.0])[None, None, :]
+        W1 = np.ones((1, 1, model.l_knots.shape[0], model.tau_knots.shape[0])) * 0.5
+        new_theta, new_W1 = model._fix_W1_theta_sign_degen(theta, W1)
+        assert new_theta.shape == theta.shape
+        assert new_W1.shape == W1.shape
+
+
+# Something in numpyro 0.15.0 triggers a warning.
+# .../python3.10/site-packages/jax/_src/linear_util.py:192: DeprecationWarning: Passing arguments 'a', 'a_min', or 'a_max' to jax.numpy.clip is deprecated. Please use 'x', 'min', and 'max' respectively instead.
+#    ans = self.f(*args, **dict(self.params, **kwargs))
+@pytest.mark.filterwarnings("ignore:Passing arguments 'a', 'a_min'")
+class TestFit:
+    def test_fit_minimal_smoke(self, model: SEDmodel):
+        t = np.array([-5.0, 0.0, 10.0])
+        flux = np.array([20000.0, 40000.0, 15000.0])
+        flux_err = np.array([400.0, 600.0, 300.0])
+        filters = np.array(["g_PS1", "g_PS1", "r_PS1"])
+        z = 0.02
+
+        samples, sn_props = model.fit(
+            t=t,
+            flux=flux,
+            flux_err=flux_err,
+            filters=filters,
+            z=z,
+            num_samples=1,
+            num_warmup=1,
+            num_chains=1,
+            chain_method="sequential",
+            print_summary=False,
+            verbose=False,
+        )
+        assert isinstance(samples, dict)
+        assert "theta" in samples and "AV" in samples and "Ds" in samples
+        assert "tmax" in samples and "mu" in samples and "delM" in samples
+        assert sn_props == (0.02, 0)
+
+    @pytest.mark.filterwarnings("ignore:Degrees of freedom <= 0")
+    def test_fit_feature_flags(self, model: SEDmodel, tmp_path: Path):
+        t = np.array([57415.0, 57420.0, 57425.0])
+        flux = np.array([16.5, 16.0, 16.8])
+        flux_err = np.array([0.02, 0.02, 0.03])
+        filters = np.array(["g_custom", "r_custom", "i_custom"])
+        prefix = str(tmp_path / "fit_out")
+
+        samples, _ = model.fit(
+            t=t,
+            flux=flux,
+            flux_err=flux_err,
+            filters=filters,
+            z=0.02,
+            peak_mjd=57420.0,
+            mag=True,
+            photoz=True,
+            z_prior_err=0.01,
+            fix_tmax=True,
+            fix_theta=0.0,
+            fix_AV=0.1,
+            filt_map={f"{bp}_custom": f"{bp}_PS1" for bp in "gri"},
+            drop_bands=["z_PS1"],
+            file_prefix=prefix,
+            num_samples=1,
+            num_warmup=1,
+            num_chains=1,
+            chain_method="sequential",
+            print_summary=False,
+            verbose=False,
+        )
+        assert (tmp_path / "fit_out_chains.pkl").exists()
+        assert (tmp_path / "fit_out_fit_summary.csv").exists()
+        np.testing.assert_allclose(samples["theta"], 0.0)
+        np.testing.assert_allclose(samples["AV"], 0.1)
+        np.testing.assert_allclose(samples["tmax"], 0.0)
+
+    def test_fit_error_validation(self, model: SEDmodel):
+        with pytest.raises(ValueError, match="same length"):
+            model.fit(
+                t=np.array([0.0, 1.0]),
+                flux=np.array([10.0]),
+                flux_err=np.array([1.0]),
+                filters=np.array(["g_PS1"]),
+                z=0.02,
+            )
+
+        with pytest.raises(ValueError, match="phase range"):
+            model.fit(
+                t=np.array([57420.0]),
+                flux=np.array([10000.0]),
+                flux_err=np.array([100.0]),
+                filters=np.array(["g_PS1"]),
+                z=0.02,
+                peak_mjd=None,  # Not rest-frame, triggers phase error
+            )
+
+    @pytest.mark.slow
+    def test_fit_mcmc_deep(self, model: SEDmodel):
+        t = np.array([-5.0, 0.0, 5.0])
+        flux = np.array([25000.0, 45000.0, 30000.0])
+        flux_err = np.array([500.0, 500.0, 500.0])
+        filters = np.array(["g_PS1", "g_PS1", "r_PS1"])
+
+        samples, _ = model.fit(
+            t=t,
+            flux=flux,
+            flux_err=flux_err,
+            filters=filters,
+            z=0.025,
+            num_samples=10,
+            num_warmup=10,
+            num_chains=2,
+            chain_method="sequential",
+            infer_dust_properties=True,
+            RV="normal",
+            shared_RV=True,
+            print_summary=False,
+            verbose=False,
+        )
+        assert samples["theta"].shape == (2, 10, 1)
+        assert np.all(np.isfinite(samples["theta"]))
+        assert np.all(np.isfinite(samples["AV"]))

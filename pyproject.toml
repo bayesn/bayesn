@@ -62,16 +62,11 @@ build-docs = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--cov=bayesn --cov-report=term-missing"
+addopts = "-m 'not slow' --cov=bayesn --cov-report=term-missing"
 markers = [
-    "initialization: Tests for loading data into model",
-    "band_weights: Tests for band_weight manipulation and calculation",
-    "yaml: Tests parsing the input yaml (modes, model_kwargs)",
-    "dust: Tests get_axav methods with various reddening laws.",
-    "spectra: Tests get_spectra method and its wrapper",
-    "flux: Tests get_flux_batch",
-    "new: for testing tests",
+    "slow: Deep integration or long-running tests (run with -m slow)",
 ]
+testpaths = "tests"
 
 [tool.setuptools.package-data]
 bayesn = [

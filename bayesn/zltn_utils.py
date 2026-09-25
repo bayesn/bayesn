@@ -1,4 +1,5 @@
 import numpyro
+from numpyro.util import is_prng_key
 from numpyro.infer.autoguide import AutoContinuous
 from numpyro.distributions import constraints
 from numpyro.infer.initialization import init_to_median
@@ -8,7 +9,7 @@ from numpyro.distributions.truncated import TruncatedNormal
 from numpyro.distributions.constraints import _SingletonConstraint
 from numpyro.distributions.transforms import biject_to, IdentityTransform, LowerCholeskyAffine
 import jax.numpy as jnp
-from numpyro.distributions.util import is_prng_key, promote_shapes, validate_sample
+from numpyro.distributions.util import promote_shapes, validate_sample
 from jax import lax
 from jax.random import normal, exponential
 
