@@ -639,7 +639,8 @@ class SEDmodel(object):
         for attr in (
             "data",
             "dataset",
-            "J_t"
+            "band_weights",
+            "J_t",
             "hsiao_interp",
             "z_u_grid",
             "z_icdf_grid",
@@ -1247,7 +1248,7 @@ class SEDmodel(object):
                 raise FileNotFoundError(
                     "Requested output directory does not exist and could not be created"
                 )
-        self._check_args_valid(args)
+        self._check_args_valid(args, verbose=verbose)
 
         if args["train_new_model"]:
             self.l_knots = device_put(np.array(args["l_knots"], dtype=float))
@@ -1589,12 +1590,12 @@ class SEDmodel(object):
                 )
 
         # Warnings for weird configurations that do not break things.
-        if not args["shared_RV"] and isinstance(args["RV"], Number):
+        if not args["shared_RV"] and isinstance(args["RV"], Number) and verbose:
             warn(UserWarning(
                 f"shared_RV is False but RV is {args['RV']}. The run will proceed but "
                 "you should know that all SNe will share that value for RV."
             ))
-        if args["shared_RV"] and args["infer_dust_properties"]:
+        if args["shared_RV"] and args["infer_dust_properties"] and verbose:
             warn(UserWarning(
                 "shared_RV is True and infer_dust_properties is True. The dust "
                 "properties will be poorly constrained with one shared draw of RV."
@@ -3618,6 +3619,8 @@ class SEDmodel(object):
             np.array(flux_err),
             np.array(filters),
         )
+        if not (len(t) == len(flux) == len(flux_err) == len(filters)):
+            raise ValueError("t, flux, flux_err, and filters must all be the same length.")
         if mag:  # Convert data from mag into FLUXCAL
             flux = np.power(10, (self.ZPT - flux) / 2.5)
             flux_err = (np.log(10) / 2.5) * flux * flux_err
@@ -3718,12 +3721,24 @@ class SEDmodel(object):
             self.data.MWEBV,
             lam_shifts=0
         )
+        self.J_t = self.get_J_t(self.data.mjd)
+        self.hsiao_interp = self.get_hsiao_interp(self.data.mjd)
 
-        kwargs["mode"] = "fitting"
+        if "mode" not in kwargs:
+            expected_fitting = {
+                "infer_dust_properties": False,
+                "train_new_model": False,
+                "fix_tmax": False,
+                "vary_redshift": False,
+            }
+            if any(kwargs.get(k) is not None and kwargs.get(k) != v for k, v in expected_fitting.items()):
+                kwargs["mode"] = "custom"
+            else:
+                kwargs["mode"] = "fitting"
         # Required for parse_args to nnot throw an error.
         kwargs.update({"data_root": ".", "data_table": None})
-        kwargs = self.parse_args(kwargs, {})
-        self.RV_type = kwargs["rv_type"] = self._get_rv_type(kwargs)
+        kwargs = self.parse_args(kwargs, {}, verbose=verbose)
+        kwargs["shared_RV"], kwargs["RV"] = self._get_rv_type(kwargs, verbose=verbose)
         kwargs["muhat_err"] = 5
 
         nuts_kernel = NUTS(
@@ -3749,6 +3764,13 @@ class SEDmodel(object):
         if print_summary:
             mcmc.print_summary()
         samples = mcmc.get_samples(group_by_chain=True)
+        if kwargs.get("fix_tmax"):
+            samples["tmax"] = jnp.zeros((num_chains, num_samples, 1))
+        if kwargs.get("fix_theta") is not None:
+            samples["theta"] = jnp.ones((num_chains, num_samples, 1)) * kwargs["fix_theta"]
+        if kwargs.get("fix_AV") is not None:
+            samples["AV"] = jnp.ones((num_chains, num_samples, 1)) * kwargs["fix_AV"]
+
         if peak_mjd is not None:
             samples["peak_MJD"] = peak_mjd + samples["tmax"] * (1 + (samples["z"] if photoz else z))
         if not photoz:
@@ -3768,13 +3790,6 @@ class SEDmodel(object):
                 )
             )
             samples["delM"] = samples["Ds"] - samples["mu"]
-
-        if kwargs["fix_tmax"]:
-            samples["tmax"] = jnp.zeros_like(samples["tmax"])
-        if kwargs["fix_theta"] is not None:
-            samples["theta"] = jnp.ones((num_chains, num_samples, 1))*kwargs["fix_theta"]
-        if kwargs["fix_AV"] is not None:
-            samples["AV"] = jnp.ones((num_chains, num_samples, 1))*kwargs["fix_AV"]
 
         if file_prefix is not None:
             summary = arviz.summary(samples)
@@ -4169,8 +4184,10 @@ class SEDmodel(object):
         tmax_mean = np.array(samples['tmax'].mean(axis=(0, 1)))
         Ds_mean = np.array(samples['Ds'].mean(axis=(0, 1)))
 
-        # eps_tform: (n_chains, n_samples, N_knots_sig, n_sne) -> mean -> (N_knots_sig, n_sne)
+        # eps_tform: mean over chains/samples -> ensure (N_knots_sig, n_sne)
         eps_tform_mean = np.array(samples['eps_tform'].mean(axis=(0, 1)))
+        if eps_tform_mean.shape[0] == n_sne and eps_tform_mean.shape[1] == self.L_Sigma.shape[0]:
+            eps_tform_mean = eps_tform_mean.T
         # Reconstruct eps via L_Sigma transform (mirrors fit_model_globalRV lines 864-869)
         eps = np.matmul(self.L_Sigma, eps_tform_mean)
         eps = eps.T
@@ -4560,6 +4577,7 @@ class SEDmodel(object):
         KD_l = invKD(self.l_knots)
         self.J_l_T = device_put(spline_coeffs(self.model_wave, self.l_knots, KD_l))
         self._load_hsiao_template()
+        self.load_ext_rel(self.ext_rel.name)
 
         t = jnp.array(t)
         t = jnp.repeat(t[..., None], N, axis=1)
@@ -4782,7 +4800,7 @@ class SEDmodel(object):
         param_dict["ebv"] = param_dict["ebv_mw"]
 
         if t.shape[0] == np.array(bands).shape[0]:
-            band_indices = np.array([self.band_dict[band] for band in bands])
+            band_indices = np.array([self.used_band_dict[self.band_dict[band]] for band in bands])
             band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
         else:
             t = jnp.array(t)
@@ -4799,6 +4817,10 @@ class SEDmodel(object):
             band_indices = band_indices[:, None].repeat(N, axis=1).astype(int)
         mask = np.ones_like(band_indices)
         t = jnp.repeat(t[..., None], N, axis=1)
+        tmax = np.atleast_1d(tmax)
+        if len(tmax) == 1 and N > 1:
+            tmax = tmax.repeat(N)
+        param_dict["tmax"] = tmax
         t = t - tmax[None, :]
         J_t = self.get_J_t(t)
         hsiao_interp = self.get_hsiao_interp(t)
@@ -4814,12 +4836,25 @@ class SEDmodel(object):
             fn = self.get_mag_batch
         else:
             fn = self.get_flux_batch
+
+        if band_weights is None:
+            model_bw = getattr(self, "band_weights", None)
+            if model_bw is not None and model_bw.shape[0] == N:
+                weights = model_bw
+            else:
+                weights = self._calculate_band_weights(param_dict["z"], param_dict["ebv_mw"])
+        else:
+            if band_weights.shape[0] == 1 and N > 1:
+                weights = jnp.repeat(band_weights, N, axis=0)
+            else:
+                weights = band_weights
+
         data = fn(
             model_spectra=phot_epoch_spectra,
             M0=self.M0,
             band_indices=band_indices,
             mask=mask,
-            weights=jnp.repeat(band_weights, N, axis=0),
+            weights=weights,
             num_batch=N,
             **param_dict
         )
@@ -4861,24 +4896,25 @@ class SEDmodel(object):
                     t[:, i],
                     data[:, i],
                     yerr[:, i],
-                    z[i],
-                    ebv_mw[i],
+                    param_dict["z"][i],
+                    param_dict["ebv_mw"][i],
                 )
                 sn_t = sn_t * (1 + sn_z)
                 sn_tmax = 0
-                sn_flt = [self.inv_band_dict[f] for f in band_indices[:, i]]
+                inv_used = {v: self.inv_band_dict[k] for k, v in self.used_band_dict.items()}
+                sn_flt = [inv_used[f] for f in band_indices[:, i]]
                 sn_file = write_snana_lcfile(
-                    output_dir,
-                    sn_name,
-                    sn_t,
-                    sn_flt,
-                    sn_mag,
-                    sn_mag_err,
-                    sn_tmax,
-                    sn_z,
-                    sn_z,
-                    zerr,
-                    sn_ebv_mw,
+                    output_dir=output_dir,
+                    snname=sn_name,
+                    mjd=sn_t,
+                    flt=sn_flt,
+                    mag=sn_mag,
+                    mag_err=sn_mag_err,
+                    tmax=sn_tmax,
+                    z_helio=sn_z,
+                    z_cmb=sn_z,
+                    z_cmb_err=zerr,
+                    ebv_mw=sn_ebv_mw,
                 )
                 sn_names.append(sn_name)
                 sn_files.append(sn_file)

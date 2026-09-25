@@ -11,7 +11,7 @@ the corresponding PDFs.
 import numpy as np
 import jax.random as jr
 import jax.numpy as jnp
-from numpyro.distributions.util import is_prng_key
+from numpyro.util import is_prng_key
 
 class ChebyshevICDF():
     """

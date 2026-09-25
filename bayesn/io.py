@@ -198,7 +198,7 @@ def read_snana_ascii_meta(
 
     # skip numeric searching to allow for mixed names like SN1234abc, which would
     # otherwise have its numeric component read as the value, 1234.
-    non_numeric_fields = ("SNID", "IAUC", "SURVEY")
+    non_numeric_fields = ("SNID", "IAUC", "SURVEY", "FILTERS")
     for i in range(len(raw_vals)):
         if raw_keys[i] == "END":
             continue

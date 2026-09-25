@@ -204,7 +204,10 @@ class TestRead:
         np.testing.assert_equal(obs_df["FLT"].values.astype(str), filts)
 
     def test_read_snana_fits(self):
-        sn_dict, obs_df = io.read_snana_fits(Path(TEST_DIR, "training_data", "BAYESN_test_fits", "BAYESN_test_fits_HEAD.FITS"))
+        sn_dict, obs_df = io.read_snana_fits(
+            TEST_DIR / "training_data/BAYESN_test_fits/BAYESN_test_fits_HEAD.FITS",
+            keep_list=["10", "14", "36", "46", "161"],
+        )
         with open(PICKLE_DIR / "snana_fits.pkl", "rb") as f:
             ref_sn_dict, ref_obs_df = pickle.load(f)
         assert_dicts_match(sn_dict, ref_sn_dict, flag_missing_data=True, rtol=1e-5, atol=1e-8)
@@ -214,9 +217,27 @@ class TestRead:
 
 class TestWrite:
     def test_write_from_sn_dict_obs_df(self):
-        example_lc = Path(BASE_DIR.parent, "bayesn/data/example_lcs/Foundation_DR1_2016W.txt")
+        example_lc = BASE_DIR.parent / "bayesn/data/example_lcs/Foundation_DR1_2016W.txt"
         orig_dict, orig_df = io.read_snana_ascii(example_lc)
         filename = io._write_snana_lcfile(
+            output_dir=TEST_DIR,
+            snname=orig_dict["SNID"],
+            sn_dict=orig_dict,
+            obs_df=orig_df,
+        )
+        filename = Path(TEST_DIR, filename)
+        rec_dict, rec_df = io.read_snana_ascii(filename)
+        os.remove(filename)
+        if "FILTERS" in rec_dict:
+            rec_dict["FILTERS"] = rec_dict["FILTERS"].replace(",", "")
+        assert_dicts_match(orig_dict, rec_dict)
+        compare_cols = ["MJD", "FLT", "flux", "flux_err", "mag", "mag_err"]
+        assert_frame_equal(orig_df[compare_cols], rec_df[compare_cols])
+
+    def test_wrapper_w_sn_dict_obs_df(self):
+        example_lc = BASE_DIR.parent / "bayesn/data/example_lcs/Foundation_DR1_2016W.txt"
+        orig_dict, orig_df = io.read_snana_ascii(example_lc)
+        filename = io.write_snana_lcfile(
             output_dir=TEST_DIR,
             snname=orig_dict["SNID"],
             sn_dict=orig_dict,
@@ -313,8 +334,8 @@ class TestWrite:
         np.testing.assert_allclose(rec_df["mag"].values, expected_mag, rtol=1e-6)
         np.testing.assert_allclose(rec_df["mag_err"].values, expected_mag_err, rtol=1e-6)
 
-    def test_write_uneven_arrays(self):
-        N = 100
+    def test_wrapper_uneven_arrays(self):
+        N = 10
         rng = np.random.default_rng(0)
         with pytest.raises(TypeError, match="mul got incompatible shapes"):
             io.write_snana_lcfile(
@@ -322,11 +343,48 @@ class TestWrite:
                 snname="short_mag",
                 mjd=np.linspace(0, 10, N),
                 flt=rng.choice(["g", "r", "i", "z"], N),
-                mag=rng.normal(18, 2, N-1),  # triggers Value Error
+                mag=rng.normal(18, 2, N-1),  # triggers Type Error
                 mag_err=rng.lognormal(-1, 0.1, N),
                 tmax=5,
                 z_helio=0.05,
                 z_cmb=0.05,
                 z_cmb_err=1e-5,
                 ebv_mw=0.1,
+            )
+
+    def test_wrapper_missing_data(self):
+        N = 10
+        rng = np.random.default_rng(0)
+        with pytest.raises(ValueError, match="Missing required data:"):
+            io.write_snana_lcfile(
+                output_dir=TEST_DIR,
+                snname="missing_mjd",
+                mjd=None,  # triggers Value Error
+                flt=rng.choice(["g", "r", "i", "z"], N),
+                mag=rng.normal(18, 2, N),
+                mag_err=rng.lognormal(-1, 0.1, N),
+                tmax=5,
+                z_helio=0.05,
+                z_cmb=0.05,
+                z_cmb_err=1e-5,
+                ebv_mw=0.1,
+            )
+
+    def test_wrapper_bad_kwargs(self):
+        N = 10
+        rng = np.random.default_rng(0)
+        with pytest.raises(KeyError, match="The supported kwargs are limited"):
+            io.write_snana_lcfile(
+                output_dir=TEST_DIR,
+                snname="bad_kwarg",
+                mjd=np.linspace(0, 10, N),
+                flt=rng.choice(["g", "r", "i", "z"], N),
+                mag=rng.normal(18, 2, N),
+                mag_err=rng.lognormal(-1, 0.1, N),
+                tmax=5,
+                z_helio=0.05,
+                z_cmb=0.05,
+                z_cmb_err=1e-5,
+                ebv_mw=0.1,
+                unsupported_kwarg=True,  # Triggers Key Error
             )
