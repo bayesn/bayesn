@@ -57,16 +57,34 @@ class DustExtRel:
         self.units = params.get("UNITS", "inverse microns").lower()
         self.output_type = params.get("OUTPUT_TYPE", "axav")
         self.spline_bc_type = params.get("SPLINE_BC_TYPE", "natural")
-        if self.output_type not in ("axav", "axebv", "exvebv"):
-            raise ValueError(
-                f"The OUTPUT_TYPE yaml key was given as {self.output_type}, which is "
-                "not supported. Valid options are 'axav' for A(x)/A(V), 'axebv', for "
-                "A(x)/E(B-V), or 'exvebv' for E(x-V)/E(B-V)."
-            )
         self.xk = jnp.array(params.get("L_KNOTS", jnp.zeros((self.n_subdomains, 1))))
         self.rv_coeffs = jnp.array(params.get("RV_COEFFS", jnp.zeros((1, 1, 1))))
         self.rv_exp = jnp.array(params.get("RV_EXP", jnp.zeros(1)))
+        self._validate_params()
         return params
+
+    def _validate_params(self):
+        msg = [f"Something is wrong with the DustExtRel parameters {self.name}:"]
+        if not isinstance(self.n_subdomains, int):
+            msg.append(f"n_subdomains {self.n_subdomains} is not an integer.")
+        if not self.range[0] < self.range[1]:
+            msg.append(f"range {self.range} is not increasing.")
+        if not any(x in self.units for x in ["micron", "um", "nanomet", "nm", "angstrom", "aa"]):
+            msg.append(
+                f"units {self.units} is not recognised, use (optionally inverse) "
+                "microns, nanometers, or angstroms."
+            )
+        if not self.xk.shape[0] == self.n_subdomains:
+            msg.append(f"xk shape {self.xk.shape} does not start with n_subdomains {self.n_subdomains}.")
+        if not len(self.rv_coeffs.shape) == 3:
+            msg.append(f"rv_coeffs should have three dimensions, but shape is {self.rv_coeffs.shape}.")
+        if self.output_type not in ("axav", "axebv", "exvebv"):
+            msg.append(
+                f"output_type {self.output_type} is not supported, use 'axav' for "
+                "A(x)/A(V), 'axebv', for A(x)/E(B-V), or 'exvebv' for E(x-V)/E(B-V)."
+            )
+        if len(msg) > 1:
+            raise ValueError("\n    ".join(msg))
 
     def set_x(self, x_in: ArrayLike | str = "default", x_units: str = "angstroms") -> None:
         x_exp = 1

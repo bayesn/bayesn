@@ -1,6 +1,8 @@
 mode: custom
 load_model: T21_model
 load_ext_rel: F99
+shared_RV: True
+RV: default
 vary_filter_shifts: False
 vary_offsets: False
 num_chains: 4

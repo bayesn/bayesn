@@ -94,25 +94,25 @@ with open(BASE_DIR.parent / "defaults.yaml", "r") as file:
 default_kwargs["AV_dist"] = dist.Exponential
 
 
-class DustParams(NamedTuple):
+class DustHyperParams(NamedTuple):
     """Container for population-level dust parameters."""
-    sigma0: ArrayLike
-    tauA: ArrayLike
-    mu_R: ArrayLike | None
-    sigma_R: ArrayLike | None
-    phi_alpha_R: ArrayLike | None
-    mu_z_grad: ArrayLike | float
-    tau_z_grad: ArrayLike | float
-    global_RV: ArrayLike | float
+    sigma0: float
+    tauA: float
+    mu_R: float | None
+    sigma_R: float | None
+    uniform_RV_min: float | None
+    uniform_RV_max: float | None
+    mu_z_grad: float
+    tau_z_grad: float
+    RV: Number | str
 
 
 class DustPop(NamedTuple):
     """Container for high-mass and low-mass population dust parameters."""
-    HM: DustParams
-    LM: DustParams | None = None
+    HM: DustHyperParams
+    LM: DustHyperParams | None = None
     HM_flag: ArrayLike | None = None
     sigma0: ArrayLike | float | None = None
-    split_variant: str | None = None
 
 
 class SEDmodel(object):
@@ -162,42 +162,273 @@ class SEDmodel(object):
         Defines the BayeSN parameters to infer conditioned on input data.
         Calls helper functions that specify the components in a modular fashion.
 
-    Attributes
-    ----------
-    cosmo: astropy.cosmology.FlatLambdaCDM
-        Defines the fiducial cosmology assumed by the model when training
-    RV_MW: Scalar
-        RV value for calculating Milky Way extinction
-    sigma_pec: Scalar
-        Peculiar velocity to be used in calculating redshift uncertainties, default = 150 km/s
-    l_knots: Array
-        Array of wavelength knots which the model is defined at
-    t_knots: Array
-        Array of time knots which the model is defined at
-    W0: Array shape (N_l_knots, N_tau_knots)
-        W0 matrix for loaded model
-    W1: Array shape (N_l_knots, N_tau_knots)
-        W1 matrix for loaded model
-    L_Sigma: Array shape (N_knots_sig_l, N_knots_sig_l)
-        Covariance matrix describing epsilon distribution for loaded model
-        N_knots_sig_l = (N_l_knots-2) * N_tau_knots
-    M0: scalar
-        Reference absolute magnitude for scaling Hsiao template
-    sigma0: Scalar
-        Standard deviation of grey offset parameter for loaded model
-    RV: Scalar
-        Global host extinction value for loaded model
-    tauA: Scalar
-        Global tauA value for exponential AV prior for loaded model
-    spectrum_bins: int
-        Number of wavelength bins used for modelling spectra and calculating photometry. Based on ParSNiP as presented
-        in Boone+21
-    hsiao_flux: Array shape (N_wl, 105)
-        Grid of flux values for Hsiao template interpolated to SEDmodel.model_wave.
-    hsiao_t: Array shape (105,)
-        Time values corresponding to Hsiao template grid
-    hsiao_l: Array shape (2401)
-        Wavelength values corresponding to Hsiao template grid
+    General Attributes
+    ------------------
+        __root_dir__: Path
+            Absolute path to the bayesn/bayesn directory.
+        example_lc: Path
+            Absolute path to a SNANA-format ascii file light curve.
+        sim: bool
+            Indicates whether data is simulated.
+        cosmo: astropy.cosmology.FlatLambdaCDM
+            Defines the fiducial cosmology assumed by the model when training. Can be
+            anything that has a `distmod` method to convert cosmological redshifts to
+            distance moduli.
+        sigma_pec: 0D Array, default jnp.array(150/constants.C_LIGHT)
+            Peculiar velocity to be used in calculating redshift uncertainties
+        ZPT: Number
+            Common fluxcal zero point for all bands
+        RV_MW: 0D Array, default jnp.array(3.1)
+            RV value for calculating Milky Way extinction
+        trunc_val: Number, default 1.2
+            Lower limit for RV based on pure Rayleigh Scattering
+        spectrum_bins: int, default 300
+            Number of wavelength bins used for modelling spectra and calculating
+            photometry. Based on ParSNiP as presented in Boone+21.
+        band_oversampling: int, default 51
+            Affects hires_spacing, which affects hires_wave, which is used to perform
+            fast interpolations when mapping between the observer-frame and the
+            rest-frame. Must be odd
+        max_redshift: Number, default 4
+            The greatest redshift at which observer-frame bandpasses and effects can be
+            mapped to the rest-frame model.
+        hsiao_l: 1D Array, length defines N_hsiao_l
+            The wavelengths (Angstroms) where the Hsiao SED time-series is defined.
+        hsiao_t: 1D Array, length defines N_hsiao_t
+            The rest-frame phases (days) where the Hsiao SED time-series is defined.
+        min_hsiao_wave: Number
+            The bluest wavelength in hsiao_l
+        max_hsiao_wave: Number
+            The reddest wavelength in hsiao_l
+        hsiao_offset: Number
+            The difference between t=0 and earliest phase in hsiao_t
+        J_l_T_hsiao: Array, shape (spectrum_bins, N_hsiao_l + 1)
+            Matrix that can be multiplied with spline knot values (at hsiao_l) to
+            interpolate the spline to model_wave.
+            Currently only used within _load_hsiao_template.
+        KD_t_hsiao: Array, shape (N_hsiao_t, N_hsiao_t + 1)
+            Matrix that can be used to construct J_t_hsiao, which can be multiplied
+            with spline knot values (at hsiao_t) to interpolate the spline to arbitrary
+            phases.
+            Currently not used by anything.
+        hsiao_flux: Array, shape (spectrum_bins, N_hsiao_t)
+            The fluxes of the Hsiao SED time-series interpolated to model_wave.
+            Combines with hsiao_interp to interpolate to interpolate to the desired
+            phases in _get_spectra.
+        ext_rel: DustExtRel
+            The extinction relation parametrizing Ax/AV as a fn of RV and wavelength.
+
+    Definable Model-Specific Attributes
+    -----------------------------------
+        model_name: str
+            The name of a loaded built-in model or path to a custom model.
+        l_knots: 1D Array, length defines N_l_knots
+            Array of wavelength knots defining the model's warping surfaces.
+        tau_knots: 1D Array, length defines N_tau_knots
+            Array of phase knots defining the model's warping surfaces.
+        M0: 0D Array
+            Reference absolute magnitude for scaling the Hsiao template.
+            Inferred in _sample_M0_by_mass if splitting populations by host logmass.
+            Affects get_flux_batch.
+        sigma0: 0D Array
+            Scale factor for the achromatic offset parameter.
+            Inferred in _sample_model_dust_params.
+            Affects _sample_SN_params.
+        tauA: 0D Array
+            Scale factor for the Exponential distribution of host-galaxy AV.
+            Inferred in _sample_model_dust_parmas.
+            Affects _sample_SN_dust_params.
+        W0: Array, shape (N_l_knots, N_tau_knots)
+            W0 matrix for loaded model. Smoothly warps the hsiao SED time-series to the
+            sample mean of a dataset.
+            Inferred in _sample_model_params and _sample_W0_by_mass if splitting
+            populations by host logmass.
+            Affects _get_spectra.
+        W1: Array, shape (N_l_knots, N_tau_knots)
+            W1 matrix for loaded model. When combined with theta, parametrizes the first
+            functional principal component of sample variation.
+            Inferred in _sample_model_params.
+            Affects _get_spectra.
+        L_Sigma: Array shape (N_knots_sig, N_knots_sig)
+            Covariance matrix describing epsilon distribution for loaded model.
+            See _sample_model_params for details on its inference.
+            See _sample_SN_params for details on its effect.
+        RV: None | 0D Array
+            The shared host-galaxy RV value for models using shared_RV=True.
+            Inferred in _sample_shared_RV.
+            Affects _sample_SN_dust_params.
+        mu_R: None | 0D Array
+            The mean of a truncated normal distribution for host-galaxy RV values for
+            models using shared_RV=False.
+            Inferred in _sample_model_dust_params.
+            Affects _sample_SN_dust_params.
+        sigma_R: None | 0D Array
+            The scale factor of a truncated normal distribution for host-galaxy RV
+            values for models using shared_RV=False.
+            Inferred in _sample_model_dust_params.
+            Affects _sample_SN_dust_params.
+
+    Calculated Model-Specific Attributes
+    ------------------------------------
+        N_knots_sig_l: int
+            N_l_knots - 2, so the bluest and reddest l_knots can remain 0 for epsilon
+            calculations.
+        N_knots_sig: int
+            N_knots_sig_l * N_tau_knots, the number of epsilon knots excluding the
+            bluest and reddest rows. Used in epsilon calculations.
+        min_wave: 0D Array
+            The bluest l_knot.
+        max_wave: 0D Array
+            The reddest l_knot.
+        model_wave: Array, shape (spectrum_bins,)
+            The rest-frame model wavelength vector. Spaced log-uniformly between
+            min_wave and max_wave.
+        hires_wave: Array, length defines N_hires
+            A high-resolution log-uniform wavelength vector whose red end is based on
+            hsiao_max_wave * (1+max_redshift). This is used to map the rest-frame to
+            the observer-frame for redshifts up to max_redshift.
+        hires_spacing: 0D Array
+            Log10 spacing between neighboring elements in hires_wave. Based on the
+            linear spacing in hsiao_l and band_oversampling.
+        J_l_T: Array, shape (spectrum_bins, N_l_knots+1)
+            Matrix that can be multiplied with spline knot values (at l_knots) to
+            interpolate the spline to model_wave.
+        KD_t: Array, shape (N_tau_knots, N_tau_knots+1)
+            Matrix used to construct J_t, which can be multiplied with spline knot
+            values (at tau_knots) interpolate the spline to arbitrary phases.
+        J_t_map: Callable
+            jit-compiled vmap of spline_utils.spline_coeffs_step.
+            Used in get_J_t.
+        mw_ext: Array, shape (N_hires,)
+            High resolution vector of Ax/AV values based on ext_rel and RV_MW.
+            Used in _calculate_band_weights.
+
+    Attributes affecting likelihood construction
+    --------------------------------------------
+        photoz: bool
+            Indicates whether redshift should be sampled or not.
+        shared_RV: bool
+            Indicates whether all SNe should share a single RV value or not.
+
+    Attributes based on data
+    ------------------------
+        Data is in N_used_bands bandpasses for N_sn targets with N_max_epochs
+        observations for the most observed target
+        data: None | ObsData
+            The NamedTuple populated by process_dataset and expected by _model.
+            The first five fields are Arrays with shape (N_sn,):
+                host_logmass, z_hel, z_hel_err, muhat, and MWEBV.
+            The second five are Arrays with shape (N_max_epochs, N_sn):
+                mjd, flux, flux_err, band_indices, and mask.
+            The flux and flux_err field names are used even for magnitudes.
+        dataset: None | SNDataset
+            The dataclass populated by process_dataset. The class has many methods for
+            transforming/cutting data, and generating data products in specific formats.
+            See datasets.py for details.
+        band_weights: None | Array, shape (N_sn, spectrum_bins, N_used_bands)
+            Populated by process_dataset and get_flux_from_chains using the output of
+            _calculate_band_weights. Since BayeSN is a rest-frame SED model, the
+            observer-frame total transmission functions need to be transformed before
+            they can be multiplied with the SED model and integrated to get fluxes.
+        J_t: None | Array, shape (N_sn, N_tau_knots.shape+1, N_max_epochs)
+            Populated by process_dataset using the output of get_J_t. This matrix can
+            be multiplied with spline knot values (at tau_knots) to interpolate the
+            spline to arbitrary phases.
+        hsiao_interp: None | Array, shape (3, N_max_epochs, N_sn)
+            Populated by process_dataset using the output of get_hsiao_interp. This
+            matrix is used in _get_spectra to perform quick linear interpolation of
+            hsiao_flux values to the desired phases.
+        z_u_grid: 1D Array, length defines N_z_u
+            CDF probability levels of the host photo-z quantiles
+        z_icdf_grid: None | Array, shape (N_sn, N_z_u)
+            SN-specific z at the levels specified by z_u_grid.
+        fitres_table: QTable
+            Populated by process_dataset. Contains a row per SN and the columns
+            VARNAMES:, CID, IDSURVEY, TYPE, FIELD, zHEL, zHELERR, zHD, zHDERR, VPEC,
+            VPECERR, MWEBV, HOST_LOGMASS, HOST_LOGMASS_ERR, SNRMAX1, SNRMAX2, and
+            SNRMAX3.
+        lcplot_data: pd.DataFrame
+            Populated by process_dataset. Contains a row per observation and the columns
+            CID, MJD, FLUXCAL, FLUXCALERR, and FLT.
+
+    Attributes for Bandpass Management
+    -------------------
+        Attributes are split into three levels.
+        Level 1 is loaded during initialisation.
+        Level 2 bandpass information is laoded as needed and never deleted.
+        Level 3 information is a subset of level 2, restricted to only the bandpasses
+        used in the data currently being analysed.
+        See the docstring for SEDmodel._init_band_weights for more details.
+
+        Level 1
+        -------
+            filter_yaml: None | Path
+                The path to a yaml specified during initialisation. This yaml should
+                contain information for custom bandpasses in the format of
+                bayesn/bayesn/bayesn-filters/filters.yaml
+            filter_dict: dict[str, dict[str, str | np.ndarray | Number]]
+                A dictionary containing the keys standards and filters.  Both are based
+                on bayesn/bayesn/bayesn-filters/filters.yaml, but the standards subdict
+                contains wavelengths and fluxes under the keys lam and f_lam.
+            dovekie_labels: 1D np.ndarray, length defines N_dovekie
+                The BayeSN names of the bandpasses in Dovekie, Popovic et al. 2026,
+                https://ui.adsabs.harvard.edu/abs/2026A%26A...712A.131P/abstract
+            dovekie_cov: Array, shape (N_dovekie, N_dovekie)
+                The covariance matrix of zero-point shifts (mag) for the bandpasses
+                listed in dovekie_labels.
+
+        Level 2
+        -------
+            band_dict: dict[str, int], N_bands keys
+                The keys are BayeSN bandpass names and the values are the order in which
+                they were loaded.
+            band_interpolate_weights: Array, shape (N_bands, N_hires)
+                The linear interpolation of observer-frame bandpass transmission
+                functions, upsampled to the wavelength grid of hires_wave for fast linear
+                interpolation on a log-uniform grid. The ordering matches the values of
+                band_dict.
+            band_lim_dict: dict[str, tuple[Number, Number]], N_bands keys
+                The keys are BayeSN bandpass names and the values are 2-tuples providing
+                the 1% cut-on and cut-off wavelengths of the transmission functions.
+            zp_dict: dict[str, Number], N_bands keys
+                The keys are BayeSN bandpass names and the values are instrumental
+                zero-points, e.g. the magnitude of an SED of 1 erg/s/cm^2/Angstrom.
+                The zero-point for NULL_BAND is arbitrary.
+            zps: Array, shape(N_bands,)
+                The values of zp_dict in the order of the band_dict values.
+            calib_cov: Array, shape (N_bands, N_bands)
+                The covariance matrix of zero-point shifts (mag) for the bandpasses in
+                the order of the band_dict values. Bandpasses not present in
+                dovekie_labels are treated as independent of all other bandpasses.  These
+                bandpasses may have zero-point errors from filter_dict, but if not, they
+                are treated as having Gaussian errors of 0.01 mag.
+            wave_sigmas: Array, shape (N_bands,)
+                The array of uncertainties in wavelength shifts for the bandpasses in the
+                order of the band_dict values. All bandpasses are treated as independent.
+                Bandpasses may have wavelength shift uncertainties from filter_dict, but
+                if not, they are treated as having Gaussian errors of 10 Angstroms.
+
+        Level 3
+        -------
+            These attributes are populated by the _set_used_bands method, which takes a
+            "bands argument". This may not match the order of band_dict.
+            used_band_inds: np.ndarray, shape (N_used_bands,)
+                This array gives the band_dict value in the order of the bands argument.
+                It is used to populate other level 3 attributes in the order of the bands
+                argument.
+            used_band_dict: dict[int, int], N_used_bands keys
+                The keys match used_band_inds and the values give their order in the
+                bands argument. Given a BayeSN name x, the corresponding index in a level
+                3 array is found with used_band_dict[band_dict[x]].
+            used_zps: Array, shape (N_used_bands,)
+                The values of zps in the order of the bands argument.
+            used_calib_cov: Array, shape (N_used_bands, N_used_bands)
+                A sub-matrix of calib_cov re-arranged to the ordering of the bands
+                argument.
+            used_calib_chcov: Array, shape (N_used_bands, N_used_bands)
+                A cholesky decomposition of used_calib_cov.
+            used_wave_sigmas: Array, shape (N_used_bands,)
+                The values of wave_sigmas in the order of the bands_argument.
     """
     ######################
     ### Initialisation ###
@@ -206,7 +437,7 @@ class SEDmodel(object):
         self,
         num_devices: int = 4,
         load_model: str = "T21_model",
-        filter_yaml: str | None = None,
+        filter_yaml: Path | str | None = None,
         fiducial_cosmology: dict[str, float] = {"H0": 73.24, "Om0": 0.28},
         load_ext_rel: str = "G23",
         apply_dovekie_mag_shifts: bool = True,
@@ -308,7 +539,7 @@ class SEDmodel(object):
         self.__root_dir__ = BASE_DIR
         print(f"Currently working in {os.getcwd()}")
 
-        self.filter_yaml = filter_yaml
+        self.filter_yaml = Path(filter_yaml) if filter_yaml is not None else filter_yaml
         built_in_models = [f.name for f in self.__root_dir__.glob("model_files/*_model")]
 
         # Model-independent terms
@@ -354,10 +585,13 @@ class SEDmodel(object):
         self.sigma0 = jnp.array(params["SIGMA0"])
         self.tauA = jnp.array(params["TAUA"])
         if "RV" in params:
-            self.RV_type = "global"
+            self.shared_RV = True
             self.RV = jnp.array(params["RV"])
+            self.mu_R = None
+            self.sigma_R = None
         elif "MUR" in params:
-            self.RV_type = "pop"
+            self.shared_RV = False
+            self.RV = None
             self.mu_R = jnp.array(params["MUR"])
             self.sigma_R = jnp.array(params["SIGMAR"])
         # Build the model wavelengths in log space
@@ -367,7 +601,6 @@ class SEDmodel(object):
             jnp.log10(self.min_wave), jnp.log10(self.max_wave), self.spectrum_bins
         )
         self.model_wave = 10 ** model_log_wave
-        self.dlambda = jnp.diff(self.model_wave)
 
         # Similarly build a high-resolution model based on the Hsiao template
         self._load_hsiao_template()  # sets self.{min/max}_hsiao_wave
@@ -405,10 +638,14 @@ class SEDmodel(object):
         # Initialising terms that will be populated later.
         for attr in (
             "data",
+            "dataset",
+            "J_t"
             "hsiao_interp",
-            "sn_list",
-            "z_u_grid",    # CDF probability levels of the host photo-z quantiles
-            "z_icdf_grid", # (N_sn, len(z_u_grid)) per-SN z at those levels, or None
+            "z_u_grid",
+            "z_icdf_grid",
+            "all_table",
+            "fitres_table",
+            "lcplot_data",
         ):
             setattr(self, attr, None)
 
@@ -542,7 +779,7 @@ class SEDmodel(object):
         self.wave_sigmas = jnp.array([10,])
 
         # Instantiate level 3 attributes
-        self.used_band_inds = jnp.array(list(self.band_dict.values()))
+        self.used_band_inds = np.array(list(self.band_dict.values()))
         self.used_band_dict = {val: val for val in self.band_dict.values()}
         self.used_zps = self.zps
         self.used_calib_cov = self.calib_cov
@@ -580,7 +817,7 @@ class SEDmodel(object):
 
         # Add custom filters, if specified
         if self.filter_yaml is not None:
-            if not Path(self.filter_yaml).exists():
+            if not self.filter_yaml.exists():
                 raise FileNotFoundError(
                     f"Specified filter yaml {self.filter_yaml} does not exist"
                 )
@@ -606,7 +843,7 @@ class SEDmodel(object):
                         path = Path(str(path).replace(f"${env_var}", env))
                     if not path == path.absolute():
                         # If relative path, prepend yaml location
-                        path = Path(self.filter_yaml).absolute().parent / path
+                        path = self.filter_yaml.absolute().parent / path
                     custom_filter_dict["standards"][key]["path"] = str(path)
                     # Add custom standard and overwrite existing one of same name if present
                     filter_dict["standards"][key] = custom_filter_dict["standards"][key]
@@ -623,7 +860,7 @@ class SEDmodel(object):
                     path = Path(str(path).replace(f"${env_var}", env))
                 if not path == path.absolute():
                     # If relative path, prepend yaml location
-                    path = Path(self.filter_yaml).absolute().parent / path
+                    path = self.filter_yaml.absolute().parent / path
                 custom_filter_dict["filters"][key]["path"] = str(path)
                 # Add custom filter and overwrite existing one of same name if present
                 filter_dict["filters"][key] = custom_filter_dict["filters"][key]
@@ -931,7 +1168,14 @@ class SEDmodel(object):
     ### Configuration ###
     #####################
     def parse_args(self, args: dict, cmd_args: dict | argparse.Namespace, verbose: bool = True) -> dict:
-        """
+        """ Given an incomplete args dict and cmd_args overrides, return a complete
+        args dict by interpreting the mode, detecting RV and shared_RV, populate
+        missing args with defaults, and validate the total configuration.
+
+        THIS IS NOT IDEMPOTENT.
+        If jobsplit is None, snana will become False and jobsplit will become [1, 1]
+        If run again, snana will become True.
+
         Parameters
         ----------
         args:
@@ -943,32 +1187,12 @@ class SEDmodel(object):
         args = self._cmd_arg_overrides(args, cmd_args)
         args.pop("CONFIG", None)
         args.pop("config", None)
-        args = self._parse_mode(args)
-        self.RV_type = args["rv_type"] = self._get_rv_type(args, verbose=True)
-
-        # Print out when relevant parameters are being assigned their default values.
-        # p2 is only relevant if substr is in p1.
-        for substr, p1, p2 in zip(
-            *np.array([
-                ("split", "mode", "M_split"),
-                ("pop", "rv_type", "mu_R"),
-                ("pop", "rv_type", "sigma_R"),
-                ("pop", "rv_type", "mu_R_min"),
-                ("pop", "rv_type", "mu_R_max"),
-                ("pop", "rv_type", "sigma_sigma_R"),
-                ("uniform", "rv_type", "uniform_RV_min"),
-                ("uniform", "rv_type", "uniform_RV_max"),
-                ("True", "vary_redshift", "tau_z_min"),
-                ("True", "vary_redshift", "tau_z_max"),
-            ]).T
-        ):
-            comparison = args.get(p1)
-            if not verbose or comparison is None or substr not in str(comparison) or p2 in args:
-                continue
-            print(
-                f"{p1} is {comparison}, but {p2} is not in the input args. "
-                f"Setting {p2} to its default of {default_kwargs[p2]}."
-            )
+        args = self._parse_mode(args, verbose=verbose)
+        detected_rv_type, RV = self._get_rv_type(args, verbose=verbose)
+        self.shared_RV = args["shared_RV"] = detected_rv_type
+        args["RV"] = RV
+        if verbose:
+            self._print_default_assignments(args)
 
         for param, default in default_kwargs.items():
             args[param] = args.pop(param, default)
@@ -1033,6 +1257,9 @@ class SEDmodel(object):
             )
             self.tau_knots = device_put(np.array(args["tau_knots"], dtype=float))
             self.KD_t = device_put(invKD(self.tau_knots))
+            self.N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
+            self.N_knots_sig_l = self.l_knots.shape[0] - 2
+            self.N_knots_sig = (self.N_knots_sig_l) * self.tau_knots.shape[0]
         return args
 
     def _cmd_arg_overrides(self, args: dict, cmd_args: dict | argparse.Namespace) -> dict:
@@ -1133,109 +1360,216 @@ class SEDmodel(object):
                 args["split_variant"] = split_variant
 
         if mode.startswith("dust"):
-            if args.get("rv_type", "pop") != "pop":
+            if args.get("shared_RV", False):
                 raise ValueError(
-                    f"mode is {mode} but rv_type is {args['rv_type']}. "
+                    f"mode is {mode} but shared_RV is {args['shared_RV']}. "
                     f"This is not consistent with typical {mode} behavior. "
-                    "Consider changing the mode or setting it to 'custom'. "
+                    "Consider changing the mode or setting it to 'custom'."
                 )
-            args["rv_type"] = "pop"
+            args["shared_RV"] = False
 
-        # RV type was previously provided through the mode parameter.
+        # RV information was previously provided through the mode parameter.
         # Check for backwards compatibility.
-        supported_RV_types = ("global", "pop", "uniform")
-        if "rv" not in mode:  # e.g. not fit_poprv, train_global_rv
-            return args
-
-        if "rv_type" in args and args["rv_type"].lower() not in mode:
+        # e.g. fit_poprv should give shared_RV = False
+        #      train_global_rv should give shared_RV = True
+        supported_RV_dict = {True: "global", False: "pop"}
+        if "shared_RV" in args and supported_RV_dict[not args["shared_RV"]] in mode:
             raise ValueError(
-                f"The rv_type parameter was provided as {args['rv_type']}. "
-                f"However, the mode {mode} seems to indicate that a different "
-                "rv_type should be used. Please remove the inconsistency."
+                f"shared_RV was provided as {args['shared_RV']}. However, the mode "
+                f"{mode} seems to indicate that a different shared_RV should be used. "
+                "Please remove the inconsistency."
             )
-        for RV_type in supported_RV_types:
-            if RV_type not in mode:
+        for shared_RV, mode_name in supported_RV_dict.items():
+            if mode_name not in mode:
                 continue
-            args["rv_type"] = RV_type
-        if "rv_type" not in args:
-            raise ValueError(
-                f"rv_type was not in the input yaml, but 'rv' is in the mode. However, "
-                f"none of the substrings {supported_RV_types} are in {args['mode']}. "
-                f"Please provide one of the supported rv_type in the input yaml."
-            )
-        if verbose:
-            print(
-                f"The rv_type was inferred as {args['rv_type']} from the mode "
-                f"{args['mode']}. Including rv_type is supported for backwards "
-                "compatibility, but in the future please consider including the "
-                "rv_type parameter in the input yaml file."
-            )
+            args["shared_RV"] = shared_RV
+            if verbose:
+                warn(UserWarning(
+                    f"shared_RV was inferred as {args['shared_RV']} from the mode "
+                    f"{args['mode']}. Indicating shared_RV with the mode is supported "
+                    "for backwards compatibility, but in the future please consider "
+                    "including the shared_RV parameter in the input yaml file."
+                ))
+        if not any([val in mode for val in supported_RV_dict.values()]):
+            if verbose and "rv" in mode:
+                warn(UserWarning(
+                    f"The indicated mode {mode} contains the string 'rv', but not the "
+                    "strings 'global' or 'pop', which correspond to shared_RV True and "
+                    "False respectively. Indicating shared_RV and RV with the mode arg "
+                    "will be deprecated at some point, but for now you may wish to fix "
+                    "the mode argument to include 'global' or 'pop' (case insensitive)."
+                ))
+            return args
         return args
 
-    def _get_rv_type(self, args: dict, verbose: bool = True) -> str:
-        """
-        rv_type can be passed in the input yaml as its own keyword or as a mode.
-        This method parses the args and figures out what the intended rv_type is and
-        raises an error if there are ambiguous signs.
+    def _get_rv_type(self, args: dict, verbose: bool = True) -> tuple[bool, Number | str]:
+        """ The shared_RV attribute indicats whether all SNe share a single RV, and the
+        RV attribute can either specify that value, or be a string indicating what
+        distribution the RV(s) should be sampled from. These kwargs can be passed in
+        the input yaml or inferred from non-default arguments using this method.
+        This method attempts to infer shared_RV and RV, raising an error if there are
+        ambiguous indicators.
 
         Parameters
         ----------
         args:
             Combination of arguments from input yaml file and command line overrides,
             defines model wavelength range and data set to load.
+            The args passed to this method should include any modifications from the
+            "_parse_mode" method, but should not include default values from the
+            "default_kwargs" dict because the provided arguments may indicate what RV
+            is intended.
         verbose:
 
         Returns
         -------
-        detected_rv_type: str
-            Either "pop", "global", or "uniform"
+        detected_shared_RV:
+            True for a global RV shared by all SNe, False for SN-specific RVs. In both
+            cases, the values depend on detected_RV.
+        detected_RV:
+            Either "normal", "uniform", or a number for a Normal distribution with a
+            lower limit of 1.2, a uniform distribution, or a fixed number (Dirac Delta
+            distribution).
         """
-        if "rv_type" in args:
-            return args.pop("rv_type")
-        elif (
-            isinstance(args.get("RV", False), str)
-            and args["RV"] in ("global", "pop", "uniform")
-        ):
-            return args.pop("RV")
+        detected_shared_RV = args.get("shared_RV")
+        detected_RV = args.get("RV")
+        if isinstance(detected_RV, str) and detected_RV == "default":
+            msg = f"RV is 'default', which will be treated as "
+            if getattr(self, "RV") is not None:
+                detected_RV = self.RV
+                msg += f"{self.RV} to match the loaded model's 'RV' attribute."
+            elif getattr(self, "mu_R", None) is not None:
+                detected_RV = self.mu_R
+                msg += f"{self.mu_R} to match the loaded model's 'mu_R'."
+            else:
+                detected_RV = 3
+                msg += f"3 since the loaded model lacks the 'RV' and 'mu_R' attributes."
+            if verbose:
+                warn(UserWarning(msg))
 
-        # If rv_type is not provided and is not in the mode, infer its value.
-        err = "rv_type is not specified. "
-        uniform = ("uniform_RV_min" in args or "uniform_RV_max" in args)
-        pop = ("mu_R" in args or "sigma_R" in args)
-        glbl = ("RV" in args)
-        if uniform + pop + glbl > 1:
-            err +=  "The yaml implies multiple RV types with its specified arguments: "
-            if uniform:
-                err += "uniform_RV_min/max suggest uniform. "
-            if pop:
-                err += "mu_R/sigma_R suggest pop. "
-            if glbl:
-                err += "RV suggests global. "
-            err += "Please specify rv_type or provide only one set of arguments."
-            raise ValueError(err)
+        if isinstance(detected_RV, Number):
+            if verbose and not detected_shared_RV:
+                warn(UserWarning(
+                    f"detected_shared_RV is {detected_shared_RV}, but detected_RV is "
+                    f"{detected_RV}, which will be used as the RV of all SNe as though "
+                    "detected_shared_RV was True."
+                ))
+            return True, detected_RV
+
+        if detected_shared_RV is None:
+            detected_shared_RV = True
+            if verbose:
+                warn(UserWarning(
+                    "shared_RV was not included in the arguments, and will default to "
+                    "True for this run, meaning all SNe will share single RV value "
+                    f"sampled from a RV={detected_RV} distribution."
+                ))
+        if detected_RV in ("uniform", "normal"):
+            return detected_shared_RV, detected_RV
+        elif isinstance(detected_RV, str):
+            raise ValueError(
+                f"RV was specified as {detected_RV}, which is not a supported option. "
+                "RV should be a number or one of the strings 'default', 'uniform', or "
+                "'normal'."
+            )
+
+        # If RV is not provided and is not in the mode, infer its value.
+        msg = "RV is not specified. "
+        uniform_keys = ("uniform_RV_min", "uniform_RV_max", "sigma_uniform_R")
+        normal_keys = ("mu_R", "sigma_R", "mu_R_min", "mu_R_max", "sigma_sigma_R")
+        uniform = [key for key in uniform_keys if key in args]
+        normal = [key for key in normal_keys if key in args]
+        if len(uniform) and len(pop):
+            msg +=  (
+                f"The arguments imply multiple RV distributions:  The keys {uniform} "
+                f" suggest uniform. while the keys {normal} suggest normal. Please "
+                "specify RV as 'uniform', 'normal', 'default', or a number."
+            )
+            raise ValueError(msg)
         elif uniform:
-            detected_RV_type = "uniform"
+            detected_RV = "uniform"
             if verbose:
-                print(err+"Inferring uniform RV based on uniform_RV_min/max.")
-        elif pop:
-            detected_RV_type = "pop"
+                warn(UserWarning(
+                    msg+f"Inferring uniform RV distribution from keys {uniform}."
+                ))
+        elif normal:
+            detected_RV = "normal"
             if verbose:
-                print(err+"Inferring pop RV based on mu_R/sigma_R.")
-        elif glbl:
-            detected_RV_type = "global"
-            if verbose:
-                print(err+"Inferring global RV based on RV.")
+                warn(UserWarning(
+                    msg+f"Inferring normal RV distribution from keys {normal}."
+                ))
         else:
-            detected_RV_type = self.RV_type
+            msg += (
+                "RV cannot be inferred from the other arguments. The run will proceed "
+                f"with RV="
+            )
+            if getattr(self, "RV") is not None:
+                detected_RV = "uniform"
+                msg += "'uniform' based on the RV attribute of the loaded model. "
+            elif getattr(self, "mu_R", None) is not None:
+                detected_RV = "normal"
+                msg += "'normal' based on the mu_R attribute of the loaded model. "
+            else:
+                detected_RV = 3
+                msg += "3 based on the lack of RV and mu_R attributes in the loaded model."
             if verbose:
-                print(err+
-                    "The rv_type cannot be inferred from the other arguments. "
-                    f"The run will proceed with rv_type={self.RV_type} based on the "
-                    f"loaded model {self.model_name}."
-                )
-        return detected_RV_type
+                warn(UserWarning(msg))
+        return detected_shared_RV, detected_RV
 
-    def _check_args_valid(self, args: dict) -> None:
+    def _print_default_assignments(self, args: dict) -> None:
+        """Print out when relevant parameters are being assigned their default values.
+        The top-level dicts' keys are kwargs that, depending on their values, will
+        depend on the values of other kwargs. If the top-level kwarg is specified as
+        one of the keys in the sub-dict, the corresponding values in that sub-dict
+        list the kwargs that will be required.
+        """
+        relevant_kwargs_dict = {
+            # As an example: if the RV kwarg is specified as "normal", the relevant
+            # kwargs are "mu_R" and "sigma_R".
+            "RV": {
+                "normal": ("mu_R", "sigma_R",),
+                "uniform": ("uniform_RV_min", "uniform_RV_max")
+            },
+            "split_variant": {
+                "split_mag": ("M_split",),
+                "split_sed": ("M_split",),
+            },
+            "fit_method": {
+                "vi": (
+                    "laplace_method", "zltn_lr", "zltn_lr_final",
+                    "zltn_particles", "num_zltn_iter", "batch_size"
+                )
+            },
+            "laplace_method": {
+                "lm": ("lm_maxiter", "lm_lam_init", "lm_use_linesearch", "lm_solver", "stage2_tmax_prior_std"),
+            },
+        }
+        if args.get("infer_dust_properties"):
+            relevant_kwargs_dict.update({
+                "RV": {
+                    "normal": ("mu_R_min", "mu_R_max", "sigma_sigma_R"),
+                    "uniform": ("uniform_RV_min", "uniform_RV_max", "sigma_uniform_R",)
+                },
+                "vary_redshift": {
+                    True: ("tau_z_min", "tau_z_max"),
+                },
+            })
+
+        for kwarg_name, subdict in relevant_kwargs_dict.items():
+            if args.get(kwarg_name) not in subdict:
+                continue
+            sub_kwargs = subdict[args[kwarg_name]]
+            missing_kwargs = set(sub_kwargs).difference(args)
+            missing_defaults = [f"{kw}={default_kwargs[kw]}" for kw in missing_kwargs]
+            if not len(missing_kwargs):
+                continue
+            s = "s" if len(missing_kwargs) > 1 else ""
+            warn(UserWarning(
+                f"{kwarg_name}={args[kwarg_name]}, and so the kwargs {missing_kwargs} "
+                f"are relevant but not provided in the input args. The default{s} "
+                f"{', '.join(missing_defaults)} will be assumed."
+            ))
+    def _check_args_valid(self, args: dict, verbose=True) -> None:
         """
         Validates the input args by looking for parameters that will cause problems
         downstream, e.g. unsupported data_type/fit_method.
@@ -1246,51 +1580,64 @@ class SEDmodel(object):
             Combination of arguments from input yaml file and command line overrides,
             defines model wavelength range and data set to load.
         """
-        def check_scalar(val: Any, val_name: str) -> None:
+        def check_scalar(val_name: str) -> None:
             try:
-                float(val)
+                float(args[val_name])
             except (ValueError, TypeError):
                 raise TypeError(
                     f"{val_name} must be a float-like value. Instead got {val}."
                 )
 
-        # RV_type
-        supported_RV_types = ("global", "pop", "uniform")
-        if args["rv_type"] not in supported_RV_types:
-            raise ValueError(
-                f"rv_type is {args['rv_type']}, which is not a supported"
-                f"option. Please set rv_type to something from {supported_RV_types}."
-            )
-        if args["rv_type"] == "global":
-            check_scalar(args["RV"], "RV")
-        elif args["rv_type"] == "pop":
-            [check_scalar(args[name], name) for name in ("mu_R", "sigma_R")]
-            if float(args["sigma_R"]) == 0:
-                raise ValueError(
-                    "sigma_R cannot be 0. Consider using rv_type: 'global'."
-                )
-        elif args["rv_type"] == "uniform":
-            [check_scalar(args[name], name) for name in ("uniform_RV_min", "uniform_RV_max")]
-            if float(args["uniform_RV_min"]) == float(args["uniform_RV_max"]):
-                raise ValueError(
-                    "uniform_RV_min cannot equal uniform_RV_max. "
-                    "Consider using rv_type: 'global'."
-                )
+        # Warnings for weird configurations that do not break things.
+        if not args["shared_RV"] and isinstance(args["RV"], Number):
+            warn(UserWarning(
+                f"shared_RV is False but RV is {args['RV']}. The run will proceed but "
+                "you should know that all SNe will share that value for RV."
+            ))
+        if args["shared_RV"] and args["infer_dust_properties"]:
+            warn(UserWarning(
+                "shared_RV is True and infer_dust_properties is True. The dust "
+                "properties will be poorly constrained with one shared draw of RV."
+            ))
 
-        if args["data_type"] not in ("flux", "mag"):
+        # Errors for configuraitons that will break things.
+        if args["RV"] not in ("normal", "uniform") and not isinstance(args["RV"], Number):
             raise ValueError(
-                f"Requested data_type, {args['args']['data_type']}, is not "
-                "supported. Please set data_type to either 'flux' or 'mag'."
+                f"RV is {args['RV']}, which is not a supported option. Please set RV "
+                "to 'normal', 'uniform', or a number."
             )
-        if args["fit_method"] not in ("vi", "mcmc"):
-            raise ValueError(
-                f"Requested fitting method, {args['fit_method']}, is not supported. "
-                "Please set fit_method to either 'mcmc' or 'vi'."
-            )
-        if args["laplace_method"] not in {"svi", "lm"}:
-            raise ValueError(f"laplace_method must be 'svi' or 'lm', got {args['laplace_method']!r}")
-        if args["lm_solver"] not in {"gn", "hvp_cg"}:
-            raise ValueError(f"lm_solver must be 'gn' or 'hvp_cg', got {args['lm_solver']!r}")
+        if args["RV"] == "normal" and args["infer_dust_properties"]:
+            for name in ("mu_R_min", "mu_R_max", "sigma_sigma_R"):
+                check_scalar(name)
+            if float(args["mu_R_min"]) >= float(args["mu_R_max"]):
+                raise ValueError("mu_R_min must be less than mu_R_max.")
+            if float(args["sigma_sigma_R"]) < 0:
+                raise ValueError("sigma_sigma_R must be positive.")
+        elif args["RV"] == "normal" and not args["infer_dust_properties"]:
+            for name in ("mu_R", "sigma_R"):
+                check_scalar(name)
+            if float(args["sigma_R"]) < 0:
+                raise ValueError("sigma_R must be positive.")
+        elif args["RV"] == "uniform":
+            for name in ("uniform_RV_min", "uniform_RV_max"):
+                check_scalar(name)
+            if float(args["uniform_RV_min"]) >= float(args["uniform_RV_max"]):
+                raise ValueError("uniform_RV_min must be less than uniform_RV_max. ")
+            if args["infer_dust_properties"]:
+                check_scalar("sigma_uniform")
+                if float(args["sigma_uniform"]) < 0:
+                    raise ValueError("sigma_uniform must be positive.")
+
+        choice_dict = {
+            "data_type": {"flux", "mag"},
+            "fit_method": {"vi", "mcmc"},
+            "laplace_method": {"svi", "lm"},
+            "lm_solver": {"gn", "hvp_cg"},
+            "split_variant": {None, "split_mag", "split_sed"},
+        }
+        for key, options in choice_dict.items():
+            if args[key] not in options:
+                raise ValueError(f"{key} must be in {options}, got {args[key]!r}")
 
         if "version_photometry" not in args and "data_table" not in args:
             raise ValueError(
@@ -1379,7 +1726,7 @@ class SEDmodel(object):
             ds.keep_according_to_list(args["SNID_keep_list"])
         ds.apply_error_floor(args["error_floor"])
 
-        self.ds = ds
+        self.dataset = ds
         self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
         self.lcplot_data = ds.make_lcplot_data(args["num_lcplot"])
         self.data = device_put(ds.make_bayesn_data(
@@ -1394,9 +1741,9 @@ class SEDmodel(object):
         self.J_t = self.get_J_t(t)
         self.hsiao_interp = self.get_hsiao_interp(t)
         self.band_weights = self._calculate_band_weights(
-            redshifts=self.ds.z_helio,
-            ebv=self.ds.mwebv,
-            lam_shifts=np.zeros(len(self.ds.unique_bands)+1),
+            redshifts=self.dataset.z_helio,
+            ebv=self.dataset.mwebv,
+            lam_shifts=np.zeros(len(self.dataset.unique_bands)+1),
         )
 
     def get_sn_slice_of_data(self, slice_: slice):
@@ -1968,37 +2315,36 @@ class SEDmodel(object):
     #########################
     def _model(
         self,
-        obs: NamedTuple,
+        obs: ObsData,
         weights: ArrayLike,
-        train_new_model: bool = False,
-        infer_dust_properties: bool = False,
-        vary_redshift: bool = False,
-        fix_tmax: bool = True,
-        vary_filter_shifts: bool = False,
-        vary_offsets: bool = False,
-        M_split: float = 10,
-        split_variant: str | None = None,
-        data_type: str = "flux",
-        photoz: bool = False,
+        train_new_model: bool,
+        infer_dust_properties: bool,
+        shared_RV: bool,
+        RV: Number | str,
+        vary_redshift: bool,
+        fix_tmax: bool,
+        fix_eps: bool,
+        vary_filter_shifts: bool,
+        vary_offsets: bool,
+        M_split: float,
+        split_variant: str | None,
+        data_type: str,
+        photoz: bool,
         prior_only: bool = False,
-        **kwargs: Any,
+        **kwargs,
     ) -> None:
-        """
-        Modular numpyro sampling functions are defined and organized based on common
-        use cases. The input kwargs are then parsed and the appropriate functions are
-        called.
+        """ This is the main numpyro model that uses the args to determine which of the
+        modular private sampling methods need to be called.
 
         Parameters
         ----------
         obs:
-            The required keys can be grouped by data type and shape.
-            Integer
-                N_sn
+            An instance of ObsData. The keys can be grouped by shape.
             Arrays with shape (N_sn,)
                 host_logmass, z_hel, z_hel_err, muhat, MWEBV
             Arrays with shape (N_max_epochs, N_sn)
                 mjd, flux, flux_err, band_indices, mask
-            The flux and flux_err names are used even when the data are in mags.
+            The flux and flux_err field names are used even when the data are in mags.
         weights: ArrayLike shape (N_sn, N_wl, N_bandpasses)
             Band weights based on filter responses and MW extinction curves for
             numerical flux integrals. Produced by SEDmodel._calculate_band_weights.
@@ -2007,11 +2353,21 @@ class SEDmodel(object):
             If False, return the model's pre-computed values.
         infer_dust_properties:
             If True, samples sigma0, tauA.
-            If True and SEDmodel.RV_type is "pop", also samples mu_R, sigma_R
-            If True and vary_redshift is True, also samples mu_z_grad and tau_z_grad.
+                If RV is "normal", also samples mu_R, sigma_R
+                If RV is "uniform", also samples uniform_RV_min/max
+                If vary_redshift is True, also samples mu_z_grad and tau_z_grad.
             If False, uses pre-computed model attributes.
+        shared_RV:
+            If True, all SNe will share a common RV that may be specified by a numeric
+            RV argument, or drawn from a distribution specified by the RV argument and
+            others (which probably should not be sampled).
+        RV:
+            If "normal", RV(s) will be sampled from a truncated normal with mean mu_R,
+                scale sigma_R, and lower limit 1.2.
+            If "uniform", RV(s) will be sampled from U(uniform_RV_min, uniform_RV_max)
+            If a number, all RVs will be that number regardless of shared_RV.
         vary_redshift:
-            If True and infer_dust_properties is True, samples mu_z_grad and tau_z_grad.
+            If True, samples mu_z_grad and tau_z_grad.
             These parameters describe a linear trend correlation between redshift and
             mu_R and tauA.
         fix_tmax:
@@ -2046,6 +2402,8 @@ class SEDmodel(object):
         ----------------------------
         fix_theta: default None
             If not None, float(fix_theta) will be used as the theta value for all SNe.
+        fix_eps: default=False
+            If True, set all eps matrices will be 0 everywhere, otherwise sampled.
         fix_AV: default None
             If not None, float(fix_AV) will be used as the AV value for all SNe.
         AV_val: default=0
@@ -2063,39 +2421,28 @@ class SEDmodel(object):
             cosmological effects may play a non-trivial role.
         fix_dist_Ds_err: default 5
             The Ds_err value to assume for SNe at redshifts above fix_dist_limit.
-
-        If SEDmodel.rv_type == "global":
-            Each SN's RV value RV_s = RV
-            RV: default SEDmodel.RV if defined or 3 if not.
-                The total-to-selective extinction used for host-galaxy extinction.
-
-        If SEDmodel.rv_type == "pop":
-            Each SN's RV value is similar to RV_s ~ N(mu_R, sigma_R).
-            mu_R: default 3
-                The mean of the normal distribution of RV.
-            sigma_R: default 0.5
-                The mean of the normal distribution of RV.
-            mu_R_min: default 1.2
-                If infer_dust_properties is True, the input mu_R parameter is ignored
-                and instead sampled as mu_R ~ U(mu_R_min, mu_R_max)
-                1.2 is the value for pure Rayleigh Scattering
-                (A propto wl^-4) as estimated in Draine 2003, 2003ARA&A..41..241D
-            mu_R_max: default 6
-                If infer_dust_properties is True, the input mu_R parameter is ignored
-                and instead sampled as mu_R ~ U(mu_R_min, mu_R_max)
-                Very large grains would produce extinction curves with no theoretical
-                upper limit on RV, but many extinction curves use data capping out
-                around RV = 6 (e.g. Cardelli 1989, Fitzpatrick 1999/2019, etc.).
-            sigma_sigma_R: default 2
-                If infer_dust_properties is True, the input sigma_R parameter is ignored
-                and instead sampled as sigma_R ~ HalfNormal(sigma_sigma_R)
-
-        If SEDmodel.rv_type == "uniform"
-            Each SN's RV value RV_s ~ U(uniform_RV_min, uniform_RV_max).
-            uniform_RV_min: default 1
-                The lower bound of the uniform distribution of RV.
-            uniform_RV_max: default 6
-                The upper bound of the uniform distribution of RV.
+        mu_R: default 3
+            The mean of the normal distribution of RV.
+        sigma_R: default 0.5
+            The mean of the normal distribution of RV.
+        mu_R_min: default 1.2
+            If infer_dust_properties is True, the input mu_R parameter is ignored
+            and instead sampled as mu_R ~ U(mu_R_min, mu_R_max)
+            1.2 is the value for pure Rayleigh Scattering
+            (A propto wl^-4) as estimated in Draine 2003, 2003ARA&A..41..241D
+        mu_R_max: default 6
+            If infer_dust_properties is True, the input mu_R parameter is ignored
+            and instead sampled as mu_R ~ U(mu_R_min, mu_R_max)
+            Very large grains would produce extinction curves with no theoretical
+            upper limit on RV, but many extinction curves use data capping out
+            around RV = 6 (e.g. Cardelli 1989, Fitzpatrick 1999/2019, etc.).
+        sigma_sigma_R: default 2
+            If infer_dust_properties is True, the input sigma_R parameter is ignored
+            and instead sampled as sigma_R ~ HalfNormal(sigma_sigma_R)
+        uniform_RV_min: default 1
+            The lower bound of the uniform distribution of RV.
+        uniform_RV_max: default 6
+            The upper bound of the uniform distribution of RV.
 
         If vary_redshift is True and infer_dust_properties is True:
             Linear correlations between redshift and mu_R / tauA will be sampled as
@@ -2106,7 +2453,7 @@ class SEDmodel(object):
             tau_z_max: default 0.5
                 The upper bound of the uniform distribution of tau_z_grad.
         """
-        N_sn = obs.z_hel.shape[0]
+        N_sn = obs.mjd.shape[1]
 
         if train_new_model:
             W0, W1, L_Sigma = self._sample_model_params()
@@ -2114,22 +2461,34 @@ class SEDmodel(object):
             W0, W1, L_Sigma = self.W0, self.W1, self.L_Sigma
 
         if infer_dust_properties:
-            dust_pop, M0, W0 = self._sample_dust_hyperparams(
+            dust_pop = self._sample_dust_hyperparams(
+                RV=RV,
                 split_variant=split_variant,
                 vary_redshift=vary_redshift,
                 mass=obs.host_logmass,
                 M_split=M_split,
-                W0=W0,
                 **kwargs,
             )
         else:
-            dust_pop, M0, W0 = self._get_fixed_dust_hyperparams(
+            dust_pop = self._get_fixed_dust_hyperparams(
+                RV=RV,
                 split_variant=split_variant,
                 mass=obs.host_logmass,
                 M_split=M_split,
-                W0=W0,
                 **kwargs,
             )
+
+        if split_variant is None:
+            M0 = self.M0
+        elif split_variant == "split_mag":
+            M0 = self._sample_M0_by_mass(HM_flag=dust_pop.HM_flag)
+        elif split_variant == "split_sed":
+            M0 = self.M0
+            W0 = self._sample_W0_by_mass(HM_flag=dust_pop.HM_flag, W0=W0)
+
+        if shared_RV:
+            dust_pop = self._sample_shared_RV(dust_pop, RV)
+
         if vary_filter_shifts:
             lam_shift = numpyro.sample("lam_shift", dist.Normal(0, self.used_wave_sigmas))
         else:
@@ -2141,6 +2500,7 @@ class SEDmodel(object):
             mag_shift = 0
 
         with numpyro.plate("SNe", N_sn) as sn_index:
+            N_max_epochs = obs.mjd.shape[0]
             band_indices = obs.band_indices[:, sn_index].astype(int)
             phot_mask = obs.mask[:, sn_index].astype(bool)
             if photoz:
@@ -2161,6 +2521,7 @@ class SEDmodel(object):
                 dust_pop=dust_pop,
                 redshift=z,
                 z_obs=obs.z_hel[sn_index],
+                shared_RV=shared_RV,
                 **kwargs,
             )
             theta, eps, Ds = self._sample_SN_params(
@@ -2170,6 +2531,7 @@ class SEDmodel(object):
                 muhat=obs.muhat[sn_index],
                 L_Sigma=L_Sigma,
                 sigma0=dust_pop.sigma0,
+                fix_eps=fix_eps,
                 **kwargs,
             )
 
@@ -2193,7 +2555,7 @@ class SEDmodel(object):
                 model_spectra=phot_epoch_spectra,
                 M0=M0,
                 Ds=Ds,
-                z=obs.z_hel,
+                z=z,
                 ebv=obs.MWEBV,
                 band_indices=band_indices,
                 mask=phot_mask,
@@ -2202,12 +2564,13 @@ class SEDmodel(object):
                 mag_shift=mag_shift,
                 num_batch=N_sn,
             )
-            with numpyro.handlers.mask(mask=phot_mask):
-                numpyro.sample(
-                    f"obs",
-                    dist.Normal(data, obs.flux_err[..., sn_index]),
-                    obs=obs.flux[..., sn_index],
-                )
+            with numpyro.plate("epochs", N_max_epochs, dim=-2):
+                with numpyro.handlers.mask(mask=phot_mask):
+                    numpyro.sample(
+                        f"obs",
+                        dist.Normal(data, obs.flux_err[..., sn_index]),
+                        obs=obs.flux[..., sn_index],
+                    )
 
     def _sample_model_params(self) -> tuple[Array, Array, Array]:
         """ Sample W0, W1, and L_Sigma
@@ -2242,7 +2605,7 @@ class SEDmodel(object):
         self,
         suffix: str = "",
         vary_redshift: bool = False,
-        global_RV: ArrayLike | None = None,
+        RV: Number | str = "normal",
         mu_R: ArrayLike | None = None,
         sigma_R: ArrayLike | None = None,
         mu_R_min: float = 1.2,
@@ -2252,205 +2615,193 @@ class SEDmodel(object):
         tau_z_max: float = 0.5,
         uniform_RV_min: float = 1,
         uniform_RV_max: float = 6,
+        sigma_uniform: float = 0.5,
         **kwargs: Any,
     ) -> tuple[Array, Array, Array | None, Array | None, Array | None, Array | None, Array | None, Array | None]:
         """Draw SN population level parameters that may vary by sub-population
         (e.g. split by galaxy mass)."""
-        phi_alpha_R, mu_z_grad, tau_z_grad, global_RV_val = [0 for _ in range(4)]
-        if global_RV is not None:
-            global_RV_val = global_RV
+        mu_z_grad, tau_z_grad = [0 for _ in range(2)]
 
         sigma0 = numpyro.sample(f"sigma0{suffix}", dist.HalfCauchy(0.1))
-        tauA = numpyro.sample(f"tauA{suffix}", dist.HalfCauchy())
+        tauA = numpyro.sample(f"tauA{suffix}", dist.HalfCauchy(1))
 
-        if self.RV_type == "global" and global_RV_val == 0:
-            global_RV_val = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
-        if self.RV_type == "pop":
+        if RV == "uniform":
+            uniform_RV_min = numpyro.sample(
+                f"uniform_RV_min{suffix}",
+                dist.TruncatedNormal(uniform_RV_min, sigma_uniform, low=0)
+            )
+            uniform_RV_max = numpyro.sample(
+                f"uniform_RV_max{suffix}",
+                dist.TruncatedNormal(uniform_RV_max, sigma_uniform, low=uniform_RV_min)
+            )
+        elif RV == "normal":
             mu_R = numpyro.sample(f"mu_R{suffix}", dist.Uniform(mu_R_min, mu_R_max))
             sigma_R = numpyro.sample(f"sigma_R{suffix}", dist.HalfNormal(sigma_sigma_R))
-            phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
+
         if vary_redshift:
-            mu_z_grad = numpyro.sample(f"mu_grad{suffix}", dist.Uniform(mu_R_min - mu_R, mu_R_max - mu_R))
-            tau_z_grad = numpyro.sample(f"tau_z_grad{suffix}", dist.Uniform(tau_z_min, tau_z_max))
-        return sigma0, tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, global_RV_val
+            mu_z_grad = numpyro.sample(
+                f"mu_z_grad{suffix}",
+                dist.Uniform(mu_R_min - mu_R, mu_R_max - mu_R)
+            )
+            tau_z_grad = numpyro.sample(
+                "tau_z_grad{suffix}",
+                dist.Uniform(tau_z_min, tau_z_max)
+            )
+        return DustHyperParams(
+            sigma0, tauA,
+            mu_R, sigma_R,
+            uniform_RV_min, uniform_RV_max,
+            mu_z_grad, tau_z_grad, RV
+        )
 
     def _get_fixed_model_dust_params(
         self,
+        RV: Number | str | None = None,
         mu_R: ArrayLike | None = None,
         sigma_R: ArrayLike | None = None,
+        uniform_RV_min: float = 1,
+        uniform_RV_max: float = 6,
         **kwargs: Any,
     ) -> tuple[Array, Array, Array | None, Array | None, Array | None, int, int, Array]:
         """Return pre-computed model dust parameters."""
-        phi_alpha_R, mu_z_grad, tau_z_grad, global_RV = [0 for _ in range(4)]
-        if mu_R is not None and sigma_R is not None:
-            phi_alpha_R = norm.cdf((1.2 - mu_R) / sigma_R)
-        return self.sigma0, self.tauA, mu_R, sigma_R, phi_alpha_R, mu_z_grad, tau_z_grad, self.RV
+        if RV is None:
+            RV = getattr(self, "RV")
+        if mu_R is None:
+            mu_R = getattr(self, "mu_R")
+        if sigma_R is None:
+            sigma_R = getattr(self, "sigma_R")
+        return DustHyperParams(
+            self.sigma0, self.tauA,
+            mu_R, sigma_R,
+            uniform_RV_min, uniform_RV_max,
+            0, 0, RV
+        )
 
     def _sample_dust_hyperparams(
         self,
+        RV: Number | str,
         split_variant: str | None,
         vary_redshift: bool,
         mass: ArrayLike,
         M_split: float,
-        W0: ArrayLike,
         **kwargs: Any,
-    ) -> tuple[DustPop, Array, Array]:
-        """Sample population dust parameters (and mass-split parameters if specified)."""
+    ) -> DustPop:
+        """Sample population dust parameters (across mass-split populations if specified)."""
         HM_flag = mass > M_split
-        M0 = self.M0
-
         suffix = "_HM" if split_variant is not None else ""
-        hm_params = self._sample_model_dust_params(
+        hm_dust = self._sample_model_dust_params(
             suffix=suffix,
+            RV=RV,
             vary_redshift=vary_redshift,
             **kwargs,
         )
-        hm_dust = DustParams(*hm_params)
-
         lm_dust = None
         sigma0 = hm_dust.sigma0
         if split_variant is not None:
-            lm_params = self._sample_model_dust_params(
+            lm_dust = self._sample_model_dust_params(
                 suffix="_LM",
+                RV=RV,
                 vary_redshift=vary_redshift,
                 **kwargs,
             )
-            lm_dust = DustParams(*lm_params)
             sigma0 = HM_flag * hm_dust.sigma0 + (1 - HM_flag) * lm_dust.sigma0
-
-        if split_variant == "split_mag":
-            M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
-            M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
-            M0 = (
-                M0 * jnp.ones_like(mass)
-                + HM_flag * M_step_HM
-                + (1 - HM_flag) * M_step_LM
-            )
-
-        if split_variant == "split_sed":
-            W_mu = jnp.zeros(self.N_knots)
-            delW_HM = numpyro.sample(
-                "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-            )
-            delW_LM = numpyro.sample(
-                "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-            )
-            delW_HM = jnp.reshape(
-                delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            delW_LM = jnp.reshape(
-                delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
-            W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
-            W0 = (
-                HM_flag[:, None, None] * W0_HM[None, ...]
-                + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
-            )
 
         dust_pop = DustPop(
             HM=hm_dust,
             LM=lm_dust,
             HM_flag=HM_flag,
             sigma0=sigma0,
-            split_variant=split_variant,
         )
-        return dust_pop, M0, W0
+        return dust_pop
 
     def _get_fixed_dust_hyperparams(
         self,
         split_variant: str | None,
         mass: ArrayLike,
         M_split: float,
-        W0: ArrayLike,
         **kwargs: Any,
-    ) -> tuple[DustPop, Array, Array]:
+    ) -> DustPop:
         """Retrieve pre-computed model dust parameters (and sample mass-split steps if specified)."""
         HM_flag = mass > M_split
-        M0 = self.M0
-
-        hm_params = self._get_fixed_model_dust_params(**kwargs)
-        hm_dust = DustParams(*hm_params)
-
+        hm_dust = self._get_fixed_model_dust_params(**kwargs)
         lm_dust = None
         sigma0 = hm_dust.sigma0
         if split_variant is not None:
-            lm_params = self._get_fixed_model_dust_params(**kwargs)
-            lm_dust = DustParams(*lm_params)
+            lm_dust = self._get_fixed_model_dust_params(**kwargs)
             sigma0 = HM_flag * hm_dust.sigma0 + (1 - HM_flag) * lm_dust.sigma0
-
-        if split_variant == "split_mag":
-            M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
-            M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
-            M0 = (
-                M0 * jnp.ones_like(mass)
-                + HM_flag * M_step_HM
-                + (1 - HM_flag) * M_step_LM
-            )
-
-        if split_variant == "split_sed":
-            W_mu = jnp.zeros(self.N_knots)
-            delW_HM = numpyro.sample(
-                "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-            )
-            delW_LM = numpyro.sample(
-                "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
-            )
-            delW_HM = jnp.reshape(
-                delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            delW_LM = jnp.reshape(
-                delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
-            W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
-            W0 = (
-                HM_flag[:, None, None] * W0_HM[None, ...]
-                + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
-            )
 
         dust_pop = DustPop(
             HM=hm_dust,
             LM=lm_dust,
             HM_flag=HM_flag,
             sigma0=sigma0,
-            split_variant=split_variant,
         )
-        return dust_pop, M0, W0
+        return dust_pop
 
-    def _sample_split_model_dust_params(
-        self,
-        split_variant: str | None,
-        infer_dust_properties: bool,
-        vary_redshift: bool,
-        mass: ArrayLike,
-        M_split: float,
-        W0: ArrayLike,
-        **kwargs: Any,
-    ) -> tuple[dict[str, Any], Array, Array, Array]:
-        """Legacy method retained for backward compatibility."""
-        if infer_dust_properties:
-            dust_pop, M0, W0 = self._sample_dust_hyperparams(
-                split_variant=split_variant,
-                vary_redshift=vary_redshift,
-                mass=mass,
-                M_split=M_split,
-                W0=W0,
-                **kwargs,
+    def _sample_M0_by_mass(self, HM_flag: ArrayLike) -> ArrayLike:
+        M_step_HM = numpyro.sample("M_step_HM", dist.Uniform(-0.2, 0.2))
+        M_step_LM = numpyro.sample("M_step_LM", dist.Uniform(-0.2, 0.2))
+        M0 = (
+            jnp.full_like(HM_flag, self.M0, dtype=float)
+            + HM_flag * M_step_HM
+            + (1 - HM_flag) * M_step_LM
+        )
+        return M0
+
+    def _sample_W0_by_mass(self, HM_flag: ArrayLike, W0: ArrayLike) -> ArrayLike:
+        W_mu = jnp.zeros(self.N_knots)
+        delW_HM = numpyro.sample(
+            "delW_HM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+        )
+        delW_LM = numpyro.sample(
+            "delW_LM", dist.MultivariateNormal(W_mu, 0.1 * jnp.eye(self.N_knots))
+        )
+        delW_HM = jnp.reshape(
+            delW_HM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+        )
+        delW_LM = jnp.reshape(
+            delW_LM, (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
+        )
+        W0_HM = numpyro.deterministic("W0_HM", W0 + delW_HM)
+        W0_LM = numpyro.deterministic("W0_LM", W0 + delW_LM)
+        W0 = (
+            HM_flag[:, None, None] * W0_HM[None, ...]
+            + (1 - HM_flag)[:, None, None] * W0_LM[None, ...]
+        )
+        return W0
+
+    def _sample_shared_RV(self, dust_pop: DustPop, RV: str | Number) -> DustPop:
+        """ Sample the RV used by all SNe within a given population. """
+        split = dust_pop.LM is not None
+        suffix = "HM" if split else ""
+        hm_dust, lm_dust = dust_pop.HM, dust_pop.LM
+        if RV == "uniform":
+            hm_RV = numpyro.sample(
+                f"RV{suffix}",
+                dist.Uniform(hm_dust.uniform_RV_min, hm_dust.uniform_RV_max)
             )
+            if split:
+                lm_RV = numpyro.sample(
+                    f"RV_LM",
+                    dist.Uniform(lm_dust.uniform_RV_min, lm_dust.uniform_RV_max)
+                )
+        elif RV == "normal":
+            hm_RV = numpyro.sample(
+                f"RV{suffix}",
+                dist.TruncatedNormal(hm_dust.mu_R, hm_dust.sigma_R, low=1.2),
+            )
+            if split:
+                lm_RV = numpyro.sample(
+                    f"RV_LM",
+                    dist.TruncatedNormal(lm_dust.mu_R, lm_dust.sigma_R, low=1.2),
+                )
         else:
-            dust_pop, M0, W0 = self._get_fixed_dust_hyperparams(
-                split_variant=split_variant,
-                mass=mass,
-                M_split=M_split,
-                W0=W0,
-                **kwargs,
-            )
-        split_kwargs = {"HM": dict(dust_pop.HM._asdict(), **kwargs)}
-        if dust_pop.LM is not None:
-            split_kwargs["LM"] = dict(dust_pop.LM._asdict(), **kwargs)
-        split_kwargs["HM"]["sigma0"] = dust_pop.sigma0
-        return split_kwargs, dust_pop.HM_flag, M0, W0
+            hm_RV = lm_RV = RV
+        hm_dust = DustHyperParams(*hm_dust[:-1], hm_RV)
+        if split:
+            lm_dust = DustHyperParams(*lm_dust[:-1], hm_RV)
+        dust_pop = DustPop(hm_dust, lm_dust, dust_pop.HM_flag, dust_pop.sigma0)
+        return dust_pop
 
     def _sample_z(
         self,
@@ -2475,19 +2826,11 @@ class SEDmodel(object):
 
     def _sample_SN_dust_params(
         self,
-        dust_params: DustParams | None = None,
-        tauA: float | ArrayLike | None = None,
+        dust_params: DustHyperParams | None = None,
         AV_dist: Callable[[float], Array] = dist.Exponential,
         fix_AV: float | None = None,
-        global_RV: ArrayLike | None = None,
-        mu_R: ArrayLike | None = None,
-        sigma_R: ArrayLike | None = None,
-        phi_alpha_R: ArrayLike | None = None,
+        shared_RV: bool = True,
         redshift: float | ArrayLike = 0,
-        mu_z_grad: float = 0,
-        tau_z_grad: float = 0,
-        uniform_RV_min: float = 1,
-        uniform_RV_max: float = 6,
         suffix: str = "",
         **kwargs: Any,
     ) -> tuple[Array, Array]:
@@ -2495,33 +2838,16 @@ class SEDmodel(object):
 
         Parameters
         ----------
-        dust_params: DustParams, optional
-            NamedTuple containing population dust parameters. If provided, overrides
-            individual dust arguments.
-        tauA:
-            Scale factor for sampling AV ~ Exponential(1/tauA).
+        dust_params: DustHyperParams, optional
+            NamedTuple containing population dust parameters.
         AV_dist:
             The stochastic function used to draw AV as fn(1/tauA).
         fix_AV: default None
             If not None, use float(fix_AV) as the AV value for all SNe.
-        global_RV: default None
-            If self.RV_type == "global", this is the RV value for all SNe.
-        mu_R: default None
-            If self.RV_type == "pop", this is used to calculate RV.
-        sigma_R: default None
-            If self.RV_type == "pop", this is used to calculate RV.
-        phi_alpha_R: default None
-            If self.RV_type == "pop", this is used to calculate RV.
+        shared_RV: default True
+            If True, use the same RV for all SNe, otherwise sample.
         redshift: default 0
             Needed if mu_z_grad or tau_z_grad are not 0.
-        mu_z_grad: default 0
-            global_RV and mu_R are increased by redshift * mu_z_grad.
-        tau_z_grad: default 0
-            tauA is increased by redshift * tau_z_grad.
-        uniform_RV_min: default 1
-            If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
-        uniform_RV_max: default 6
-            If self.RV_type == "uniform", RV ~ U(uniform_RV_min, uniform_RV_max).
         suffix: default ""
             This string is appended to the parameter naming scheme used by numpyro.
 
@@ -2530,78 +2856,57 @@ class SEDmodel(object):
             AV:
             RV:
         """
-        if dust_params is not None:
-            tauA = dust_params.tauA
-            global_RV = dust_params.global_RV
-            mu_R = dust_params.mu_R
-            sigma_R = dust_params.sigma_R
-            phi_alpha_R = dust_params.phi_alpha_R
-            mu_z_grad = dust_params.mu_z_grad
-            tau_z_grad = dust_params.tau_z_grad
-
         suffix = f"_{suffix}".replace("__", "_").rstrip("_")
         if fix_AV is not None:
             AV = jnp.array([float(fix_AV)])
         else:
-            AV = numpyro.sample(f"AV{suffix}", AV_dist(1 / (tauA + redshift * tau_z_grad)))
+            AV = numpyro.sample(f"AV{suffix}", AV_dist(1 / (dust_params.tauA + redshift * dust_params.tau_z_grad)))
 
-        if self.RV_type == "global":
-            RV = global_RV + redshift * mu_z_grad
-        if self.RV_type == "pop":
-            RV_tform = numpyro.sample(f"RV_tform{suffix}", dist.Uniform(0, 1))
-            RV = numpyro.deterministic(
+        z_drift = redshift * dust_params.mu_z_grad
+        if shared_RV:
+            RV = dust_params.RV + z_drift
+        elif dust_params.RV == "uniform":
+                RV = numpyro.sample(
+                    f"RV{suffix}", dist.Uniform(
+                        dust_params.uniform_RV_min + z_drift, dust_params.uniform_RV_max + z_drift
+                    )
+                )
+        elif dust_params.RV == "normal":
+            RV = numpyro.sample(
                 f"RV{suffix}",
-                mu_R + redshift * mu_z_grad + sigma_R * ndtri(phi_alpha_R + RV_tform * (1 - phi_alpha_R)),
+                dist.TruncatedNormal(
+                    dust_params.mu_R + z_drift, dust_params.sigma_R, low=1.2
+                ),
             )
-        elif self.RV_type == "uniform":
-            RV = numpyro.sample(f"RV{suffix}", dist.Uniform(uniform_RV_min, uniform_RV_max))
         return AV, RV
 
     def _sample_split_SN_dust_params(
         self,
-        dust_pop: DustPop | None = None,
+        dust_pop: DustPop,
+        shared_RV: bool = True,
         redshift: ArrayLike = 0,
         z_obs: ArrayLike | None = None,
-        split_variant: str | None = None,
-        HM_flag: ArrayLike | None = None,
         **kwargs: Any,
     ) -> tuple[Array, Array]:
         """Sample AV and RV for each SN given population dust parameters."""
         if z_obs is None:
             z_obs = redshift
 
-        if dust_pop is not None:
-            split_variant = dust_pop.split_variant
-            HM_flag = dust_pop.HM_flag
-            AV, RV = self._sample_SN_dust_params(
-                dust_params=dust_pop.HM,
-                redshift=redshift,
-                suffix="HM" * (split_variant is not None),
-                **kwargs,
-            )
-            if split_variant is not None and dust_pop.LM is not None:
-                AV_LM, RV_LM = self._sample_SN_dust_params(
-                    dust_params=dust_pop.LM,
-                    redshift=z_obs,
-                    suffix="LM",
-                    **kwargs,
-                )
-                AV = numpyro.deterministic("AV", HM_flag * AV + (1 - HM_flag) * AV_LM)
-                RV = numpyro.deterministic("RV", HM_flag * RV + (1 - HM_flag) * RV_LM)
-            return AV, RV
-
-        # Legacy fallback if dust_pop is not provided
-        split_kwargs = kwargs
+        HM_flag = dust_pop.HM_flag
         AV, RV = self._sample_SN_dust_params(
+            dust_params=dust_pop.HM,
+            shared_RV=shared_RV,
             redshift=redshift,
-            suffix="HM" * (split_variant is not None),
-            **split_kwargs.get("HM", {}),
+            suffix="HM" * (dust_pop.LM is not None),
+            **kwargs,
         )
-        if split_variant is not None:
+        if dust_pop.LM is not None:
             AV_LM, RV_LM = self._sample_SN_dust_params(
+                dust_params=dust_pop.LM,
+                shared_RV=shared_RV,
                 redshift=z_obs,
                 suffix="LM",
-                **split_kwargs.get("LM", {}),
+                **kwargs,
             )
             AV = numpyro.deterministic("AV", HM_flag * AV + (1 - HM_flag) * AV_LM)
             RV = numpyro.deterministic("RV", HM_flag * RV + (1 - HM_flag) * RV_LM)
@@ -2778,7 +3083,6 @@ class SEDmodel(object):
                 values=self.initial_guess(args, reference_model=args["initialisation"])
             )
         mode = args["mode"]
-        self.RV_type = args["rv_type"]
         fitting_mode = mode.startswith("fit") or (mode == "custom" and not args["train_new_model"] and not args["infer_dust_properties"])
 
         regularize_mass_matrix = fitting_mode
@@ -3110,10 +3414,11 @@ class SEDmodel(object):
         )
         rng = PRNGKey(0)
         mcmc.run(
-            rng, self.data, weights, **args, extra_fields=("potential_energy",),
+            rng, self.data, self.band_weights, **args, extra_fields=("potential_energy",),
         )
         mcmc.print_summary()
         samples = mcmc.get_samples(group_by_chain=True)
+        return samples
 
     def fit_from_file(
         self,
@@ -3485,9 +3790,9 @@ class SEDmodel(object):
         self,
         samples: dict,
         args: dict,
-        l_knot_1: float | int = 6200.0,
-        tau_knot_0: float | int = 0.0,
-        tau_knot_1: float | int = 10.0
+        l_knot_1: Number = 6200.0,
+        tau_knot_0: Number = 0.0,
+        tau_knot_1: Number = 10.0
     ) -> None:
         """
         Function to postprocess BayeSN output. Applies transformations to some
@@ -3505,128 +3810,57 @@ class SEDmodel(object):
             defines model wavelength range and data set to load.
         """
         start = time.time()
-        if "W1" in samples:  # If training
+        if args["train_new_model"]:
+            # Breaking the degeneracy will change the samples, so save a copy first.
             with open(args["outputdir"] / "initial_chains.pkl", "wb") as file:
                 pickle.dump(samples, file)
-            # Sign flipping-----------------
-            J_R = spline_coeffs([float(l_knot_1)], self.l_knots, invKD(self.l_knots))
-            J_0 = spline_coeffs([float(tau_knot_0)], self.tau_knots, invKD(self.tau_knots))
-            J_10 = spline_coeffs([float(tau_knot_1)], self.tau_knots, invKD(self.tau_knots))
-            W1 = np.reshape(
-                samples["W1"],
-                (
-                    samples["W1"].shape[0],
-                    samples["W1"].shape[1],
-                    self.l_knots.shape[0],
-                    self.tau_knots.shape[0],
-                ),
-                order="F",
+            samples["theta"], samples["W1"] = self._fix_W1_theta_sign_degen(
+                theta=samples["theta"],
+                W1=samples["W1"],
+                l_knot_1=l_knot_1,
+                tau_knot_0=tau_knot_0,
+                tau_knot_1=tau_knot_1
             )
-            N_chains = W1.shape[0]
-            sign = np.zeros(N_chains)
-            for chain in range(N_chains):
-                chain_W1 = np.mean(W1[chain, ...], axis=0)
-                padded_chain_W1 = np.ones((chain_W1.shape[0]+1, chain_W1.shape[1]+1))
-                padded_chain_W1[1:,1:] = chain_W1
-                chain_sign = np.sign(
-                    np.squeeze(np.matmul(J_R, np.matmul(padded_chain_W1, J_10.T)))
-                    - np.squeeze(np.matmul(J_R, np.matmul(padded_chain_W1, J_0.T)))
-                )
-                sign[chain] = chain_sign
-            samples["W1"] = samples["W1"] * sign[:, None, None]
-            samples["theta"] = samples["theta"] * sign[:, None, None]
-            # Modify W1 and theta----------------
-            theta_std = np.std(samples["theta"], axis=2)
-            samples["theta"] = samples["theta"] / theta_std[..., None]
-            samples["W1"] = samples["W1"] * theta_std[..., None]
+            self._make_yaml_from_samples(samples=samples, args=args)
 
-            # Save best fit global params to files for easy inspection and reading in------
-            W0 = np.mean(samples["W0"], axis=[0, 1]).reshape(
-                (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
-            W1 = np.mean(samples["W1"], axis=[0, 1]).reshape(
-                (self.l_knots.shape[0], self.tau_knots.shape[0]), order="F"
-            )
+        fitting_mode = args["mode"].startswith("fit") or (not args["train_new_model"] and not args["infer_dust_properties"])
 
-            L_Sigma = np.matmul(
-                np.diag(np.mean(samples["sigmaepsilon"], axis=[0, 1])),
-                np.mean(samples["L_Omega"], axis=[0, 1]),
-            )
-            # L_Sigma_dust = np.matmul(
-            #     np.diag(np.mean(samples["sigmaepsilon_dust"], axis=[0, 1])),
-            #     np.mean(samples["L_Omega_dust"], axis=[0, 1]),
-            # )
-            sigma0 = self.sigma0
-            if "sigma0" in samples:
-                sigma0 = np.mean(samples["sigma0"])
-            tauA = self.tauA
-            if "tauA" in samples:
-                tauA = np.mean(samples["tauA"])
-
-            yaml_data = {
-                "M0": float(self.M0),
-                "SIGMA0": float(sigma0),
-                "TAUA": float(tauA),
-                "TAU_KNOTS": self.tau_knots.tolist(),
-                "L_KNOTS": self.l_knots.tolist(),
-                "W0": W0.tolist(),
-                "W1": W1.tolist(),
-                "L_SIGMA_EPSILON": L_Sigma.tolist(),
-                # "L_SIGMA_EPSILON_DUST": L_Sigma_dust.tolist(),
-            }
-
-            if args["rv_type"] == "global":
-                yaml_data["RV"] = float(self.RV)
-            elif args["rv_type"] == "uniform":
-                yaml_data["RV"] = float(np.mean(samples.get("RV", float(self.RV))))
-            elif args["rv_type"] == "pop":
-                yaml_data["MUR"] = float(np.mean(samples.get("mu_R", float(self.RV))))
-                yaml_data["SIGMAR"] = float(np.mean(samples["sigma_R"]))
-
-            with open(args["outputdir"] / "bayesn.yaml", "w") as file:
-                yaml.dump(yaml_data, file)
-
-        z_HEL = self.data.z_hel
-        muhat = self.data.muhat
-
-        if args["mode"].startswith("fit"):
+        if fitting_mode:
             muhat_err = 5
-            Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
+            Ds_err = np.hypot(muhat_err, self.sigma0)
             if args["photoz"]:
                 # Cosmology-independent: report the fitted light-curve distance Ds directly,
-                # without the muhat (catalog-z distmod) shrinkage that would inject a fiducial cosmology
+                # without the muhat (cosmo(z_hubble) distmod) shrinkage that would inject a fiducial cosmology
                 samples["mu"] = samples["Ds"]
                 samples["delM"] = np.zeros_like(samples["Ds"])
             else:
                 samples["mu"] = np.random.normal(
                     loc=(
                         samples["Ds"] * np.power(muhat_err, 2)
-                        + muhat * np.power(self.sigma0, 2)
+                        + self.data.muhat * np.power(self.sigma0, 2)
                     ) / np.power(Ds_err, 2),
-                    scale=np.sqrt(
-                        (np.power(self.sigma0, 2) * np.power(muhat_err, 2))
-                        / np.power(Ds_err, 2)
-                    ),
+                    scale=self.sigma0 * muhat_err / Ds_err
                 )
                 samples["delM"] = samples["Ds"] - samples["mu"]
-            if "tmax" in samples:  # Convert tmax samples into peak_MJD samples
+            if not args["fix_tmax"]:  # Convert tmax samples into peak_MJD samples
                 # Time dilation at the fitted z for photo-z, else the fixed catalog z
-                z_dilation = samples["z"] if args["photoz"] else z_HEL[None, None, :]
-                samples["peak_MJD"] = self.ds.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
+                z_dilation = samples["z"] if args["photoz"] else self.data.z_hel[None, None, :]
+                samples["peak_MJD"] = self.dataset.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
             fitprob, fitchi2, ndof = self.get_fitprob(samples, batch_size=args.get("batch_size"))
 
-            # Create lcplot file
+            # Add flux from chains to lcplot_data and create lcplot file
+            # Real data will have DATA_FLAG=1 and model flux 0
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
             if args["num_lcplot"] is None:
-                num_lcplot = self.data.z_hel.shape[0]
+                num_lcplot = self.dataset.N_sn
             else:
                 num_lcplot = args["num_lcplot"]
 
             if num_lcplot > 0:
                 bands_by_cid = self.lcplot_data.groupby("CID")["FLT"].unique().to_dict()
-                bands = [list(bands_by_cid.get(sn, [])) for sn in self.ds.snid]
+                bands = [list(bands_by_cid.get(sn, [])) for sn in self.dataset.snid]
                 f = self.get_flux_from_chains(
                     t,
                     bands,
@@ -3645,7 +3879,7 @@ class SEDmodel(object):
                 fit_dfs = []
                 for i, sn in enumerate(self.lcplot_data.CID.unique()):
                     fit_df = pd.DataFrame()
-                    fit_df["MJD"] = (self.ds.peak_mjd[i] + t * (1 + z_hel[i])).repeat(
+                    fit_df["MJD"] = (self.dataset.peak_mjd[i] + t * (1 + z_hel[i])).repeat(
                         len(bands[i])
                     )
                     fit_df["FLUXCAL"] = f[i, : len(bands[i]), :].flatten(order="F")
@@ -3745,8 +3979,8 @@ class SEDmodel(object):
             # Output yaml
             out_dict = {
                 "ABORT_IF_ZERO": 1,
-                "SURVEY": self.survey,
-                "IDSURVEY": int(self.survey_id),
+                "SURVEY": getattr(self, "survey", "NULL"),
+                "IDSURVEY": int(getattr(self, "survey_id", 0)),
                 "NEVT_TOT": self.data.z_hel.shape[0],
                 "NEVT_LC_CUTS": self.data.z_hel.shape[0],
                 "NEVT_LCFIT_CUTS": int(self.data.z_hel.shape[0] - drop_count),
@@ -3755,7 +3989,9 @@ class SEDmodel(object):
             with open(f"{args['outfile_prefix']}.YAML", "w") as file:
                 yaml.dump(out_dict, file)
 
-        if not (args["mode"].startswith("fit") and args["snana"]):
+            if fitting_mode:
+                return
+
             # Save convergence data for each parameter to csv file
             summary = arviz.summary(samples)
             summary.to_csv(args["outputdir"] / "fit_summary.csv")
@@ -3763,16 +3999,113 @@ class SEDmodel(object):
             with open(args["outputdir"] / "chains.pkl", "wb") as file:
                 pickle.dump(samples, file)
 
-            dump_args = copy.deepcopy(args)
-            for k, v in dump_args.items():
-                if isinstance(v, Path):
-                    dump_args[k] = str(v)
+            dump_args = {key: str(val) if isinstance(val, Path) else val for key, val in args.items()}
             with open(args["outputdir"] / "input.yaml", "w") as file:
                 if args.get("AV_dist") == dist.Exponential:
                     dump_args["AV_dist"] = "dist.Exponential"
                 elif args.get("AV_dist") == zltn.My_Exponential:
                     dump_args["AV_dist"] = "zltn.My_Exponential"
                 yaml.dump(dump_args, file)
+
+    def _fix_W1_theta_sign_degen(
+        self,
+        theta: ArrayLike,
+        W1: ArrayLike,
+        l_knot_1: Number = 6200.,
+        tau_knot_0: Number = 0.,
+        tau_knot_1: Number = 10.,
+    ) -> dict:
+        """The model has multiple symmetries that will lead to unreliable parameter
+        estimation if not corrected.
+
+        The model is degenerate under the transformation (theta, W1) -> (-theta, -W1).
+        We force the W1 surface evaluated at wavelength l_knot_1 to increase between
+        the phases tau_knot_0 and tau_knot_1.
+
+        The model is also degenerate under (theta, W1) -> (A*theta, W1/A) for constant A.
+        (the previous degeneracy is a special case A=-1). Although theta is sampled from
+        N(0, 1), we force std(theta) = 1 in the posterior to break this degeneracy.
+        """
+        J_R = spline_coeffs([float(l_knot_1)], self.l_knots, invKD(self.l_knots))
+        J_0 = spline_coeffs([float(tau_knot_0)], self.tau_knots, invKD(self.tau_knots))
+        J_10 = spline_coeffs([float(tau_knot_1)], self.tau_knots, invKD(self.tau_knots))
+        W1_grid = np.reshape(
+            W1,
+            (W1.shape[0], W1.shape[1], self.l_knots.shape[0], self.tau_knots.shape[0],),
+            order="F",
+        )
+        N_chains = W1_grid.shape[0]
+        sign = np.zeros(N_chains)
+        for chain in range(N_chains):
+            chain_W1 = np.mean(W1_grid[chain, ...], axis=0)
+            padded_chain_W1 = np.ones((chain_W1.shape[0]+1, chain_W1.shape[1]+1))
+            padded_chain_W1[1:,1:] = chain_W1
+            chain_sign = np.sign(
+                np.squeeze(np.matmul(J_R, np.matmul(padded_chain_W1, J_10.T)))
+                - np.squeeze(np.matmul(J_R, np.matmul(padded_chain_W1, J_0.T)))
+            )
+            sign[chain] = chain_sign
+        theta = theta * sign[:, None, None]
+        W1 = W1 * sign[:, None, None]
+        # Modify W1 and theta----------------
+        theta_std = np.std(theta, axis=2)
+        theta = theta / theta_std[..., None]
+        W1 = W1 * theta_std[..., None]
+        return theta, W1
+
+    def _make_yaml_from_samples(
+        self,
+        samples: dict,
+        args: dict,
+        outfile: str | Path = "bayesn.yaml"
+    ):
+        """Save best fit global params to files for easy inspection and reading in.
+        """
+        W_shape = (self.l_knots.shape[0], self.tau_knots.shape[0])
+        W0 = np.mean(samples["W0"], axis=[0, 1]).reshape(W_shape, order="F")
+        W1 = np.mean(samples["W1"], axis=[0, 1]).reshape(W_shape, order="F")
+        L_Sigma = np.matmul(
+            np.diag(np.mean(samples["sigmaepsilon"], axis=[0, 1])),
+            np.mean(samples["L_Omega"], axis=[0, 1]),
+        )
+        yaml_data = {
+            "M0": float(self.M0),
+            "TAU_KNOTS": self.tau_knots.tolist(),
+            "L_KNOTS": self.l_knots.tolist(),
+            "L_SIGMA_EPSILON": L_Sigma.tolist(),
+            "W1": W1.tolist(),
+        }
+        if args["split_variant"] == "split_sed":
+            for suffix in ("_HM", "_LM"):
+                delW = np.mean(
+                    samples[f"delW{suffix}"], axis=[0, 1]
+                ).reshape(W_shape, order="F")
+                yaml_data[f"W0{suffix}"] = (W0 + delW).tolist()
+        else:
+            yaml_data["W0"] = W0.tolist()
+        for key in (
+            # The keys that may vary by mass split, see _sample_model_dust_params
+            "sigma0", "tauA", "mu_R", "sigma_R", "uniform_RV_min", "uniform_RV_max",
+            "mu_z_grad", "tau_z_grad", "M_step"
+        ):
+            for suffix in ("", "_HM", "_LM"):
+                if key + suffix in samples:
+                    yaml_data[key.upper()+suffix] = float(np.mean(samples[key + suffix]))
+
+        if not args["infer_dust_properties"]:
+            yaml_data.update({"SIGMA0": float(self.sigma0), "TAUA": float(self.tauA)})
+
+        if isinstance(args["RV"], Number):
+            yaml_data["RV"] = float(args["RV"])
+        elif args["shared_RV"]:
+            yaml_data["RV"] = float(np.mean(samples["RV"]))
+
+        for key in ("MU_R", "SIGMA_R"):  # for backwards compatibility, need
+            if key in yaml_data:
+                yaml_data[key.replace("_", "")] = yaml_data.pop(key)
+
+        with open(args["outputdir"] / outfile, "w") as file:
+            yaml.dump(yaml_data, file)
 
     #################
     ### Utilities ###
@@ -4589,6 +4922,7 @@ class SEDmodel(object):
             print()
         if return_dict:
             return ret_dict
+
     @property
     def inv_band_dict(self) -> dict[int, str]:
         return {val: key for key, val in self.band_dict.items()}
