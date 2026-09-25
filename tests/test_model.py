@@ -6,6 +6,7 @@ from ruamel.yaml import YAML
 import shutil
 import time
 from typing import Any
+from unittest.mock import patch
 from warnings import warn
 
 from bayesn.bayesn_model import SEDmodel, default_kwargs
@@ -60,7 +61,6 @@ def model(initial_args: dict) -> SEDmodel:
     model = SEDmodel(load_model=initial_args["load_model"], load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
     return model
 
-from unittest.mock import patch
 
 @pytest.fixture(scope="module")
 def custom_model(initial_args: dict, model: SEDmodel) -> SEDmodel:
@@ -101,7 +101,7 @@ def loaded_model_and_args(initial_args: dict, model: SEDmodel) -> tuple[SEDmodel
     cmd_args = {"input": str(TEST_DIR / "input.yaml")}
     # T21_mini_set.txt uses PS1 data.
     model._set_used_bands(bands=[f"{bp}_PS1" for bp in "griz"])
-    args = model.parse_args(initial_args, cmd_args)
+    args = model.parse_args(initial_args, cmd_args, verbose=False)
     model.process_dataset(args)
     return model, args
 
@@ -132,7 +132,8 @@ class TestInit:
             assert getattr(custom_model, attr) == getattr(model, attr)
 
     def test_pop_rv_init(self, initial_args: dict, custom_model: SEDmodel):
-        assert custom_model.RV_type == "pop"
+        assert not custom_model.shared_RV
+        assert custom_model.RV is None
         assert custom_model.mu_R == 2.61
         assert custom_model.sigma_R == 0.5
 
@@ -146,14 +147,15 @@ class TestInit:
 
     def test_example_lc_exists(self, model: SEDmodel):
         assert Path(model.example_lc).exists()
-    @pytest.mark.parametrize("attr_name", ("M0", "sigma0", "tauA", "mu_R", "sigma_R"))
+
+    @pytest.mark.parametrize("attr_name", ("M0", "sigma0", "tauA", "RV"))
     def test_0d_arrs(self, model: SEDmodel, attr_name: str):
-        attr = getattr(model, attr_name, jnp.array(0))  # mu_R and sigma_R can be undef
+        attr = getattr(model, attr_name)
         assert isinstance(attr, jax.Array)
         assert len(attr.shape) == 0
         assert not jnp.isnan(attr)
 
-    @pytest.mark.parametrize("attr_name", ("l_knots", "tau_knots"))
+    @pytest.mark.parametrize("attr_name", ("l_knots", "tau_knots", "model_wave", "hires_wave"))
     def test_1d_arrs(self, model: SEDmodel, attr_name: str):
         attr = getattr(model, attr_name)
         assert isinstance(attr, jax.Array)
@@ -181,7 +183,7 @@ class TestInit:
         assert test_obj.shape == shape
         with open(PICKLE_DIR / f"{arr_name}.pkl", "rb") as f:
             ref = pickle.load(f)
-        assert jnp.isclose(test_obj, ref, rtol=rtol, atol=atol).all()
+        np.testing.assert_allclose(test_obj, ref, rtol=rtol, atol=atol)
 
     def test_init_band_dicts(self, model: SEDmodel):
         assert model.band_dict == {"NULL_BAND": 0}
@@ -239,7 +241,7 @@ class TestBandWeights:
     @pytest.mark.parametrize("filter_yaml", ("test_filter_std_root.yaml", "test_filter_filt_root.yaml"))
     def test_custom_filter_dict(self, model: SEDmodel, filter_yaml: str):
         model = copy.deepcopy(model)
-        model.filter_yaml = str(TEST_DIR / filter_yaml)
+        model.filter_yaml = TEST_DIR / filter_yaml
         # filter.yaml file uses env variable
         old_env = os.environ.pop("BAYESN_TEST_VAR", None)
         with pytest.raises(FileNotFoundError, match="The environment variable"):
@@ -363,21 +365,16 @@ class TestYaml:
         with pytest.raises(ValueError, match="mode is fitting but train_new_model"):
             model._parse_mode(mode_args)
 
-    def test_parse_mode_training(self, initial_args: dict, model: SEDmodel):
-        for mode in (
-            "training_pop_rv",
-            "training_globalRv",
-        ):
-            mode_args = copy.deepcopy(initial_args)
-            mode_args["mode"] = mode
-            mode_args.pop("shared_RV", None)
+    @pytest.mark.parametrize("mode,shared_RV", (("training_pop_rv", False), ("training_globalRv", True)))
+    def test_parse_mode_training(self, initial_args: dict, model: SEDmodel, mode: str, shared_RV: bool):
+        mode_args = copy.deepcopy(initial_args)
+        mode_args["mode"] = mode
+        mode_args.pop("shared_RV", None)
+        with pytest.warns(UserWarning, match=f"shared_RV was inferred as {shared_RV}"):
             mode_args = model._parse_mode(mode_args)
-            for key, val in self.expected_values.items():
-                assert mode_args[key] == val[1]
-            if "global" in mode:
-                assert mode_args["shared_RV"]
-            elif "pop" in mode:
-                assert not mode_args["shared_RV"]
+        for key, val in self.expected_values.items():
+            assert mode_args[key] == val[1]
+        assert mode_args["shared_RV"] == shared_RV
 
     def test_parse_mode_dust(self, initial_args: dict, model: SEDmodel):
         for mode in (

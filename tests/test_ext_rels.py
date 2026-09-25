@@ -55,6 +55,10 @@ def initial_args() -> dict:
 @pytest.fixture(scope="module")
 def F99() -> DustExtRel:
     return DustExtRel(name="F99", x_in="default", default_min_wave=3500, default_max_wave=9500)
+
+@pytest.fixture(scope="module")
+def F19() -> DustExtRel:
+    return DustExtRel(name="F19", x_in="default", default_min_wave=3500, default_max_wave=9500)
 #############
 ### Tests ###
 #############
@@ -74,11 +78,72 @@ de_args = (
     ("G23", 2e-9),
 )
 
+def test_str_rep(F99: DustExtRel):
+    assert str(F99) == f"DustExtRel: {F99.name}"
+
+def test_bad_subdomain(F99: DustExtRel):
+    F99.n_subdomains += 0.5
+    with pytest.raises(ValueError, match=f"n_subdomains {F99.n_subdomains} is not an "):
+        F99._validate_params()
+    F99.n_subdomains = int(F99.n_subdomains)
+
+def test_bad_range(F99: DustExtRel):
+    F99.range = F99.range[::-1]
+    with pytest.raises(ValueError, match=f"range"):
+        F99._validate_params()
+    F99.range = F99.range[::-1]
+
+def test_bad_units(F99: DustExtRel):
+    old_units = F99.units
+    F99.units = "inverse inches"
+    with pytest.raises(ValueError, match=f"units"):
+        F99._validate_params()
+    F99.units = old_units
+
+def test_bad_xk_shape(F99: DustExtRel):
+    old_xk = F99.xk
+    F99.xk = jnp.ones((F99.n_subdomains+1, 3))
+    with pytest.raises(ValueError, match=f"xk shape"):
+        F99._validate_params()
+    F99.xk = old_xk
+
+def test_bad_rv_coeffs_shape(F99: DustExtRel):
+    old_rv_coeffs = F99.rv_coeffs
+    F99.rv_coeffs = F99.rv_coeffs[:,:,0]
+    with pytest.raises(ValueError, match=f"rv_coeffs"):
+        F99._validate_params()
+    F99.rv_coeffs = old_rv_coeffs
+
+def test_bad_output_type(F99: DustExtRel):
+    old_output_type = F99.output_type
+    F99.output_type = "A_x/A_V"
+    with pytest.raises(ValueError, match=f"output_type"):
+        F99._validate_params()
+    F99.output_type = old_output_type
+
 def test_custom_DER(F99: DustExtRel):
     test_der = DustExtRel(name=os.path.join(TEST_DIR, "test_ext_rel.yaml"))
     assert (F99.ax == test_der.ax).all()
     assert (F99.bx == test_der.bx).all()
     assert (F99.Jx == test_der.Jx).all()
+
+@pytest.mark.parametrize("x_units,factor", (("angstroms", 1), ("nm", 10), ("um", 1e4)))
+def test_set_x(F99: DustExtRel, x_units: str, factor: int | float):
+    test_der = copy.deepcopy(F99)
+    test_der.default_min_wave /= factor
+    test_der.default_max_wave /= factor
+    test_der.set_x(x_in="default", x_units=x_units)
+    np.testing.assert_allclose(test_der.x, F99.x)
+
+def test_set_x_bad_units(F99: DustExtRel):
+    with pytest.raises(ValueError, match="Unit string"):
+        F99.set_x(x_in="default", x_units="inches")
+
+def test_set_x_custom_x(F99: DustExtRel):
+    test_der = copy.deepcopy(F99)
+    test_der.set_x(x_in=F99.x, x_units="inverse microns")
+    np.testing.assert_allclose(test_der.x, F99.x)
+
 
 def test_ext_rel_short_wl_coverage():
     with pytest.warns(UserWarning):

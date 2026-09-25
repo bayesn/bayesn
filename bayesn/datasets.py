@@ -1593,7 +1593,7 @@ class ObsData(NamedTuple):
     z_hel_err: ArrayLike
     muhat: ArrayLike
     MWEBV: ArrayLike
-    # Arrays with shape (N_sn, N_max_epochs)
+    # Arrays with shape (N_max_epochs, N_sn)
     mjd: ArrayLike
     flux: ArrayLike
     flux_err: ArrayLike
