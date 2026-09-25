@@ -1,4 +1,11 @@
 plots/*
 results/*
 data/lcs/simulations/*
+bayesn/data/dust_maps/
 model_files/T21_model/T21_free_tmax
+bayesn.egg-info/
+build/
+*__pycache__*
+*.swp
+.coverage
+bayesn/data/dust_maps/
