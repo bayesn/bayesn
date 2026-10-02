@@ -1,0 +1,8 @@
+B60 b_stritzinger.dat 15.289  Kron-Cousins B filter based on Stritzinger et al. 2005
+V60 v_stritzinger.dat 14.860  Kron-Cousins V filter based on Stritzinger et al. 2005
+g60 sdss_g.dat 14.2013159905 sloan g at P60
+r60 sdss_r.dat 14.2156544329 sloan r at P60
+i60 sdss_i.dat 13.7775438954 sloan i at P60
+z60 sdss_z.dat 11.8525822106 sloan z at P60
+b60 b_stritzinger.dat vegaB=0  Kron-Cousins B filter based on Stritzinger et al. 2005
+v60 v_stritzinger.dat vegaB=0  Kron-Cousins V filter based on Stritzinger et al. 2005

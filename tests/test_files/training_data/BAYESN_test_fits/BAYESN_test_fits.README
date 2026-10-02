@@ -1,0 +1,135 @@
+DOCUMENTATION:
+  OVERVIEW:
+    TIME_START:   2026-08-25  15:49  # UT
+    SURVEY:       FOUNDATION
+    GENMODEL:     /pscratch/sd/d/desctd/cfs_mirror/SNANA/SURVEYS/LSST/ROOT/models/bayesn/BAYESN.T21
+    SNIA:         True
+    HOST_MACHINE: login35
+    USERNAME:     ado
+    SNDATA_ROOT:  /pscratch/sd/d/desctd/cfs_mirror/SNANA/SNDATA_ROOT
+    SNANA_DIR:     /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/SNANA
+    SNANA_VERSION: v12_02b-8-gb3420c10
+    CWD:   /global/cfs/cdirs/desc-sn/SNANA/SURVEYS/LSST/USERS/ado
+    INPUT_FILE:
+    - INP_FIT_BAYESN_DUST.input
+# 
+  INPUT_KEYS:
+# Output data
+    GENVERSION:              BAYESN_test_fits
+    NGENTOT_LC:              200  
+    FORMAT_MASK:             32  #  += 2,32,16 -> TEXT, FITS, randomCID
+    WRFLAG_MODELPAR:         1  
+    GENTYPE:                 1  # true type
+    SNTYPE:                  1  101  # spec Type, photID type
+    CIDRAN_MIN:              0  
+    CIDRAN_MAX:              3000000  
+# Source model
+    GENMODEL:                $SNANA_LSST_ROOT/models/bayesn/BAYESN.T21 
+    GENMODEL_MSKOPT:         1 
+    GENMAG_SMEAR:            0.0 
+# Cosmology inputs
+    OMEGA_MATTER:            0.3150  
+    OMEGA_LAMBDA:            0.6850  
+    w0_LAMBDA:               -1.0000  
+    wa_LAMBDA:               0  
+# Instrumental inputs
+    GENFILTERS:          griz 
+    CALIB_FILE:          $SNDATA_ROOT/kcor/DES/DES-SN5YR/calib_DES-SN5YR_Foundation.fits.gz    # aka KCOR_FILE
+    SIMLIB_FILE:             $SNDATA_ROOT/simlib/DES/DES-SN5YR_FOUND.SIMLIB 
+    SMEARFLAG_FLUX:      1  # 1->add Poisson noise
+    SMEARFLAG_ZEROPT:    1  # +=1->apply scatter, +=2->add to FLUXERRCAL
+# HOSTLIB inputs
+    HOSTLIB_FILE:            $ELASTICC_HOSTLIB/SNIa_GHOST.HOSTLIB.gz 
+    HOSTLIB_WGTMAP_FILE:     $ELASTICC_WGTMAP/SNIa_GHOST_nox1.WGTMAP 
+    HOSTLIB_MAXDDLR:      4.00    # DDLR cut for match
+    HOSTLIB_MAXDDLR2:     7.00    # DDLR cut for 2nd match (for confusion)
+# SEARCHEFF/detections
+    SEARCHEFF_PIPELINE_LOGIC_FILE:  NONE
+    NEWMJD_DIF:              0.0200  # day-sep if > 1 detections required
+    SEARCHEFF_PIPELINE_EFF_FILE:  NONE
+    SEARCHEFF_SPEC_FILE:     NONE
+    SEARCHEFF_zHOST_FILE:    NONE
+    APPLY_SEARCHEFF_OPT:     1  # += 1,2,4 => pipe,spec,zhost
+# Redshift inputs
+    GENRANGE_REDSHIFT:       0.0150  0.0800  
+    GENSIGMA_REDSHIFT:       1.0000e-03  
+    GENSIGMA_VPEC:           0  # true vpec scatter (km/sec)
+    VPEC_ERR:                0  # vpec error after correction (km/sec)
+# Epoch & sky coverage inputs
+    GENRANGE_PEAKMJD:        57000.0000  57480.0000  
+    GENRANGE_TREST:          -12.5000  45.0000  
+    SOLID_ANGLE:             6.2800  
+# Galactic extinction
+    OPT_MWEBV:        3   
+    OPT_MWCOLORLAW:   99   
+# Population and rate-model params
+    GENPEAK_DELTAM:          0  
+    GENSIGMA_DELTAM:         0.1000  0.1000  
+    GENRANGE_DELTAM:         -0.2640  0.2640  
+    GENPEAK_THETA:           0  
+    GENSIGMA_THETA:          1.0000  1.0000  
+    GENRANGE_THETA:          -5.0000  5.0000  
+    GENTAU_AV:               0.2500  
+    GENRANGE_AV:             0  8.0000  
+    GENPEAK_RV:              2.5100  
+    GENSIGMA_RV:             0.6500  0.6500  
+    GENRANGE_RV:             1.2000  6.0000  
+    DNDZ:                    POWERLAW2 2.6E-5 1.5 0.0 1.4 
+# Misc inputs
+    GENSOURCE:               RANDOM
+    PATH_SNDATA_SIM:         $SNANA_LSST_SIM
+    RANSEED:                 12345  
+    DEBUG_FLAG:              0  
+    SIMGEN_DUMP:             19 CID GENTYPE SNTYPE NON1A_INDEX GENZ LIBID RA DEC MWEBV MU AV RV THETA PEAKMJD SNRMAX PEAKMAG_g PEAKMAG_r PEAKMAG_i PEAKMAG_z 
+# CUTWIN inputs
+    APPLY_CUTWIN_OPT:        1  
+    CUTWIN_NEPOCH:           5 3. 
+    CUTWIN_SNRMAX:           3 griz 2 -20. 60. 
+    CUTWIN_TRESTMIN:         -20 0 
+    CUTWIN_TRESTMAX:         0 40 
+    CUTWIN_MWEBV:            0 0.30 
+# 
+  FILTERS:   # mean wavelength (A)
+    g:  4836.5
+    r:  6214.6
+    i:  7544.6
+    z:  8679.5
+# 
+  INPUT_NOTES:
+  - Poisson noise is ON 
+  - Reported flux-uncertainty includes SKY+GALAXY+SOURCE
+  - SB-dependent flux scatter is OFF
+  -  POWERLAW RATE MODEL:  2.60e-05*(1+z)^1.50  (0.0 < z < 1.4) 
+  -     MODEL_RATE(z=0.01) = 2.659e-05/Mpc^3/yr  dV/dz=1.742e+07   
+  -  Calculated Number of EVENTS per season =  2777 
+  - H0 =  70.00 km/s/Mpc 
+  - Omega_{M,L} =  0.315, 0.685     w0,wa = -1.00,0.000
+  - APPLY_SEARCHEFF_OPT=1 --> Require EFF(PIPELINE) 
+  - PIPELINE requires 0 detections among  (MJD dif > 0.0200 days) 
+#
+  GENTYPE_TO_NAME:  # GENTYPE:  [non]Ia   type  
+    1:  Ia       BAYESN.T21
+# 
+  OUTPUT_SUMMARY:
+    RANDOM_SYNC: 
+    - List=1  FIRST=0.714178  LAST=0.056824   AVG(wrap) = 0.0 +_ 0.1 
+    - List=2  FIRST=0.645028  LAST=0.777114   AVG(wrap) = 0.0 +_ 0.1 
+    - List=3  FIRST=0.033652  LAST=0.203967   AVG(wrap) = 0.0 +_ 0.0 
+# 
+    CPU_MINUTES:       0.00  
+    NGENEV_TOT:        200    # (0/sec, total events)
+    NGENLC_TOT:        200    # (0/sec, total LC)
+    NGENLC_WRITE:      5    # (0/sec, LC passing trigger)
+    NGENSPEC_WRITE:    0  
+    EFF(SEARCH+CUTS):  0.0250 +-  0.0110
+    NACCEPT:  [ 5, 0, 0 ]   # NSN(ACCEPT) for [ SpecID, noSpecID, zHOST]
+    NGEN_PER_SEASON:   2777       # NSN(GENLC) in GENRANGE(z,MJD,dOmega)
+    NACC_PER_SEASON:   69 +_ 31  # NSN(ACCEPT) per season  after trigger+cuts
+    NREJECT:  [0,   184, 0, 11]   # [GENRANGE,   NEP<5, SEARCHEFF, CUTWIN] 
+    HOST_NMATCH:   # accepted
+    - 0 : [    0,   1,   0 ]  # z-ranges:  0.01-0.04, 0.04-0.06, 0.06-0.08
+    - 2 : [    0,   0,   0 ] 
+    HOST_NMATCH_FRACTIONS:  # accepted 
+    - 0 : [  0.000, 0.500, 0.000 ]  # z-ranges:  0.01-0.04, 0.04-0.06, 0.06-0.08
+    - 2 : [  0.000, 0.000, 0.000 ] 
+DOCUMENTATION_END:

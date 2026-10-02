@@ -1,0 +1,3 @@
+4sh_harris.passbands.txt - wavelength in nm, response in normalized
+energy sensitivity => divide by wavelength and renormalize to get
+photon sensitivity
