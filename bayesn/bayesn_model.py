@@ -149,13 +149,19 @@ def merge_systematic_covariance(syst_files):
     """
     Combine the per-SN delta_mu tables written by separate fitting jobs into one systematic
     covariance. Rows are stacked in the order the files are given, which must match the order the
-    Hubble diagram rows were merged in. Writes SNANA's npz covariance format: the number of SNe,
-    then the upper triangle (including the diagonal, row-major) as float32. Columns are labelled by
+    Hubble diagram rows were merged in. Writes whichever formats the jobs wrote; both hold the same
+    arrays, the number of SNe then the upper triangle (including the diagonal, row-major) as float32.
+    Columns are labelled by
     systematic, so one covariance is written per systematic alongside the total; since the columns are
     disjoint these sum exactly to the total.
     """
-    delta_mu, labels = [], None
+    by_stem = {}  # one file per job; a job may have written both formats and the npz is authoritative
     for syst_file in syst_files:
+        file_stem = re.sub(r'\.syst\.(npz|txt)$', '', syst_file)
+        if file_stem not in by_stem or syst_file.endswith('.npz'):
+            by_stem[file_stem] = syst_file
+    delta_mu, labels = [], None
+    for syst_file in by_stem.values():
         job_rows, _, labels_i = read_systematics(syst_file)
         if labels is not None and list(labels_i) != list(labels):
             raise ValueError(f'{syst_file} declares different systematics from the other files being '
@@ -164,18 +170,27 @@ def merge_systematic_covariance(syst_files):
         labels = labels_i
     delta_mu = np.concatenate(delta_mu, axis=0)
 
-    def write(cov, path):  # SNANA's format: upper triangle including the diagonal, row-major, float32
-        np.savez(path, nsn=[cov.shape[0]], cov=cov[np.triu_indices_from(cov)].astype(np.float32),
-                 allow_pickle=False)
+    formats = {'npz' if f.endswith('.npz') else 'txt' for f in syst_files}  # write back what the jobs wrote
+
+    def write(cov, path):  # the same arrays either way: the number of SNe, then the upper triangle
+        cov_triu = cov[np.triu_indices_from(cov)].astype(np.float32)
+        if 'npz' in formats:
+            np.savez(path, nsn=[cov.shape[0]], cov=cov_triu, allow_pickle=False)
+        if 'txt' in formats:
+            with open(f'{path}.txt', 'w') as f:
+                f.write(f'{cov.shape[0]}\n')
+                f.write('\n'.join(f'{v:.10e}' for v in cov_triu) + '\n')
 
     # named after the first file, beside it: {version}_{fitopt}_COVSYS.npz, split or not
     cov_file = re.sub(r'(_SPLIT\d+)?\.syst\.(npz|txt)$', '', syst_files[0]) + '_COVSYS'
     write(delta_mu @ delta_mu.T, cov_file)
-    print(f'Merged {len(syst_files)} systematics files ({delta_mu.shape[0]} SNe) into {os.path.basename(cov_file)}.npz')
+    written = ', '.join(sorted(formats))
+    print(f'Merged {len(by_stem)} systematics files ({delta_mu.shape[0]} SNe) into '
+          f'{os.path.basename(cov_file)} ({written})')
     for label in dict.fromkeys(str(l) for l in labels):  # one file per systematic, contributions are additive
         cols = delta_mu[:, labels == label]
         write(cols @ cols.T, f'{cov_file}_{label}')
-        print(f'  {label:20s} {cols.shape[1]:5d} columns -> {os.path.basename(cov_file)}_{label}.npz')
+        print(f'  {label:20s} {cols.shape[1]:5d} columns -> {os.path.basename(cov_file)}_{label} ({written})')
 
 
 class SEDmodel(object):
