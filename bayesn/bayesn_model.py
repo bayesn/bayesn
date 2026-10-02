@@ -4007,20 +4007,20 @@ class SEDmodel(object):
             if fitting_mode:
                 return
 
-            # Save convergence data for each parameter to csv file
-            summary = arviz.summary(samples)
-            summary.to_csv(args["outputdir"] / "fit_summary.csv")
+        # Save convergence data for each parameter to csv file
+        summary = arviz.summary(samples)
+        summary.to_csv(args["outputdir"] / "fit_summary.csv")
 
-            with open(args["outputdir"] / "chains.pkl", "wb") as file:
-                pickle.dump(samples, file)
+        with open(args["outputdir"] / "chains.pkl", "wb") as file:
+            pickle.dump(samples, file)
 
-            dump_args = {key: str(val) if isinstance(val, Path) else val for key, val in args.items()}
-            with open(args["outputdir"] / "input.yaml", "w") as file:
-                if args.get("AV_dist") == dist.Exponential:
-                    dump_args["AV_dist"] = "dist.Exponential"
-                elif args.get("AV_dist") == zltn.My_Exponential:
-                    dump_args["AV_dist"] = "zltn.My_Exponential"
-                yaml.dump(dump_args, file)
+        dump_args = {key: str(val) if isinstance(val, Path) else val for key, val in args.items()}
+        with open(args["outputdir"] / "input.yaml", "w") as file:
+            if args.get("AV_dist") == dist.Exponential:
+                dump_args["AV_dist"] = "dist.Exponential"
+            elif args.get("AV_dist") == zltn.My_Exponential:
+                dump_args["AV_dist"] = "zltn.My_Exponential"
+            yaml.dump(dump_args, file)
 
     def _fix_W1_theta_sign_degen(
         self,
