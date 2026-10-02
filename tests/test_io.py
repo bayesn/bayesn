@@ -14,7 +14,7 @@ import sncosmo
 from pandas.testing import assert_frame_equal
 
 from bayesn import io
-from bayesn.utils import assert_dicts_match, mag_to_flux, flux_to_mag, get_MWEBV
+from bayesn.utils import assert_dicts_match, convert_z, mag_to_flux, flux_to_mag, get_MWEBV
 
 BASE_DIR = Path(__file__).parent.absolute()
 TEST_DIR = BASE_DIR / "test_files"
@@ -191,10 +191,8 @@ class TestRead:
         assert sn_dict["RA"] == ra
         assert sn_dict["DECL"] == dec
         assert sn_dict["REDSHIFT_HELIO"] == z_helio
+        assert sn_dict["REDSHIFT_FINAL"] == convert_z(z_helio, ra, dec, z_in_type="hel")
         assert np.isclose(sn_dict["MWEBV"], get_MWEBV(ra, dec))
-        for key in sn_dict:
-            if key.endswith("ERR") or key in ("HOSTGAL_LOGMASS", "REDSHIFT_FINAL", "VPEC"):
-                assert sn_dict[key] is None
         # testing obs_df
         np.testing.assert_allclose(obs_df["MJD"].values.astype(float), mjd)
         np.testing.assert_allclose(obs_df["mag"].values.astype(float), mag)
@@ -211,9 +209,7 @@ class TestRead:
         with open(PICKLE_DIR / "snana_fits.pkl", "rb") as f:
             ref_sn_dict, ref_obs_df = pickle.load(f)
         assert_dicts_match(sn_dict, ref_sn_dict, flag_missing_data=True, rtol=1e-5, atol=1e-8)
-        for key in ref_obs_df:
-            assert (obs_df[key] == ref_obs_df[key]).all()
-        assert "snid" in obs_df
+        pd.testing.assert_frame_equal(obs_df, ref_obs_df)
 
 class TestWrite:
     def test_write_from_sn_dict_obs_df(self):

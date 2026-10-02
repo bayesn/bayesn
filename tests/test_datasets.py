@@ -3,13 +3,16 @@ from numbers import Number
 import os
 from pathlib import Path
 import pickle
+from typing import Callable
 
+from astropy.table import QTable
 import pandas as pd
 import pytest
 import numpy as np
 
 from bayesn import io
-from bayesn.utils import assert_dicts_match, mag_to_flux, flux_to_mag
+from bayesn.constants import C_LIGHT
+from bayesn.utils import assert_dicts_match, convert_z, mag_to_flux, flux_to_mag
 from bayesn.datasets import (
     SNDataset,
     meta_names,
@@ -19,6 +22,17 @@ from bayesn.datasets import (
     clean_sn_dict,
     clean_obs_df,
 )
+
+BASE_DIR: Path = Path(__file__).parent.parent.absolute()
+TEST_DIR: Path = BASE_DIR / "tests/test_files"
+NON_EXISTENT_PATH: Path = TEST_DIR / "non_existent"
+
+def non_existent_check():
+    if NON_EXISTENT_PATH.exists():
+        raise FileExistsError(
+            f"{NON_EXISTENT_PATH} exists, so this test cannot trigger the expected "
+            "FileNotFoundError."
+        )
 
 def random_sn_dict(RNG_seed=0, N=1, sim=False) -> dict[str, str | Number]:
     rng = np.random.default_rng(RNG_seed)
@@ -72,11 +86,14 @@ def random_obs_df(RNG_seed: int = 0, zp: Number = 27.5) -> pd.DataFrame:
         "mag": mag, "mag_err": mag_err
     })
     obs_df["snid"] = f"test{RNG_seed}"
+    obs_df["snid"] = obs_df["snid"].astype("category")
     return obs_df
 
 def format_df(df: pd.DataFrame):
     df = df.sort_values(["snid", "flt", "mjd"]).reset_index(drop=True)
-    return df[["snid", "flt", "mjd", "flux", "flux_err", "mag", "mag_err"]]
+    df = df[["snid", "flt", "mjd", "flux", "flux_err", "mag", "mag_err"]]
+    df["snid"] = df["snid"].astype("category")
+    return df
 
 @pytest.fixture
 def sample_data_single_sn() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.ndarray]:
@@ -84,7 +101,6 @@ def sample_data_single_sn() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.nda
     sn_dict = random_sn_dict(RNG_seed=0, N=N_sn)
     sn_dict["test_key"] = np.arange(N_sn)
     obs_df = random_obs_df(RNG_seed=0)
-    phot_idx = np.array([0, len(obs_df)])
     return sn_dict, obs_df
 
 @pytest.fixture
@@ -94,8 +110,6 @@ def sample_data_two_sne() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.ndarr
     sn_dict["test_key"] = np.arange(N_sn)
     obs_dfs = [random_obs_df(RNG_seed=i) for i in range(N_sn)]
     obs_df = pd.concat(obs_dfs, ignore_index=True)
-    N_obs = np.array([len(df) for df in obs_dfs])
-    phot_idx = np.append(0, np.cumsum(N_obs))
     return sn_dict, obs_df
 
 @pytest.fixture
@@ -104,8 +118,6 @@ def sample_data_sim() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.ndarray]:
     sn_dict = random_sn_dict(RNG_seed=0, N=N_sn, sim=True)
     obs_dfs = [random_obs_df(RNG_seed=i) for i in range(N_sn)]
     obs_df = pd.concat(obs_dfs, ignore_index=True)
-    N_obs = np.array([len(df) for df in obs_dfs])
-    phot_idx = np.append(0, np.cumsum(N_obs))
     return sn_dict, obs_df
 
 
@@ -374,6 +386,7 @@ class TestDataAddition:
         new_dict = copy.deepcopy(sn_dict)
         new_dict["snid"][0] = "test2"
         new_df = copy.deepcopy(obs_df)
+        new_df["snid"] = new_df["snid"].cat.add_categories("test2")
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         ds_to_be_added = make_dataset(new_dict, new_df)
@@ -387,6 +400,7 @@ class TestDataAddition:
         new_dict = copy.deepcopy(sn_dict)
         new_dict["snid"][0] = "test2"
         new_df = copy.deepcopy(obs_df)
+        new_df["snid"] = new_df["snid"].cat.add_categories("test2")
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         ds_test = copy.deepcopy(dataset_two_sne)
@@ -399,6 +413,7 @@ class TestDataAddition:
         new_dict = copy.deepcopy(sn_dict)
         new_dict["snid"][0] = "test2"
         new_df = copy.deepcopy(obs_df)
+        new_df["snid"] = new_df["snid"].cat.add_categories("test2")
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         ds_to_be_added = make_dataset(new_dict, copy.deepcopy(new_df))
@@ -412,6 +427,7 @@ class TestDataAddition:
         new_dict = copy.deepcopy(sn_dict)
         new_dict["snid"][0] = "test2"
         new_df = copy.deepcopy(obs_df)
+        new_df["snid"] = new_df["snid"].cat.add_categories("test2")
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         new_dict.pop("test_key")
@@ -656,29 +672,203 @@ class TestAstroGetter:
             dataset_two_sne.get_band_indices(band_dict=default_band_dict)
 
 class TestAstroSetter:
-    def test_fill_out_redshifts(self):
-        pass
-    def test_set_all_rest_phases(self):
-        pass
-    def test_recalibrate_fluxcal_zpt(self):
-        pass
-    def test_apply_filter_map(self):
-        pass
-    def test_apply_error_floor(self):
-        pass
+    def test_fill_out_redshifts_hub_to_hel(self, dataset_two_sne):
+        N_sn, ra, dec, z_hubble, z_hubble_err, vpec, vpec_err = [
+            getattr(dataset_two_sne, attr) for attr in
+            ("N_sn", "ra", "dec", "z_hubble", "z_hubble_err", "vpec", "vpec_err")
+        ]
+        v = vpec / C_LIGHT
+        dv = vpec_err / C_LIGHT
+        z_cmb = (1 + z_hubble) / (1 + v) - 1
+        dz_pv = z_hubble_err / (1 + v)
+        z_dpv = -dv * (1 + z_hubble) / (1 + v)**2
+        z_cmb_err = np.hypot(dz_pv, z_dpv)
+        z_hel, z_hel_err = convert_z(
+                z=z_cmb, ra=ra, dec=dec, z_in_type="cmb", z_err=z_cmb_err
+        )
+        for attr in ("z_helio", "z_helio_err", "z_cmb", "z_cmb_err"):
+            setattr(dataset_two_sne, attr, np.full(N_sn, None))
+        dataset_two_sne.fill_out_redshifts()
+        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        np.testing.assert_allclose(dataset_two_sne.z_helio.astype(float), z_hel)
+        np.testing.assert_allclose(dataset_two_sne.z_helio_err.astype(float), z_hel_err)
+
+    def test_fill_out_redshifts_hel_to_hub(self, dataset_two_sne):
+        N_sn, ra, dec, z_hel, z_hel_err, vpec, vpec_err = [
+            getattr(dataset_two_sne, attr) for attr in
+            ("N_sn", "ra", "dec", "z_helio", "z_helio_err", "vpec", "vpec_err")
+        ]
+        v = vpec / C_LIGHT
+        dv = vpec_err / C_LIGHT
+        z_cmb, z_cmb_err = convert_z(
+                z=z_hel, ra=ra, dec=dec, z_in_type="hel", z_err=z_hel_err
+        )
+        z_hubble = (1 + z_cmb) * (1 + v) - 1
+        dz_pv = z_cmb_err * (1 + v)
+        z_dpv = dv * (1 + z_cmb)
+        z_hubble_err = np.hypot(dz_pv, z_dpv)
+        for attr in ("z_hubble", "z_hubble_err", "z_cmb", "z_cmb_err"):
+            setattr(dataset_two_sne, attr, np.full(N_sn, None))
+        dataset_two_sne.fill_out_redshifts()
+        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        np.testing.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
+        np.testing.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
+
+    def test_fill_out_redshifts_no_overwrite(self, dataset_two_sne):
+        N_sn, ra, dec, z_hel, z_hel_err, z_cmb_err, vpec = [
+            getattr(dataset_two_sne, attr) for attr in
+            ("N_sn", "ra", "dec", "z_helio", "z_helio_err", "z_cmb_err", "vpec")
+        ]
+        v = vpec / C_LIGHT
+        z_cmb, other_z_cmb = convert_z(
+                z=z_hel, ra=ra, dec=dec, z_in_type="hel", z_err=z_hel_err
+        )
+        z_hubble = (1 + z_cmb) * (1 + v) - 1
+        z_hubble_err = z_cmb_err * (1 + v)   # for vpec_err = None
+        for attr in ("z_hubble", "z_hubble_err", "z_cmb", "vpec_err"):
+            setattr(dataset_two_sne, attr, np.full(N_sn, None))
+        dataset_two_sne.fill_out_redshifts()
+        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        np.testing.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
+        np.testing.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
+
+    def test_set_all_rest_phases(self, dataset_two_sne):
+        test = copy.deepcopy(dataset_two_sne)
+        assert "phase" not in test.photometry
+        obs_peaks = np.concatenate([np.full(test.N_obs[i], test.peak_mjd[i]) for i in range(test.N_sn)])
+        obs_z_hels = np.concatenate([np.full(test.N_obs[i], test.z_helio[i]) for i in range(test.N_sn)])
+        test.set_all_rest_phases()
+        pd.testing.assert_series_equal(test.photometry["mjd"], test.photometry["phase"] * (1+obs_z_hels) + obs_peaks, check_names=False)
+
+    def test_recalibrate_fluxcal_zpt(self, dataset_two_sne):
+        test = copy.deepcopy(dataset_two_sne)
+        assert test.fluxcal_zpt == 27.5
+        # testing different data zero-points for test0 and test1
+        test.photometry.loc[test.photometry["snid"] == "test0", ["flux", "flux_err"]] *= 10**0.4
+        test.fluxcal_zpt = 32.5
+        scaling = 100  # 5 mags
+        test.recalibrate_fluxcal_zpt()
+        np.testing.assert_allclose((test.photometry["flux"] / dataset_two_sne.photometry["flux"]).values, 100)
+        np.testing.assert_allclose((test.photometry["flux_err"] / dataset_two_sne.photometry["flux_err"]).values, 100)
+        pd.testing.assert_series_equal(test.photometry["mag"], dataset_two_sne.photometry["mag"])
+
+    def test_apply_filter_map(self, dataset_two_sne):
+        test = copy.deepcopy(dataset_two_sne)
+        bands = test.unique_bands
+        test.apply_filter_map(map_dict={bands[0]: "alpha", bands[1]: "beta"})
+        mask = [col for col in test.photometry.columns if col != "flt"]
+        for i, band in enumerate(("alpha", "beta")):
+            df_ref = dataset_two_sne.photometry.loc[dataset_two_sne.photometry["flt"] == bands[i]]
+            df_test = test.photometry.loc[test.photometry["flt"] == band]
+            pd.testing.assert_frame_equal(df_test[mask], df_ref[mask])
+
+    def test_apply_error_floor(self, dataset_two_sne):
+        test = copy.deepcopy(dataset_two_sne)
+        # no op for non-positive error floors.
+        test.apply_error_floor(0)
+        pd.testing.assert_frame_equal(test.photometry, dataset_two_sne.photometry)
+        sorted_mag_errs = test.photometry.mag_err.sort_values()
+        floor = sorted_mag_errs.values[3]
+        test.apply_error_floor(floor)
+        for i in range(3):
+            idx = sorted_mag_errs.index[i]
+            assert test.photometry.mag_err[idx] == floor
+            assert test.photometry.flux_err[idx] == floor*np.log(10)/2.5*test.photometry.flux[idx]
 
 class TestFactoryMethods:
-    def test_from_ascii_files(self):
-        pass
+    @pytest.mark.parametrize("fname,file_format,read_fn", (("Foundation_DR1_2016W.txt", "SNANA", io.read_snana_ascii), ("CSP_SN2004dt.snpy", "snpy", io.read_snpy)))
+    def test_from_one_ascii(self, fname: str, file_format: str, read_fn: Callable):
+        path = TEST_DIR / f"training_data/{fname}"
+        test_ds = SNDataset.from_ascii_files(path, file_format=file_format)
+        sn_dict, obs_df = read_fn(path)
+        sn_dict = clean_sn_dict(sn_dict)
+        obs_df["snid"] = sn_dict["snid"][0]
+        ref_ds = make_dataset(sn_dict, obs_df)
+        ref_ds.fill_out_redshifts()
+        ref_ds.set_all_rest_phases()
+        assert test_ds == ref_ds
+
+    def test_from_ascii_bad_format(self):
+        path = TEST_DIR / "training_data/Foundation_DR1_2016W.txt"
+        with pytest.raises(ValueError, match="file_format"):
+            test_ds = SNDataset.from_ascii_files(path, file_format="unsupported_format")
+
+    def test_from_multi_ascii(self):
+        paths = [TEST_DIR / f"training_data/{fname}" for fname in ("Foundation_DR1_2016W.txt", "CSP_SN2004dt.snpy")]
+        test_ds = SNDataset.from_ascii_files(paths, file_format=["SNANA", "snpy"])
+        sn_dict_0, obs_df_0 = io.read_snana_ascii(paths[0])
+        sn_dict_1, obs_df_1 = io.read_snpy(paths[1])
+        sn_dict_0 = clean_sn_dict(sn_dict_0)  # just need to clean for make_dataset
+        ref_ds = make_dataset(sn_dict_0, obs_df_0)
+        ref_ds.append(sn_dict=sn_dict_1, obs_df=obs_df_1)
+        ref_ds.fill_out_redshifts()
+        ref_ds.set_all_rest_phases()
+        assert test_ds == ref_ds
+
+    def test_from_ascii_overrides(self):
+        paths = [TEST_DIR / f"training_data/Foundation_DR1_2016{name}.txt" for name in ("W", "afk")]
+        ors = {"z_helio_err": 2e-5, "mwebv_err": [0.1, 0.2]}
+        test_ds = SNDataset.from_ascii_files(paths, file_format="SNANA", overrides=ors)
+        np.testing.assert_allclose(test_ds.z_helio_err, 2e-5)
+        np.testing.assert_allclose(test_ds.mwebv_err, [0.1, 0.2])
+
     def test_from_table_file(self):
-        pass
+        table_path = TEST_DIR / "T21_mini_set.txt"
+        test_ds = SNDataset.from_table_file(table_path, data_root=TEST_DIR)
+        df = pd.read_csv(table_path, sep=r"\s+")
+        N_sn = len(df["SNID"])
+        overrides = {
+            "peak_mjd": df["SEARCH_PEAKMJD"].values,
+            "z_cmb": df["REDSHIFT_CMB"].values,
+            "z_cmb_err": df["REDSHIFT_CMB_ERR"].values,
+            # Propagating overriden redshifts
+            "z_helio": np.full(N_sn, None),
+            "z_helio_err": np.full(N_sn, None),
+            "z_hubble": np.full(N_sn, None),
+            "z_hubble_err": np.full(N_sn, None),
+        }
+        ref_ds = SNDataset.from_ascii_files(
+            [TEST_DIR / path for path in df["files"]],
+            file_format="SNANA",
+            overrides=overrides
+        )
+        assert test_ds == ref_ds
+
+    def test_from_table_file_bad_sn_list(self):
+        table_path = TEST_DIR / "training_data/CSP_SN2004dt.snpy"
+        with pytest.raises(ValueError, match="does not have a header row"):
+            test_ds = SNDataset.from_table_file(table_path, data_root=TEST_DIR)
+
+    def test_from_table_file_bad_formats(self):
+        table_path = TEST_DIR / "T21_mini_set.txt"
+        with pytest.raises(ValueError, match="file_format was provided"):
+            test_ds = SNDataset.from_table_file(
+                table_path, data_root=TEST_DIR, file_format=["snana", "snana"]
+            )
+
     def test_from_snana_fits(self):
-        pass
+        path = TEST_DIR / "training_data/BAYESN_test_fits/BAYESN_test_fits_HEAD.FITS"
+        test_ds = SNDataset.from_snana_fits(path, peakmjd_key="PEAKMJD")
+        sn_dict, obs_df = io.read_snana_fits(path)
+        sn_dict = clean_sn_dict(sn_dict)
+        ref_ds = make_dataset(sn_dict, obs_df, sim=True)
+        ref_ds.fill_out_redshifts()
+        ref_ds.set_all_rest_phases()
+        assert test_ds == ref_ds
+
     def test_from_snana_list(self):
-        pass
+        fits_dir = TEST_DIR / f"training_data/BAYESN_test_fits/"
+        test_ds = SNDataset.from_snana_list(fits_dir / "BAYESN_test_fits.LIST", data_root=fits_dir, peakmjd_key="PEAKMJD")
+        ref_ds = SNDataset.from_snana_fits(fits_dir / "BAYESN_test_fits_HEAD.FITS", peakmjd_key="PEAKMJD")
+        assert test_ds == ref_ds
 
 class TestDataProducts:
-    def test_make_fitres_table(self):
+    def test_make_fitres_table(self, dataset_two_sne):
+        pass
+    def test_make_fitres_table_sim(self, dataset_sim):
         pass
     def test_cut_fitres_table(self):
         pass

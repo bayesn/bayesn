@@ -261,7 +261,7 @@ def where_logic(arr: ArrayLike, val: Number, logic: str) -> tuple[np.ndarray, ..
             return np.where(arr >= val)
         case _:
             raise ValueError(f"Unsupported logic {logic}. Use =, <, <=, >, or >=.")
-def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, rtol=0, atol=0):
+def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, flag_nans=False, rtol=0, atol=0):
     """ Given two dictionaries, check to see if there are any discrepancies that may
     indicate inaccurate data. If any discrepancies are found, raise a ValueError.
     Missing data in one dict does not count as a discrepancy unless the
@@ -298,7 +298,8 @@ def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, rtol=0, atol
             good = np.isclose(
                 np.array(val1[comp_idx], dtype=float),
                 np.array(val2[comp_idx], dtype=float),
-                rtol=rtol, atol=atol
+                rtol=rtol, atol=atol,
+                equal_nan=not flag_nans,
             )
             bad_idx = tuple(idx[~good] for idx in comp_idx)
             if not good.all():

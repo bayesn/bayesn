@@ -78,6 +78,8 @@ default_arr_float = lambda: np.zeros(shape=(0,), dtype=float)
 ### Global methods ###
 ######################
 def get_standard_name(name: str) -> str:
+    if name in all_meta_names:
+        return name
     # SNANA names are largely the same but capitalised though there are a few
     # exceptions which are handled explicitly.
     name = name.lower()
@@ -162,7 +164,7 @@ def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike]) -> dict:
         if key in meta_names["str"] and (isinstance(sn_dict[key], str) or not hasattr(sn_dict[key], "__iter__")):
             sn_dict[key] = np.atleast_1d(sn_dict[key]).astype(str)
         elif key not in meta_names["str"]:
-            sn_dict[key] = np.atleast_1d(sn_dict[key]).astype(float)
+            sn_dict[key] = np.atleast_1d(sn_dict[key])
     # Adding standard keys as Nones if needed.
     keys_to_check = meta_names["str"] + meta_names["num"]
     if any([key.startswith("sim_") for key in sn_dict]):
@@ -202,8 +204,13 @@ def clean_obs_df(
             data_cols.append(col)
         elif col not in req_phot_cols:
             other_cols.append(col)
+    for col in ("mjd", *data_cols):
+        obs_df[col] = obs_df[col].astype(float)
 
     # Sorting
+    if snids is not None:
+        # Use ordering of snids rather than alphabetical.
+        obs_df["snid"] = obs_df["snid"].astype("category").cat.set_categories(snids)
     obs_df = obs_df.sort_values(list(req_phot_cols)).reset_index(drop=True)
     return obs_df[[*req_phot_cols, *data_cols, *other_cols]]
 
@@ -328,6 +335,7 @@ class SNDataset:
 
     def _clean_photometry(self):
         self.photometry = clean_obs_df(self.photometry, self.snid, self.phot_idx)
+
     def _validate_dtypes(self) -> None:
         for attr in all_meta_names:
             if not self.sim and attr in meta_names["sim"]:
@@ -370,7 +378,7 @@ class SNDataset:
     def _validate_other_lengths(self, sn_dict: dict[str, ArrayLike], obs_df: None | pd.DataFrame = None):
         N_sn = len(sn_dict["snid"])
         for attr in sn_dict:
-            assert len(sn_dict[attr]) == N_sn
+            assert len(sn_dict[attr]) == N_sn, attr
         if obs_df is not None:
             assert len(obs_df["snid"].unique()) == N_sn
 
@@ -614,9 +622,9 @@ class SNDataset:
         other_keys = [key for key in sn_dict if key not in all_meta_names]
         for key in other_keys:
             if key in self.other_metadata:
-                self.other_metadata[key] = np.append(self.other_metadata[key], sn_dict[key])
+                self.other_metadata[key] = np.append(self.other_metadata[key], sn_dict[key], axis=0)
             else:
-                self.other_metadata[key] = np.append(np.full(self.N_sn, None), sn_dict[key])
+                self.other_metadata[key] = np.append(np.full((self.N_sn, *sn_dict[key].shape[1:]), None), sn_dict[key], axis=0)
         self.N_sn += N_sn
         if len(self.photometry):
             self.photometry = pd.concat([self.photometry, obs_df], ignore_index=True)
@@ -1012,9 +1020,9 @@ class SNDataset:
             if dzcmb is None and None not in (zhub, dzhub, v):
                 dz_pv = dzhub/(1+v)
                 z_dpv = 0 if dv is None else -dv*(1+zhub)/(1+v)**2
-                dzcmb = self.z_cmb_err[i] = np.sqrt(dz_pv**2 + z_dpv**2)
+                dzcmb = self.z_cmb_err[i] = np.hypot(dz_pv, z_dpv)
             if zcmb is None and None not in (zhub, v):
-                zcmb = self.z_cmb[i] = (1+zhub)*(1+v) - 1
+                zcmb = self.z_cmb[i] = (1+zhub)/(1+v) - 1
 
 
             # Populating zcmb first allows for potential z_hel <-> zhub.
@@ -1026,7 +1034,7 @@ class SNDataset:
             if dzhub is None and None not in (zcmb, dzcmb, v):
                 dz_pv = dzcmb*(1+v)
                 z_dpv = 0 if dv is None else dv*(1+zcmb)
-                self.z_hubble_err[i] = np.sqrt(dz_pv**2 + z_dpv**2)
+                self.z_hubble_err[i] = np.hypot(dz_pv, z_dpv)
             if zhub is None and None not in (zcmb, v):
                 self.z_hubble[i] = (1+zcmb)*(1+v) - 1
 
@@ -1144,15 +1152,19 @@ class SNDataset:
                 read_fn = io.read_snana_ascii
             elif fmt.lower() in ("snpy", "snoopy"):
                 read_fn = io.read_snpy
+            else:
+                raise ValueError(
+                    f"{fmt} in file_format {file_format} not recognised. Use snana, "
+                    "snpy, or snoopy, all case-insensitive."
+                )
             sn_dict, obs_df = read_fn(fname=f, fluxcal_zpt=fluxcal_zpt)
-            sn_dict["SEARCH_PEAKMJD"] = sn_dict.pop(peakmjd_key)
+            if peakmjd_key in sn_dict:
+                sn_dict["SEARCH_PEAKMJD"] = sn_dict.pop(peakmjd_key)
             ds.append(sn_dict=sn_dict, obs_df=obs_df)
         ds.photometry.reset_index(drop=True, inplace=True)
 
         for key, val in overrides.items():
-            if isinstance(val, Number | str | None) and ds.N_sn == 1:
-                val = np.array([val])
-            elif isinstance(val, Number | str | None):
+            if isinstance(val, Number | str | None):
                 val = np.full(ds.N_sn, val)
             setattr(ds, key, val)
 
@@ -1168,7 +1180,6 @@ class SNDataset:
         fname: str | Path | StringIO,
         data_root: str | Path = Path(),
         fluxcal_zpt: Number = 27.5,
-        table_format: str = "SNANA",
         file_format: str | ArrayLike = "SNANA",
         comment="#",
         jobid: int = 1,
@@ -1219,7 +1230,7 @@ class SNDataset:
             for other_key in redshift_types.difference(overridden_redshifts):
                 all_overrides[other_key] = np.full(sn_list.shape[0], None)
 
-        err_types = {f"{k}_err" for k in redshift_types}
+        err_types = {f"{z_type}_err" for z_type in redshift_types}
         overridden_errs = set(all_overrides.keys()).intersection(err_types)
         if overridden_errs:
             for other_err in err_types.difference(overridden_errs):
@@ -1259,7 +1270,7 @@ class SNDataset:
             ds.sim = True
             for attr in meta_names["sim"]:
                 setattr(ds, attr, np.array([]))
-        ds.append(sn_dict, obs_df)
+        ds.append(sn_dict=sn_dict, obs_df=obs_df)
         # Cleaning
         ds.recalibrate_fluxcal_zpt()
         ds.fill_out_redshifts()
@@ -1309,7 +1320,7 @@ class SNDataset:
                 file_format="SNANA",
                 overrides={},
             )
-            ds.append_ds(row_ds)
+            ds.append(row_ds)
         ds.recalibrate_fluxcal_zpt()
         ds.set_all_rest_phases()
         ds.fill_out_redshifts()

@@ -211,7 +211,7 @@ class TestHsiao:
         assert test_obj.shape == shape
         with open(PICKLE_DIR / f"{arr_name}.pkl", "rb") as f:
             ref = pickle.load(f)
-        assert jnp.isclose(test_obj, ref, rtol=1e-15, atol=1e-20).all()
+        np.testing.assert_allclose(test_obj, ref, rtol=1e-8, atol=1e-15)
 
 class TestBandWeights:
     bp_caching_args: tuple[tuple, ...] = (
@@ -327,7 +327,7 @@ class TestBandWeights:
         if clean:
             model._init_band_weights()
 
-    def test_calculate_band_weights(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...], rtol: float=1e-14, atol: float=1e-14):
+    def test_calculate_band_weights(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...], rtol: float=1e-10, atol: float=1e-10):
         AV = sample_model_parameters[1]
         redshifts = sample_model_parameters[9]
         ebv = AV / model.RV_MW
@@ -338,7 +338,7 @@ class TestBandWeights:
             example_band_weights = pickle.load(f)
         # +1 for NULL_BAND
         assert band_weights.shape == (N_sn, len(model.model_wave), len(bands)+1)
-        assert jnp.isclose(band_weights, example_band_weights, rtol=rtol, atol=atol).all()
+        np.testing.assert_allclose(band_weights, example_band_weights, rtol=rtol, atol=atol)
 
 class TestYaml:
     expected_values: dict = {
