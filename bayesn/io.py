@@ -479,7 +479,6 @@ def read_snana_fits(
     keep = ~np.isnan(phot_df["flux"].values) & ~np.isnan(phot_df["flux_err"].values)
     phot_df = phot_df.iloc[keep].reset_index(drop=True)
     sn_idx = sn_idx[keep]
-    sn_dict["phot_idx"] = np.append(0, np.cumsum(sn_dict["NOBS"]))
 
     phot_df['mag'] = fluxcal_zpt - 2.5 * np.log10(phot_df['flux'].values)
     phot_df['mag_err'] = (2.5 / np.log(10)) * phot_df['flux_err'].values / phot_df['flux'].values
@@ -545,7 +544,7 @@ def read_snpy(
             mag: Apparent magnitudes
             mag_err: Uncertainty on those magnitudes
     """
-    fh = open(fname, "r") if isinstance(fname, str) else fname
+    fh = open(fname, "r") if isinstance(fname, str | Path) else fname
     lines = fh.readlines()
     fh.close()
     lines = [
@@ -558,13 +557,13 @@ def read_snpy(
     z_hel, ra, dec = map(lambda x: float(x), (z_hel, ra, dec))
     z_cmb = utils.convert_z(z_hel, ra, dec, z_in_type="hel")
     MWEBV = utils.get_MWEBV(ra, dec)
-    sn_dict = odict(zip(sn_dict_keys, [None for _ in sn_dict_keys]))
-    sn_dict.update({
+    # sn_dict = odict(zip(sn_dict_keys, [None for _ in sn_dict_keys]))
+    sn_dict = odict({
         "SNID": SNID,
         "RA": ra,
         "DECL": dec,
         "REDSHIFT_HELIO": z_hel,
-        "REDSHIFT_CMB": z_cmb,
+        "REDSHIFT_FINAL": z_cmb,
         "MWEBV": MWEBV,
         "ZP_FLUXCAL": fluxcal_zpt,
     })

@@ -1,3 +1,8 @@
+import builtins
+import sys
+from types import ModuleType
+from unittest.mock import Mock
+
 import pytest
 import numpy as np
 import jax
@@ -100,7 +105,28 @@ class TestMonoEICDF:
         assert jnp.all(draws >= 0.0)
         assert jnp.all(draws <= 10.0)
 
-    def test_cubic_error_without_interpax(self):
+    def test_cubic_with_interpax(self, monkeypatch):
+        samples = np.linspace(0.0, 10.0, 50)
+        fake_interp = Mock(return_value="test_interpolator")
+        fake_interpax = ModuleType("interpax")
+        fake_interpax.PchipInterpolator = fake_interp
+
+        monkeypatch.setitem(sys.modules, "interpax", fake_interpax)
+        test = MonoEICDF(samples=samples, kind="cubic")
+        fake_interp.assert_called_once_with(test.pp, test.zp)
+        assert test.interpolator == "test_interpolator"
+
+
+    def test_cubic_without_interpax(self, monkeypatch):
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "interpax":
+                raise ModuleNotFoundError
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
         samples = np.linspace(0.0, 10.0, 50)
         with pytest.raises(ModuleNotFoundError, match="interpax"):
             MonoEICDF(samples=samples, kind="cubic")
