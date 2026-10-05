@@ -1046,10 +1046,20 @@ class SNDataset:
         Assume the magnitudes are correct.
         This is an irreversible operation as the data zeropoints are not retained.
         """
-        data_zps = np.array(self.photometry["mag"].astype(float) + 2.5*np.log10(self.photometry["flux"].astype(float)))
-        flux_scaling = 10**(0.4*(self.fluxcal_zpt - data_zps))
-        self.photometry["flux"] *= flux_scaling
-        self.photometry["flux_err"] *= flux_scaling
+        pos_mask = self.photometry["flux"] > 0
+        if not pos_mask.any():
+            return
+        data_zps = (
+            self.photometry.loc[pos_mask, "mag"].astype(float)
+            + 2.5 * np.log10(self.photometry.loc[pos_mask, "flux"].astype(float))
+        )
+        if np.isclose(np.std(data_zps), 0):
+            # Assume all same zp and apply scaling to all fluxes/errs.
+            pos_mask = pd.Series(np.ones(len(pos_mask)), dtype=bool)
+            data_zps = np.median(data_zps)
+        flux_scaling = 10 ** (0.4 * (self.fluxcal_zpt - data_zps))
+        self.photometry.loc[pos_mask, "flux"] *= flux_scaling
+        self.photometry.loc[pos_mask, "flux_err"] *= flux_scaling
 
     def apply_filter_map(self, map_dict: dict[str, str]) -> None:
         """
