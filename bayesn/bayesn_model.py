@@ -62,6 +62,10 @@ jax.config.update('jax_enable_x64', True)  # Enables 64 computation
 SYSTEMATIC_NOMINAL = {'mwebv_scale': 1.0, 'mwebv_shift': 0.0, 'mw_rv_shift': 0.0,
                       'redshift_final_shift': 0.0}
 
+# every name --systematic accepts; magobs is absent from SYSTEMATIC_NOMINAL and training is not a shift
+SYSTEMATIC_NAMES = {'mwebv_scale', 'mwebv_shift', 'mw_rv_shift', 'redshift_final_shift',
+                    'magobs_shift_zp_params', 'training'}
+
 np.seterr(divide='ignore', invalid='ignore')  # Disable divide by zero warnings
 
 # jax.config.update('jax_platform_name', 'cpu')  # Forces CPU
@@ -2122,25 +2126,36 @@ class SEDmodel(object):
                     filt_map = np.loadtxt(cmd_args.map, dtype=str)
                     arg_val = {row[0]: row[1] for row in filt_map}
                 elif arg == 'systematics_variations':
-                    from_cli = {}  # each --systematic is one label's shifts, given as shift=value
+                    from_cli = {}  # each --systematic is an optional label, then each shift with its values
                     for syst_args in arg_val:
-                        label, shifts = None, {}
+                        label, shifts, shift = None, {}, None
                         for syst_arg in syst_args:
-                            if '=' in syst_arg:
-                                shift, _, value = syst_arg.partition('=')
-                                shifts[shift] = value.split(',') if ',' in value else value
+                            if syst_arg in SYSTEMATIC_NAMES:
+                                shift = syst_arg
+                                shifts[shift] = []
+                            elif shift is not None:
+                                shifts[shift].append(syst_arg)
                             elif label is None:
                                 label = syst_arg
                             else:
-                                raise ValueError(f'--systematic {" ".join(syst_args)} gives more than one label')
+                                raise ValueError(f'--systematic {" ".join(syst_args)}: {syst_arg} is not a '
+                                                 f'systematic, and {label} is already the label')
+                        if not shifts:
+                            raise ValueError(f'--systematic {" ".join(syst_args)} names no systematic')
+                        if 'training' in shifts:
+                            if label is not None or len(shifts) > 1:
+                                raise ValueError('training is the model training systematic on its own, so it '
+                                                 'takes no label and cannot be joined to a shift')
+                            from_cli['training'] = shifts['training'][0] if shifts['training'] else True
+                            continue
+                        if label is None and len(shifts) == 1:
+                            label, = shifts  # one shift, so it names its own column
                         if label is None:
-                            from_cli.update(shifts)
-                        elif not shifts:
-                            from_cli[label] = True
-                        elif label in from_cli:
+                            raise ValueError(f'--systematic {" ".join(syst_args)} varies several shifts '
+                                             f'together, so it needs a label to name the column')
+                        if label in from_cli:
                             raise ValueError(f'{label} is declared by more than one --systematic')
-                        else:
-                            from_cli[label] = shifts
+                        from_cli[label] = shifts
                     from_yaml = dict(args.get(arg) or {})  # CLI wins per label, so a base yaml set survives
                     from_yaml.update(from_cli)
                     arg_val = from_yaml
@@ -2353,10 +2368,15 @@ class SEDmodel(object):
                 value = {label: value}  # shorthand: one shift, labelled by itself
             shift_values = {}
             for shift, shift_value in value.items():
+                vals = shift_value if isinstance(shift_value, (list, tuple)) else [shift_value]
                 if shift == 'magobs_shift_zp_params':
-                    shift_values[shift] = tuple(float(v) for v in shift_value)
+                    if len(vals) != 3:
+                        raise ValueError(f'{shift} takes three coefficients, got {len(vals)}')
+                    shift_values[shift] = tuple(float(v) for v in vals)
+                elif len(vals) != 1:
+                    raise ValueError(f'{shift} takes one value, got {len(vals)}')
                 else:
-                    shift_values[shift] = float(shift_value)
+                    shift_values[shift] = float(vals[0])
             systematics[label] = shift_values
         shift_rows = {}  # distinct shifts, in order; the value is that shift's row of param_sigmas
         for shifts in systematics.values():
