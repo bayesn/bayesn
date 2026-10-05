@@ -1582,11 +1582,29 @@ class SNDataset:
             flux[neg_mask] = 0
             band_indices[neg_mask] = 0
             mask[neg_mask] = 0
+        # The redshift to use for calculating muhat is z_hubble, but it may not always
+        # be available. Issue a UserWarning if so.
+        replace_w_cmb = (meta["z_hubble"] == None) & (meta["z_cmb"] != None)
+        if any(replace_w_cmb):
+            warn(UserWarning(
+                "Some SNe are missing z_hubble values. The muhat (distance prior) "
+                "calculation will instead use their z_cmb values. The affected SNe are "
+                f"\n{meta['snid'][replace_w_cmb]}."
+            ))
+        z_hubble = np.where(replace_w_cmb, meta["z_cmb"], meta["z_hubble"])
+        replace_w_helio = (z_hubble == None) & (meta["z_helio"] != None)
+        if any(replace_w_helio):
+            warn(UserWarning(
+                "Some SNe are missing z_hubble, z_cmb, and ra/dec values. The muhat "
+                "(distance prior) calculation will instead use their z_cmb values. The "
+                f"affected SNe are\n{meta['snid'][replace_w_helio]}."
+            ))
+        z_hubble = np.where(replace_w_helio, meta["z_helio"], z_hubble)
         return ObsData(
             host_logmass=meta["host_logmass"],
             z_hel=meta["z_helio"],
             z_hel_err=meta["z_helio_err"],
-            muhat=np.array(cosmo.distmod(meta["z_hubble"])),
+            muhat=np.array(cosmo.distmod(z_hubble.astype(float))),
             MWEBV=meta["mwebv"],
             mjd=mjd,
             flux=flux,
