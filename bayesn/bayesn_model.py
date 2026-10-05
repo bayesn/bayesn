@@ -151,30 +151,50 @@ def read_systematics(path):
 
 def merge_systematic_covariance(syst_files):
     """
-    Combine the per-SN delta_mu tables written by separate fitting jobs into one systematic
-    covariance. Rows are stacked in the order the files are given, which must match the order the
-    Hubble diagram rows were merged in. Writes whichever formats the jobs wrote; both hold the same
-    arrays, the number of SNe then the upper triangle (including the diagonal, row-major) as float32.
-    Columns are labelled by
-    systematic, so one covariance is written per systematic alongside the total; since the columns are
-    disjoint these sum exactly to the total.
+    Merge per-SN delta_mu tables into total and per-systematic covariances. Rows follow input file
+    order, which must match the Hubble diagram. Shared labels are aligned; missing responses are zero.
+    Repeated labels are matched in their order within the group, so training axes must come from the
+    same model artifact. Writes the upper triangle (row-major, float32) in the input formats.
     """
-    by_stem = {}  # one file per job; a job may have written both formats and the npz is authoritative
+    if not syst_files:
+        raise ValueError('No systematics files to merge')
+    by_stem = {}  # one file per job, preferring npz when both formats are supplied
     for syst_file in syst_files:
         file_stem = re.sub(r'\.syst\.(npz|txt)$', '', syst_file)
         if file_stem not in by_stem or syst_file.endswith('.npz'):
             by_stem[file_stem] = syst_file
-    delta_mu, labels = [], None
+    jobs, column_indices, group_sizes = [], {}, {}
     for syst_file in by_stem.values():
-        job_rows, _, labels_i = read_systematics(syst_file)
-        if labels is not None and list(labels_i) != list(labels):
-            raise ValueError(f'{syst_file} declares different systematics from the other files being '
-                             f'merged, so the per-systematic split would not line up with the columns')
-        delta_mu.append(job_rows)
-        labels = labels_i
-    delta_mu = np.concatenate(delta_mu, axis=0)
+        job_rows, sn_list, labels_i = read_systematics(syst_file)
+        if job_rows.ndim != 2 or job_rows.shape != (len(sn_list), len(labels_i)):
+            raise ValueError(f'{syst_file}: delta_mu must have one row per SN and one column per label')
+        if not np.isfinite(job_rows).all():
+            raise ValueError(f'{syst_file}: delta_mu contains non-finite values')
+        label_counts, job_columns = {}, []
+        for label in labels_i:
+            label = str(label)
+            i = label_counts.get(label, 0)
+            column = (label, i)  # keep repeated training axes distinct
+            label_counts[label] = i + 1
+            if column not in column_indices:
+                column_indices[column] = len(column_indices)
+            job_columns.append(column_indices[column])
+        for label, count in label_counts.items():
+            if label in group_sizes and count != group_sizes[label]:
+                raise ValueError(f'{syst_file}: {label} has {count} axes, expected {group_sizes[label]}; '
+                                 f'shared systematics must have the same axes in every file')
+            group_sizes[label] = count
+        jobs.append((job_rows, job_columns))
 
-    formats = {'npz' if f.endswith('.npz') else 'txt' for f in syst_files}  # write back what the jobs wrote
+    delta_mu = np.zeros((sum(rows.shape[0] for rows, _ in jobs), len(column_indices)))
+    start = 0
+    for rows, job_columns in jobs:
+        stop = start + rows.shape[0]
+        delta_mu[start:stop, job_columns] = rows
+        start = stop
+    labels = np.array([label for label, _ in column_indices], dtype=str)
+
+    formats = {'npz' if f.endswith('.npz') else 'txt' for f in syst_files}
 
     def write(cov, path):  # the same arrays either way: the number of SNe, then the upper triangle
         cov_triu = cov[np.triu_indices_from(cov)].astype(np.float32)
