@@ -4017,12 +4017,17 @@ class SEDmodel(object):
         with open(args["outputdir"] / "chains.pkl", "wb") as file:
             pickle.dump(samples, file)
 
-        dump_args = {key: str(val) if isinstance(val, Path) else val for key, val in args.items()}
+        dump_args = copy.deepcopy(args)
+        for key, val in dump_args.items():
+            if isinstance(val, Path):
+                dump_args[key] = str(val)
+            elif isinstance(val, Array):
+                dump_args[key] = float(val)
+            elif val == dist.Exponential:
+                dump_args[key] = "dist.Exponential"
+            elif val == zltn.My_Exponential:
+                dump_args[key] = "zltn.My_Exponential"
         with open(args["outputdir"] / "input.yaml", "w") as file:
-            if args.get("AV_dist") == dist.Exponential:
-                dump_args["AV_dist"] = "dist.Exponential"
-            elif args.get("AV_dist") == zltn.My_Exponential:
-                dump_args["AV_dist"] = "zltn.My_Exponential"
             yaml.dump(dump_args, file)
 
     def _fix_W1_theta_sign_degen(
