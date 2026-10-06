@@ -7,8 +7,10 @@ from typing import Callable
 
 from astropy.table import QTable
 import pandas as pd
+import pandas.testing as pdt
 import pytest
 import numpy as np
+import numpy.testing as npt
 
 from bayesn import io
 from bayesn.constants import C_LIGHT
@@ -181,7 +183,7 @@ class TestGlobals:
         test_df = copy.deepcopy(ref_df)
         test_df.rename({"flux": get_SNANA_name("flux"), "flt": "BAND", "snid": "SNID"})
         test_df = clean_obs_df(test_df, snids, phot_idx=None)
-        pd.testing.assert_frame_equal(format_df(test_df), format_df(ref_df))
+        pdt.assert_frame_equal(format_df(test_df), format_df(ref_df))
 
     def test_clean_obs_df_add_snid_for_single(self, sample_data_single_sn):
         snids = sample_data_single_sn[0]["snid"]
@@ -189,7 +191,7 @@ class TestGlobals:
         test_df = copy.deepcopy(ref_df)
         test_df.pop("snid")
         test_df = clean_obs_df(test_df, snids, phot_idx=None)
-        pd.testing.assert_frame_equal(format_df(test_df), format_df(ref_df))
+        pdt.assert_frame_equal(format_df(test_df), format_df(ref_df))
 
     def test_clean_obs_df_add_snid_for_multi(self, sample_data_two_sne):
         snids = sample_data_two_sne[0]["snid"]
@@ -200,7 +202,7 @@ class TestGlobals:
             test_df = clean_obs_df(test_df, snids, phot_idx=None)
         phot_idx = np.array([0, sum(ref_df["snid"] == "test0"), len(ref_df)])
         test_df = clean_obs_df(test_df, snids, phot_idx=phot_idx)
-        pd.testing.assert_frame_equal(format_df(test_df), format_df(ref_df))
+        pdt.assert_frame_equal(format_df(test_df), format_df(ref_df))
 
     def test_clean_obs_extra_col(self, sample_data_single_sn):
         snids = sample_data_single_sn[0]["snid"]
@@ -213,9 +215,9 @@ class TestGlobals:
         test_df.rename({"flux": get_SNANA_name("flux"), "flt": "BAND", "snid": "SNID"})
         test_df = clean_obs_df(test_df, snids, phot_idx=None)
         # Only checks snid, flt, mjd, flux+err, mag+err
-        pd.testing.assert_frame_equal(format_df(test_df), format_df(ref_df))
+        pdt.assert_frame_equal(format_df(test_df), format_df(ref_df))
         assert test_df.columns[-1] == "phase"  # should come after req and data columns
-        pd.testing.assert_series_equal(test_df["phase"], ref_df["phase"])
+        pdt.assert_series_equal(test_df["phase"], ref_df["phase"])
 
     def test_clean_obs_df_empty(self, sample_data_single_sn):
         empty_df = pd.DataFrame()
@@ -226,9 +228,9 @@ class TestInit:
         ds = SNDataset()
         assert ds.N_sn == 0
         assert ds.sim is False
-        np.testing.assert_equal(ds.phot_idx, np.array([0]))
+        npt.assert_equal(ds.phot_idx, np.array([0]))
         for attr in meta_names["str"] + meta_names["num"]:
-            np.testing.assert_equal(getattr(ds, attr), np.array([]))
+            npt.assert_equal(getattr(ds, attr), np.array([]))
         for attr in meta_names["sim"]:
             assert getattr(ds, attr) is None
 
@@ -246,23 +248,23 @@ class TestInit:
         obs_df = format_df(obs_df)
         assert dataset_two_sne.N_sn == 2
         for attr in all_meta_names:
-            np.testing.assert_equal(getattr(dataset_two_sne, attr), sn_dict.get(attr))
-        pd.testing.assert_frame_equal(dataset_two_sne.photometry, obs_df)
+            npt.assert_equal(getattr(dataset_two_sne, attr), sn_dict.get(attr))
+        pdt.assert_frame_equal(dataset_two_sne.photometry, obs_df)
 
     def test_init_sim(self, sample_data_sim, dataset_sim):
         sn_dict = sample_data_sim[0]
         for attr in meta_names["sim"]:
-            np.testing.assert_equal(getattr(dataset_sim, attr), sn_dict[attr])
+            npt.assert_equal(getattr(dataset_sim, attr), sn_dict[attr])
 
     def test_init_0d_arrs(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
-        ds_test = SNDataset(
+        test_ds = SNDataset(
             N_sn=1,
             photometry=obs_df,
             # init meta keys w/ scalars/strings instead of ArrayLikes
             **{key: val[0] for key, val in sn_dict.items() if key in all_meta_names}
         )
-        assert ds_test == dataset_single_sn
+        assert test_ds == dataset_single_sn
 
     def test_eq_phot(self, dataset_two_sne):
         copied_ds = copy.deepcopy(dataset_two_sne)
@@ -281,7 +283,7 @@ class TestAttributesProperties:
         obs_df = sample_data_two_sne[1]
         ref_bands = np.sort(obs_df["flt"].unique().astype(str))
         test_bands = np.sort(dataset_two_sne.unique_bands.astype(str))
-        np.testing.assert_equal(ref_bands, test_bands)
+        npt.assert_equal(ref_bands, test_bands)
 
     def test_metadata(self, sample_data_sim, dataset_sim):
         sn_dict = sample_data_sim[0]
@@ -293,13 +295,13 @@ class TestAttributesProperties:
 class TestDataAddition:
     def test_append_new_single(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
-        ds_test = SNDataset()
-        ds_test._append_new(sn_dict, obs_df)
-        ds_test._clean_photometry()
-        assert ds_test == dataset_single_sn
+        test_ds = SNDataset()
+        test_ds._append_new(sn_dict, obs_df)
+        test_ds._clean_photometry()
+        assert test_ds == dataset_single_sn
 
     def test_append_new_single_missing_data(self, sample_data_single_sn, dataset_single_sn):
-        ds_test = SNDataset()
+        test_ds = SNDataset()
         sn_dict, obs_df = sample_data_single_sn
         drop_keys = (
             "z_hubble", "z_hubble_err", "vpec", "vpec_err", "host_logmass",
@@ -307,21 +309,21 @@ class TestDataAddition:
         )
         for key in drop_keys:
             sn_dict.pop(key)
-        ds_test._append_new(sn_dict, obs_df)
-        ds_test._clean_photometry()
+        test_ds._append_new(sn_dict, obs_df)
+        test_ds._clean_photometry()
         for attr in all_meta_names:
             if attr in drop_keys:
-                assert getattr(ds_test, attr) == np.array([None])
+                assert getattr(test_ds, attr) == np.array([None])
             else:
-                assert getattr(ds_test, attr) == sn_dict.get(attr)
-        pd.testing.assert_frame_equal(ds_test.photometry, dataset_single_sn.photometry)
+                assert getattr(test_ds, attr) == sn_dict.get(attr)
+        pdt.assert_frame_equal(test_ds.photometry, dataset_single_sn.photometry)
 
     def test_append_new_multi(self, sample_data_sim, dataset_sim):
         sn_dict, obs_df = sample_data_sim
-        ds_test = SNDataset()
-        ds_test._append_new(sn_dict, obs_df)
-        ds_test._clean_photometry()
-        assert ds_test == dataset_sim
+        test_ds = SNDataset()
+        test_ds._append_new(sn_dict, obs_df)
+        test_ds._clean_photometry()
+        assert test_ds == dataset_sim
 
     def test_append_duplicate_single(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
@@ -331,15 +333,15 @@ class TestDataAddition:
         expected_phot = format_df(pd.concat([obs_df, new_df]))
         dataset_single_sn._append_duplicate(sn_dict, new_df)
         assert_dicts_match(dataset_single_sn.metadata, sn_dict)
-        pd.testing.assert_frame_equal(dataset_single_sn.photometry, expected_phot)
+        pdt.assert_frame_equal(dataset_single_sn.photometry, expected_phot)
 
     def test_append_duplicate_phot_overlap(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
-        ds_test = copy.deepcopy(dataset_single_sn)
+        test_ds = copy.deepcopy(dataset_single_sn)
         # 100% overlap changes nothing
-        ds_test._append_duplicate(sn_dict, obs_df)
-        ds_test._clean_photometry()
-        pd.testing.assert_frame_equal(ds_test.photometry, ds_test.photometry)
+        test_ds._append_duplicate(sn_dict, obs_df)
+        test_ds._clean_photometry()
+        pdt.assert_frame_equal(test_ds.photometry, test_ds.photometry)
 
         # mismatch between new and old data
         new_df = copy.deepcopy(obs_df)
@@ -351,20 +353,20 @@ class TestDataAddition:
         new_df = copy.deepcopy(obs_df)
         # 0:2 grabs first three rows here
         new_df.loc[0:2, "mjd"] += new_df["mjd"].max() - new_df["mjd"].min()
-        ds_test._append_duplicate(sn_dict, new_df)
-        ds_test._clean_photometry()
+        test_ds._append_duplicate(sn_dict, new_df)
+        test_ds._clean_photometry()
         # 0:3 grabs first three rows here
         expected_phot = format_df(pd.concat([dataset_single_sn.photometry, new_df[0:3]]))
-        assert_dicts_match(ds_test.metadata, dataset_single_sn.metadata)
-        pd.testing.assert_frame_equal(ds_test.photometry, expected_phot)
+        assert_dicts_match(test_ds.metadata, dataset_single_sn.metadata)
+        pdt.assert_frame_equal(test_ds.photometry, expected_phot)
 
     def test_append_duplicate_new_metadata(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
         dataset_single_sn.z_helio = np.array([None])
         dataset_single_sn.other_metadata = {}
         dataset_single_sn._append_duplicate(sn_dict, obs_df)
-        np.testing.assert_equal(dataset_single_sn.z_helio, sn_dict["z_helio"])
-        np.testing.assert_equal(dataset_single_sn.other_metadata["test_key"], sn_dict["test_key"])
+        npt.assert_equal(dataset_single_sn.z_helio, sn_dict["z_helio"])
+        npt.assert_equal(dataset_single_sn.other_metadata["test_key"], sn_dict["test_key"])
 
     def test_append_duplicate_multi(self, sample_data_two_sne, dataset_two_sne):
         sn_dict, obs_df = sample_data_two_sne
@@ -374,12 +376,12 @@ class TestDataAddition:
         expected_phot = format_df(pd.concat([obs_df, new_df]))
         dataset_two_sne._append_duplicate(sn_dict, new_df)
         assert_dicts_match(dataset_two_sne.metadata, sn_dict)
-        pd.testing.assert_frame_equal(dataset_two_sne.photometry, expected_phot)
+        pdt.assert_frame_equal(dataset_two_sne.photometry, expected_phot)
 
     def test_append_empty(self):
-        ds_test, ds_ref = [SNDataset() for _ in range(2)]
-        ds_test.append(ds=None, sn_dict=None, obs_df=None)
-        assert ds_test == ds_ref
+        test_ds, ds_ref = [SNDataset() for _ in range(2)]
+        test_ds.append(ds=None, sn_dict=None, obs_df=None)
+        assert test_ds == ds_ref
 
     def test_append_dataset(self, sample_data_two_sne, dataset_two_sne):
         sn_dict, obs_df = sample_data_two_sne
@@ -390,10 +392,10 @@ class TestDataAddition:
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         ds_to_be_added = make_dataset(new_dict, new_df)
-        ds_test = copy.deepcopy(dataset_two_sne)
+        test_ds = copy.deepcopy(dataset_two_sne)
         dataset_two_sne.append(sn_dict=new_dict, obs_df=new_df)
-        ds_test.append(ds=ds_to_be_added)
-        assert dataset_two_sne == ds_test
+        test_ds.append(ds=ds_to_be_added)
+        assert dataset_two_sne == test_ds
 
     def test_append_sn_dict_obs_df(self, sample_data_two_sne, dataset_two_sne):
         sn_dict, obs_df = sample_data_two_sne
@@ -403,10 +405,10 @@ class TestDataAddition:
         new_df["snid"] = new_df["snid"].cat.add_categories("test2")
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
-        ds_test = copy.deepcopy(dataset_two_sne)
-        ds_test.append(sn_dict=new_dict, obs_df=new_df)
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.append(sn_dict=new_dict, obs_df=new_df)
         dataset_two_sne.append(sn_dict=new_dict, obs_df=new_df)
-        assert dataset_two_sne == ds_test
+        assert dataset_two_sne == test_ds
 
     def test_append_mismatch(self, sample_data_two_sne, dataset_two_sne):
         sn_dict, obs_df = sample_data_two_sne
@@ -431,24 +433,24 @@ class TestDataAddition:
         new_df.loc[new_df["snid"] == "test0", "snid"] = "test2"
         new_df["mjd"] += obs_df["mjd"].max() - new_df["mjd"].min() + 1
         new_dict.pop("test_key")
-        ds_test = copy.deepcopy(dataset_two_sne)
-        ds_test.append(sn_dict=new_dict, obs_df=new_df)
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.append(sn_dict=new_dict, obs_df=new_df)
         ref_test_key = np.append(dataset_two_sne.other_metadata["test_key"], None)
-        np.testing.assert_equal(ds_test.other_metadata["test_key"], ref_test_key)
+        npt.assert_equal(test_ds.other_metadata["test_key"], ref_test_key)
 
     def test_append_infer_phot_idx(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
         obs_df.pop("snid")
-        ds_test = SNDataset()
-        ds_test.append(sn_dict=sn_dict, obs_df=obs_df, phot_idx=None)
+        test_ds = SNDataset()
+        test_ds.append(sn_dict=sn_dict, obs_df=obs_df, phot_idx=None)
         dataset_single_sn.photometry = clean_obs_df(dataset_single_sn.photometry, sn_dict["snid"])
-        assert ds_test == dataset_single_sn
+        assert test_ds == dataset_single_sn
 
 class TestGetterMethods:
     def test_get_idx(self, dataset_two_sne):
         assert dataset_two_sne.get_idx("test0") == 0
-        np.testing.assert_equal(dataset_two_sne.get_idx(["test0"]), np.array([0]))
-        np.testing.assert_equal(dataset_two_sne.get_idx(["test1", "test0"]), np.array([1, 0]))
+        npt.assert_equal(dataset_two_sne.get_idx(["test0"]), np.array([0]))
+        npt.assert_equal(dataset_two_sne.get_idx(["test1", "test0"]), np.array([1, 0]))
 
     def test_get_idx_not_found(self, dataset_two_sne):
         with pytest.raises(ValueError, match="snid missing not found."):
@@ -461,7 +463,7 @@ class TestGetterMethods:
     def test_parse_snid_idx(self, dataset_two_sne):
         assert dataset_two_sne._parse_snid_idx_args(idx=1) == 1
         assert dataset_two_sne._parse_snid_idx_args(snid="test1") == 1
-        np.testing.assert_equal(dataset_two_sne._parse_snid_idx_args(snid=["test0", "test1"]), np.array([0, 1]))
+        npt.assert_equal(dataset_two_sne._parse_snid_idx_args(snid=["test0", "test1"]), np.array([0, 1]))
 
     def test_parse_snid_idx_args_no_args(self, dataset_two_sne):
         with pytest.raises(ValueError, match="Either snid or idx should be specified."):
@@ -494,8 +496,8 @@ class TestGetterMethods:
         df0 = format_df(obs_df[obs_df["snid"] == "test0"])
         df1 = format_df(obs_df[obs_df["snid"] == "test1"])
         switched_df = pd.concat([df1, df0], ignore_index=True)
-        pd.testing.assert_frame_equal(dataset_two_sne.get_phot_subset(snid="test0"), df0)
-        pd.testing.assert_frame_equal(dataset_two_sne.get_phot_subset(snid=["test1", "test0"]), switched_df)
+        pdt.assert_frame_equal(dataset_two_sne.get_phot_subset(snid="test0"), df0)
+        pdt.assert_frame_equal(dataset_two_sne.get_phot_subset(snid=["test1", "test0"]), switched_df)
 class TestDataRemoval:
     def test_remove_sn(self, dataset_sim):
         ref_meta = dataset_sim.get_metadata_subset(idx=[0, 2, 4])
@@ -506,8 +508,8 @@ class TestDataRemoval:
         dataset_sim.remove_sn(snid=["test3", "test1"])
         assert dataset_sim.N_sn == 3
         assert_dicts_match(ref_meta, dataset_sim.metadata)
-        pd.testing.assert_frame_equal(ref_phot, dataset_sim.photometry)
-        # np.testing.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
+        pdt.assert_frame_equal(ref_phot, dataset_sim.photometry)
+        # npt.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
 
     def test_keep_according_to_list(self, dataset_sim):
         ref_meta = dataset_sim.get_metadata_subset(idx=[2, 3])
@@ -515,7 +517,7 @@ class TestDataRemoval:
         dataset_sim.keep_according_to_list(["test2", "test3", "test10"])
         assert dataset_sim.N_sn == 2
         assert_dicts_match(ref_meta, dataset_sim.metadata)
-        pd.testing.assert_frame_equal(ref_phot, dataset_sim.photometry)
+        pdt.assert_frame_equal(ref_phot, dataset_sim.photometry)
 
     def test_remove_phot_idx(self, sample_data_sim, dataset_sim):
         # First object has more than 2 observations, so metadata shouldn't change.
@@ -525,8 +527,8 @@ class TestDataRemoval:
         ref_phot = format_df(ref_phot).drop(index=[0, 1]).reset_index(drop=True)
         dataset_sim.remove_phot_by_idx([0, 1])
         assert_dicts_match(sn_dict, dataset_sim.metadata)
-        pd.testing.assert_frame_equal(ref_phot, dataset_sim.photometry)
-        np.testing.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
+        pdt.assert_frame_equal(ref_phot, dataset_sim.photometry)
+        npt.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
 
     def test_remove_phot_idx_drop_sn(self, sample_data_sim, dataset_sim):
         # Removing all photometry from first object should cause it to be dropped.
@@ -537,8 +539,8 @@ class TestDataRemoval:
         ref_phot = format_df(ref_phot).drop(index=np.arange(phot_idx[1])).reset_index(drop=True)
         dataset_sim.remove_phot_by_idx(np.arange(phot_idx[1]))
         assert_dicts_match(ref_meta, dataset_sim.metadata)
-        pd.testing.assert_frame_equal(ref_phot, dataset_sim.photometry)
-        np.testing.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
+        pdt.assert_frame_equal(ref_phot, dataset_sim.photometry)
+        npt.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
 
     def test_drop_bands(self, dataset_sim):
         unique_bands = dataset_sim.unique_bands
@@ -580,37 +582,37 @@ class TestDataRemoval:
         assert len(dataset_sim.photometry) == original_length - zmin_counts - zmax_counts
 
     def test_cut_by_meta_numeric(self, dataset_sim):
-        ds_test = copy.deepcopy(dataset_sim)
-        z = ds_test.z_cmb
+        test_ds = copy.deepcopy(dataset_sim)
+        z = test_ds.z_cmb
         high_idx = np.where(z >= np.median(z))[0]
-        ref_meta = ds_test.get_metadata_subset(idx=high_idx)
-        ref_phot = ds_test.get_phot_subset(idx=high_idx)
-        test_meta, test_phot = ds_test.cut_by_meta_numeric("z_cmb", "<", np.median(z), inplace=False)
-        assert ds_test == dataset_sim
+        ref_meta = test_ds.get_metadata_subset(idx=high_idx)
+        ref_phot = test_ds.get_phot_subset(idx=high_idx)
+        test_meta, test_phot = test_ds.cut_by_meta_numeric("z_cmb", "<", np.median(z), inplace=False)
+        assert test_ds == dataset_sim
         assert_dicts_match(test_meta, ref_meta)
-        pd.testing.assert_frame_equal(test_phot, ref_phot)
-        ds_test.cut_by_meta_numeric("z_cmb", "<", np.median(z), inplace=True)
-        assert ds_test != dataset_sim
-        assert_dicts_match(ds_test.metadata, ref_meta)
-        pd.testing.assert_frame_equal(ds_test.photometry, ref_phot)
+        pdt.assert_frame_equal(test_phot, ref_phot)
+        test_ds.cut_by_meta_numeric("z_cmb", "<", np.median(z), inplace=True)
+        assert test_ds != dataset_sim
+        assert_dicts_match(test_ds.metadata, ref_meta)
+        pdt.assert_frame_equal(test_ds.photometry, ref_phot)
 
     def test_cut_by_phot_numeric(self, dataset_sim):
         # Given unique minimum fluxes for all SNe, cutting fluxes >= the greatest
         # minimum flux should remove one SN from the dataset.
-        ds_test = copy.deepcopy(dataset_sim)
-        flux = ds_test.photometry["flux"]
-        min_fluxes = [min(flux[ds_test.photometry["snid"] == f"test{i}"]) for i in range(ds_test.N_sn)]
-        sn_to_be_removed = ds_test.snid[np.argmax(min_fluxes)]
-        ref_meta = ds_test.get_metadata_subset(snid=[snid for snid in ds_test.snid if snid != sn_to_be_removed])
-        ref_phot = ds_test.photometry[flux < max(min_fluxes)].reset_index(drop=True)
-        test_meta, test_phot = ds_test.cut_by_phot_numeric("flux", ">=", max(min_fluxes), inplace=False)
-        assert ds_test == dataset_sim
+        test_ds = copy.deepcopy(dataset_sim)
+        flux = test_ds.photometry["flux"]
+        min_fluxes = [min(flux[test_ds.photometry["snid"] == f"test{i}"]) for i in range(test_ds.N_sn)]
+        sn_to_be_removed = test_ds.snid[np.argmax(min_fluxes)]
+        ref_meta = test_ds.get_metadata_subset(snid=[snid for snid in test_ds.snid if snid != sn_to_be_removed])
+        ref_phot = test_ds.photometry[flux < max(min_fluxes)].reset_index(drop=True)
+        test_meta, test_phot = test_ds.cut_by_phot_numeric("flux", ">=", max(min_fluxes), inplace=False)
+        assert test_ds == dataset_sim
         assert_dicts_match(test_meta, ref_meta)
-        pd.testing.assert_frame_equal(test_phot, ref_phot)
-        ds_test.cut_by_phot_numeric("flux", ">=", max(min_fluxes), inplace=True)
-        assert ds_test != dataset_sim
-        assert_dicts_match(ds_test.metadata, ref_meta)
-        pd.testing.assert_frame_equal(ds_test.photometry, ref_phot)
+        pdt.assert_frame_equal(test_phot, ref_phot)
+        test_ds.cut_by_phot_numeric("flux", ">=", max(min_fluxes), inplace=True)
+        assert test_ds != dataset_sim
+        assert_dicts_match(test_ds.metadata, ref_meta)
+        pdt.assert_frame_equal(test_ds.photometry, ref_phot)
 
     def test_cut_by_meta_numeric_bad_col(self, dataset_sim):
         with pytest.raises(ValueError, match="foo not recognised."):
@@ -631,7 +633,7 @@ class TestAstroGetter:
             ref_snrmaxes = [phot[phot["flt"] == flt]["snr"].max() for flt in flts]
             ref_snrmaxes += [-99]*N_extra
             test_snrmaxes = dataset_two_sne.calculate_snrmaxes(snid=snid, N=N_bands+N_extra, default_value=-99)
-            np.testing.assert_allclose(test_snrmaxes, ref_snrmaxes)
+            npt.assert_allclose(test_snrmaxes, ref_snrmaxes)
         with pytest.raises(AssertionError, match="Non-str snids are not supported."):
             dataset_two_sne.calculate_snrmaxes(snid=dataset_two_sne.snid)
 
@@ -641,7 +643,7 @@ class TestAstroGetter:
             snr = phot["flux"] / phot["flux_err"]
             ref_tmax = np.average(phot["mjd"], weights=snr**2)
             test_tmax = dataset_two_sne.estimate_tmax(snid)
-            np.testing.assert_allclose(test_tmax, ref_tmax)
+            npt.assert_allclose(test_tmax, ref_tmax)
         with pytest.raises(AssertionError, match="Non-str snids are not supported."):
             dataset_two_sne.estimate_tmax(snid=dataset_two_sne.snid)
 
@@ -652,11 +654,11 @@ class TestAstroGetter:
 
             ref_phases0 = phot["mjd"]/z_scaling
             test_phases0 = dataset_two_sne.calculate_rest_phases(snid=snid, peak_mjd=0)
-            np.testing.assert_allclose(test_phases0, ref_phases0)
+            npt.assert_allclose(test_phases0, ref_phases0)
 
             ref_phases = ref_phases0 - dataset_two_sne.peak_mjd[idx]/z_scaling
             test_phases = dataset_two_sne.calculate_rest_phases(snid=snid, peak_mjd=None)
-            np.testing.assert_allclose(test_phases, ref_phases)
+            npt.assert_allclose(test_phases, ref_phases)
         with pytest.raises(AssertionError, match="Non-str snids are not supported."):
             dataset_two_sne.calculate_rest_phases(snid=dataset_two_sne.snid)
 
@@ -666,7 +668,7 @@ class TestAstroGetter:
         default_band_dict["NULL_BAND"] = 0
         ref_indices = np.array([default_band_dict[flt] for flt in dataset_two_sne.photometry["flt"]])
         test_indices = dataset_two_sne.get_band_indices()
-        np.testing.assert_equal(test_indices, ref_indices)
+        npt.assert_equal(test_indices, ref_indices)
         default_band_dict.pop(bands[0])
         with pytest.warns(UserWarning, match="The provided band_dict does not cover"):
             dataset_two_sne.get_band_indices(band_dict=default_band_dict)
@@ -689,10 +691,10 @@ class TestAstroSetter:
         for attr in ("z_helio", "z_helio_err", "z_cmb", "z_cmb_err"):
             setattr(dataset_two_sne, attr, np.full(N_sn, None))
         dataset_two_sne.fill_out_redshifts()
-        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
-        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
-        np.testing.assert_allclose(dataset_two_sne.z_helio.astype(float), z_hel)
-        np.testing.assert_allclose(dataset_two_sne.z_helio_err.astype(float), z_hel_err)
+        npt.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        npt.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        npt.assert_allclose(dataset_two_sne.z_helio.astype(float), z_hel)
+        npt.assert_allclose(dataset_two_sne.z_helio_err.astype(float), z_hel_err)
 
     def test_fill_out_redshifts_hel_to_hub(self, dataset_two_sne):
         N_sn, ra, dec, z_hel, z_hel_err, vpec, vpec_err = [
@@ -711,10 +713,10 @@ class TestAstroSetter:
         for attr in ("z_hubble", "z_hubble_err", "z_cmb", "z_cmb_err"):
             setattr(dataset_two_sne, attr, np.full(N_sn, None))
         dataset_two_sne.fill_out_redshifts()
-        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
-        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
-        np.testing.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
-        np.testing.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
+        npt.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        npt.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        npt.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
+        npt.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
 
     def test_fill_out_redshifts_no_overwrite(self, dataset_two_sne):
         N_sn, ra, dec, z_hel, z_hel_err, z_cmb_err, vpec = [
@@ -730,53 +732,113 @@ class TestAstroSetter:
         for attr in ("z_hubble", "z_hubble_err", "z_cmb", "vpec_err"):
             setattr(dataset_two_sne, attr, np.full(N_sn, None))
         dataset_two_sne.fill_out_redshifts()
-        np.testing.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
-        np.testing.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
-        np.testing.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
-        np.testing.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
+        npt.assert_allclose(dataset_two_sne.z_cmb.astype(float), z_cmb)
+        npt.assert_allclose(dataset_two_sne.z_cmb_err.astype(float), z_cmb_err)
+        npt.assert_allclose(dataset_two_sne.z_hubble.astype(float), z_hubble)
+        npt.assert_allclose(dataset_two_sne.z_hubble_err.astype(float), z_hubble_err)
 
     def test_set_all_rest_phases(self, dataset_two_sne):
-        test = copy.deepcopy(dataset_two_sne)
-        assert "phase" not in test.photometry
-        obs_peaks = np.concatenate([np.full(test.N_obs[i], test.peak_mjd[i]) for i in range(test.N_sn)])
-        obs_z_hels = np.concatenate([np.full(test.N_obs[i], test.z_helio[i]) for i in range(test.N_sn)])
-        test.set_all_rest_phases()
-        pd.testing.assert_series_equal(test.photometry["mjd"], test.photometry["phase"] * (1+obs_z_hels) + obs_peaks, check_names=False)
+        test_ds = copy.deepcopy(dataset_two_sne)
+        assert "phase" not in test_ds.photometry
+        obs_peaks = np.concatenate([np.full(test_ds.N_obs[i], test_ds.peak_mjd[i]) for i in range(test_ds.N_sn)])
+        obs_z_hels = np.concatenate([np.full(test_ds.N_obs[i], test_ds.z_helio[i]) for i in range(test_ds.N_sn)])
+        test_ds.set_all_rest_phases()
+        pdt.assert_series_equal(test_ds.photometry["mjd"], test_ds.photometry["phase"] * (1+obs_z_hels) + obs_peaks, check_names=False)
 
     def test_recalibrate_fluxcal_zpt(self, dataset_two_sne):
-        test = copy.deepcopy(dataset_two_sne)
-        assert test.fluxcal_zpt == 27.5
-        # testing different data zero-points for test0 and test1
-        test.photometry.loc[test.photometry["snid"] == "test0", ["flux", "flux_err"]] *= 10**0.4
-        test.fluxcal_zpt = 32.5
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_phot, ref_phot = test_ds.photometry, dataset_two_sne.photometry
+        fluxes, mags = ["flux", "flux_err"], ["mag", "mag_err"]
+        assert test_ds.fluxcal_zpt == 27.5
+        # testing different data zero-points for test0 and test1, 28.5 and 27.5
+        test_phot.loc[test_phot["snid"] == "test0", fluxes] *= 10**0.4
+        test_ds.fluxcal_zpt = 32.5
         scaling = 100  # 5 mags
-        test.recalibrate_fluxcal_zpt()
-        np.testing.assert_allclose((test.photometry["flux"] / dataset_two_sne.photometry["flux"]).values, 100)
-        np.testing.assert_allclose((test.photometry["flux_err"] / dataset_two_sne.photometry["flux_err"]).values, 100)
-        pd.testing.assert_series_equal(test.photometry["mag"], dataset_two_sne.photometry["mag"])
+        test_ds.recalibrate_fluxcal_zpt()
+        flux_ratios = test_phot[fluxes] / ref_phot[fluxes]
+        # test0 and test1 both brought to 32.5, ratio with ref_phot (27.5) is 100
+        npt.assert_allclose(flux_ratios.values.flatten(), 100)
+        pdt.assert_frame_equal(test_phot[mags], ref_phot[mags])
+
+    def test_recalibrate_fluxcal_zpt_all_negative(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_phot = test_ds.photometry
+        fluxes, mags = ["flux", "flux_err"], ["mag", "mag_err"]
+        test_phot["flux"] *= -1
+        test_phot[["mag", "mag_err"]] = -99
+        test_ds.fluxcal_zpt = 32.5
+        ref_phot = copy.deepcopy(test_phot)
+        test_ds.recalibrate_fluxcal_zpt()  # no-op when no positive fluxes
+        pdt.assert_frame_equal(test_phot, ref_phot)
+
+    def test_recalibrate_fluxcal_zpt_negatives_single_zpt(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_phot, ref_phot = test_ds.photometry, dataset_two_sne.photometry
+        fluxes, mags = ["flux", "flux_err"], ["mag", "mag_err"]
+        assert test_ds.fluxcal_zpt == 27.5
+        # same setup as test_recalibrate_fluxcal_zpt, but with negatives for first flt
+        # and test0 and test1 have the same zeropoint.
+        flt_mask = test_phot["flt"] == test_ds.unique_bands[0]
+        test_phot.loc[flt_mask, "flux"] *= -1
+        test_phot.loc[flt_mask, mags] = -99
+        test_ds.fluxcal_zpt = 32.5
+        scaling = 100  # 5 mags
+        test_ds.recalibrate_fluxcal_zpt()
+        flux_ratios = test_phot[fluxes] / ref_phot[fluxes]
+        npt.assert_allclose(flux_ratios[~flt_mask].values.flatten(), 100)
+        # single zpt inferred for negative fluxes, ratios match with negative for flux
+        npt.assert_allclose(flux_ratios.loc[flt_mask, "flux"].values.flatten(), -100)
+        npt.assert_allclose(flux_ratios.loc[flt_mask, "flux_err"].values.flatten(), 100)
+        npt.assert_allclose(test_phot.loc[flt_mask, mags].values.flatten(), -99)
+
+    def test_recalibrate_fluxcal_zpt_negatives_multiple_zpts(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_phot, ref_phot = test_ds.photometry, dataset_two_sne.photometry
+        fluxes, mags = ["flux", "flux_err"], ["mag", "mag_err"]
+        assert test_ds.fluxcal_zpt == 27.5
+        # same setup as test_recalibrate_fluxcal_zpt, but with negatives for first flt
+        snid_mask = test_phot["snid"] == "test0"
+        test_phot.loc[snid_mask, fluxes] *= 10**0.4
+        flt_mask = test_phot["flt"] == test_ds.unique_bands[0]
+        test_phot.loc[flt_mask, "flux"] *= -1
+        test_phot.loc[flt_mask, mags] = -99
+        test_ds.fluxcal_zpt = 32.5
+        scaling = 100  # 5 mags
+        test_ds.recalibrate_fluxcal_zpt()
+        flux_ratios = test_phot[fluxes] / ref_phot[fluxes]
+        npt.assert_allclose(flux_ratios[~flt_mask].values.flatten(), 100)
+        npt.assert_allclose(test_phot.loc[flt_mask, mags].values.flatten(), -99)
+        pdt.assert_frame_equal(test_phot.loc[~flt_mask, mags], ref_phot.loc[~flt_mask, mags])
+        # Different zpts means zp for negative fluxes cannot be inferred
+        # negative test0 photometry only changed by 1 mag
+        npt.assert_allclose(flux_ratios.loc[flt_mask*snid_mask, "flux"].values.flatten(), -10**0.4)
+        npt.assert_allclose(flux_ratios.loc[flt_mask*snid_mask, "flux_err"].values.flatten(), 10**0.4)
+        # negative test1 photometry not changed at all
+        npt.assert_allclose(flux_ratios.loc[flt_mask*~snid_mask, "flux"].values.flatten(), -1)
+        npt.assert_allclose(flux_ratios.loc[flt_mask*~snid_mask, "flux_err"].values.flatten(), 1)
 
     def test_apply_filter_map(self, dataset_two_sne):
-        test = copy.deepcopy(dataset_two_sne)
-        bands = test.unique_bands
-        test.apply_filter_map(map_dict={bands[0]: "alpha", bands[1]: "beta"})
-        mask = [col for col in test.photometry.columns if col != "flt"]
+        test_ds = copy.deepcopy(dataset_two_sne)
+        bands = test_ds.unique_bands
+        test_ds.apply_filter_map(map_dict={bands[0]: "alpha", bands[1]: "beta"})
+        mask = [col for col in test_ds.photometry.columns if col != "flt"]
         for i, band in enumerate(("alpha", "beta")):
-            df_ref = dataset_two_sne.photometry.loc[dataset_two_sne.photometry["flt"] == bands[i]]
-            df_test = test.photometry.loc[test.photometry["flt"] == band]
-            pd.testing.assert_frame_equal(df_test[mask], df_ref[mask])
+            ref_df = dataset_two_sne.photometry.loc[dataset_two_sne.photometry["flt"] == bands[i]]
+            test_df = test_ds.photometry.loc[test_ds.photometry["flt"] == band]
+            pdt.assert_frame_equal(test_df[mask], ref_df[mask])
 
     def test_apply_error_floor(self, dataset_two_sne):
-        test = copy.deepcopy(dataset_two_sne)
+        test_ds = copy.deepcopy(dataset_two_sne)
         # no op for non-positive error floors.
-        test.apply_error_floor(0)
-        pd.testing.assert_frame_equal(test.photometry, dataset_two_sne.photometry)
-        sorted_mag_errs = test.photometry.mag_err.sort_values()
+        test_ds.apply_error_floor(0)
+        pdt.assert_frame_equal(test_ds.photometry, dataset_two_sne.photometry)
+        sorted_mag_errs = test_ds.photometry.mag_err.sort_values()
         floor = sorted_mag_errs.values[3]
-        test.apply_error_floor(floor)
+        test_ds.apply_error_floor(floor)
         for i in range(3):
             idx = sorted_mag_errs.index[i]
-            assert test.photometry.mag_err[idx] == floor
-            assert test.photometry.flux_err[idx] == floor*np.log(10)/2.5*test.photometry.flux[idx]
+            assert test_ds.photometry.mag_err[idx] == floor
+            assert test_ds.photometry.flux_err[idx] == floor*np.log(10)/2.5*test_ds.photometry.flux[idx]
 
 class TestFactoryMethods:
     @pytest.mark.parametrize("fname,file_format,read_fn", (("Foundation_DR1_2016W.txt", "SNANA", io.read_snana_ascii), ("CSP_SN2004dt.snpy", "snpy", io.read_snpy)))
@@ -812,8 +874,8 @@ class TestFactoryMethods:
         paths = [TEST_DIR / f"training_data/Foundation_DR1_2016{name}.txt" for name in ("W", "afk")]
         ors = {"z_helio_err": 2e-5, "mwebv_err": [0.1, 0.2]}
         test_ds = SNDataset.from_ascii_files(paths, file_format="SNANA", overrides=ors)
-        np.testing.assert_allclose(test_ds.z_helio_err, 2e-5)
-        np.testing.assert_allclose(test_ds.mwebv_err, [0.1, 0.2])
+        npt.assert_allclose(test_ds.z_helio_err, 2e-5)
+        npt.assert_allclose(test_ds.mwebv_err, [0.1, 0.2])
 
     def test_from_table_file(self):
         table_path = TEST_DIR / "T21_mini_set.txt"
