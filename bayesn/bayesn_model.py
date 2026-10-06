@@ -1198,20 +1198,23 @@ class SEDmodel(object):
         for param, default in default_kwargs.items():
             args[param] = args.pop(param, default)
 
-        # Defaults based on model values.
-        for key in ("RV", "mu_R"):
-            if args[key] == "default":
-                args[key] = float(getattr(self, "RV", 3))
-        for key in ("l_knots", "tau_knots"):
-            if args[key] == "default":
-                args[key] = args.get(key, getattr(self, key).tolist())
+        # Handle defaults that are "default" or based on model values.
+        for key, val in args.items():
+            if val != "default":
+                continue
+            if key in ("l_knots", "tau_knots"):
+                args[key] = getattr(self, key).tolist()
+            elif key == "outputdir":
+                args["outputdir"] = "."
+            elif getattr(self, key) is not None:
+                args[key] = getattr(self, key)
+            elif key == "mu_R":  # backup if no mu_R in self
+                args[key] = getattr(self, "RV", default_kwargs[key])
 
         # The VI fitting method uses a modified exponential for AV.
         if args.get("fit_method") == "vi":
             args["AV_dist"] = zltn.My_Exponential
 
-        if args["outputdir"] == "default":
-            args["outputdir"] = "."
         args["outputdir"] = Path(args["outputdir"]).absolute()
         args["photoz"] = args.get("photoz", False)
         args["num_zltn_iter"] = args.get("num_zltn_iter", 4000 if args["photoz"] else 1500)
