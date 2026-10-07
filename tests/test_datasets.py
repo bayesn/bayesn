@@ -17,10 +17,12 @@ from bayesn.constants import C_LIGHT
 from bayesn.utils import assert_dicts_match, convert_z, mag_to_flux, flux_to_mag
 from bayesn.datasets import (
     SNDataset,
+    ObsData,
     meta_names,
     all_meta_names,
     get_standard_name,
     get_SNANA_name,
+    clean_peakmjd_key,
     clean_sn_dict,
     clean_obs_df,
 )
@@ -152,6 +154,14 @@ class TestGlobals:
             assert std_name == name
         with pytest.warns(UserWarning, match="Not sure"):
             assert get_SNANA_name("test_key") == "TEST_KEY"
+
+    def test_clean_peakmjd_key(self):
+        test = clean_peakmjd_key(sn_dict={"search_peakmjd": 1, "misc1": 2}, peakmjd_key=None)
+        assert test["peak_mjd"] == 1
+        test = clean_peakmjd_key(sn_dict={"misc3": 3, "misc4": 4}, peakmjd_key=["misc3", "misc5"])
+        assert test["peak_mjd"] == 3
+        with pytest.raises(ValueError, match="Multiple peakmjd_keys found"):
+            clean_peakmjd_key(sn_dict={"peakmjd": 3, "misc4": 4}, peakmjd_key="misc4")
 
     def test_clean_sn_dict_rename(self, sample_data_single_sn):
         ref_dict = sample_data_single_sn[0]
@@ -940,12 +950,148 @@ class TestFactoryMethods:
 
 class TestDataProducts:
     def test_make_fitres_table(self, dataset_two_sne):
-        pass
+        fitres_table, all_table = dataset_two_sne.make_fitres_table(
+            version_photometry=False, idsurvey_overwrite="test"
+        )
+        cols = [
+            "VARNAMES:", "CID", "IDSURVEY", "TYPE", "FIELD", "zHEL", "zHELERR", "zHD",
+            "zHDERR", "VPEC", "VPECERR", "MWEBV", "HOST_LOGMASS", "HOST_LOGMASS_ERR",
+            "SNRMAX1", "SNRMAX2", "SNRMAX3",
+        ]
+        npt.assert_equal(list(fitres_table.columns), cols)
+        npt.assert_equal(all_table["IDSURVEY"].values, "test")
+        npt.assert_equal(all_table["DROP"].values, "")
+        pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
+
+    def test_make_fitres_table_version_photometry(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.set_all_rest_phases()  # needed for TRESTMIN/MAX
+        fitres_table, all_table = test_ds.make_fitres_table(version_photometry=True)
+        cols = [
+            "VARNAMES:", "CID", "IDSURVEY", "TYPE", "FIELD", "zHEL", "zHELERR", "zHD",
+            "zHDERR", "VPEC", "VPECERR", "MWEBV", "HOST_LOGMASS", "HOST_LOGMASS_ERR",
+            "SNRMAX1", "SNRMAX2", "SNRMAX3",
+            "SEARCH_PEAKMJD", "NEPOCH", "TRESTMIN", "TRESTMAX",
+        ]
+        npt.assert_equal(list(fitres_table.columns), cols)
+        npt.assert_equal(all_table["DROP"].values, "")
+        pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
+
     def test_make_fitres_table_sim(self, dataset_sim):
-        pass
-    def test_cut_fitres_table(self):
-        pass
-    def test_make_lcplot_data(self):
-        pass
-    def test_make_bayesn_data(self):
-        pass
+        fitres_table, all_table = dataset_sim.make_fitres_table(version_photometry=False)
+        cols = [
+            "VARNAMES:", "CID", "IDSURVEY", "TYPE", "FIELD", "zHEL", "zHELERR", "zHD",
+            "zHDERR", "VPEC", "VPECERR", "MWEBV", "HOST_LOGMASS", "HOST_LOGMASS_ERR",
+            "SNRMAX1", "SNRMAX2", "SNRMAX3",
+            *[get_SNANA_name(key) for key in meta_names["sim"]]
+        ]
+        npt.assert_equal(list(fitres_table.columns), cols)
+        npt.assert_equal(all_table["DROP"].values, "")
+        pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
+
+    def test_cut_fitres_table(self, dataset_two_sne):
+        mwebv = dataset_two_sne.mwebv
+        fitres_table = dataset_two_sne.make_fitres_table()[0]
+        cut_dict = {"mwebv": (0, np.average(mwebv))}
+        cut_idx = np.argmin(mwebv)
+        keep_dict = {"zHEL": (0, 1)}
+        cut_table, all_table = dataset_two_sne.cut_fitres_table(
+            fitres_table, keep_dict=keep_dict, cut_dict=cut_dict
+        )
+        assert len(cut_table) == 1
+        assert cut_table["CID"][0] == dataset_two_sne.snid[int(not cut_idx)]
+        assert all_table["DROP"][cut_idx] == "mwebv"
+        with pytest.raises(ValueError, match="not in the fitres_table"):
+            dataset_two_sne.cut_fitres_table(
+                fitres_table, keep_dict={}, cut_dict={"missing_key": (0, 1)}
+            )
+
+    def test_make_lcplot_data(self, dataset_two_sne):
+        lcplot_data = dataset_two_sne.make_lcplot_data(N=None)
+        cols = ["CID", "MJD", "FLUXCAL", "FLUXCALERR", "FLT"]
+        npt.assert_equal(list(lcplot_data.columns), cols)
+        assert lcplot_data["CID"].dtype == "object"  # not category like photometry
+        ref_df = dataset_two_sne.photometry[["snid", "mjd", "flux", "flux_err", "flt"]]
+        npt.assert_equal(lcplot_data.values, ref_df.values)
+
+    def test_make_bayesn_data(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.set_all_rest_phases()
+        data = test_ds.make_bayesn_data(data_type="flux", cosmo=FakeCosmo())
+        for data_attr, ds_attr in zip(
+            ("z_hel", "z_hel_err", "muhat", "MWEBV"),
+            ("z_helio", "z_helio_err", "z_hubble", "mwebv")
+        ):
+            npt.assert_allclose(getattr(data, data_attr), getattr(test_ds, ds_attr))
+        N_obs_max = max(test_ds.N_obs)
+        test_dict = {}
+        test_dict["flux"] = np.zeros((N_obs_max, test_ds.N_sn))
+        test_dict["flux_err"] = np.full((N_obs_max, test_ds.N_sn), 1/np.sqrt(2*np.pi))
+        for key in ("flux", "flux_err"):
+            test_dict[key][:test_ds.N_obs[0],0] = test_ds.photometry[key][test_ds.phot_idx[0]:test_ds.phot_idx[1]]
+            test_dict[key][:test_ds.N_obs[1],1] = test_ds.photometry[key][test_ds.phot_idx[1]:test_ds.phot_idx[2]]
+        test_dict["mjd"], test_dict["band_indices"], test_dict["mask"] = [np.zeros((N_obs_max, test_ds.N_sn)) for _ in range(3)]
+        test_dict["band_indices"], test_dict["mask"] = [np.zeros((N_obs_max, test_ds.N_sn)) for _ in range(2)]
+        for i in range(2):
+            test_dict["mjd"][:test_ds.N_obs[i],i] = test_ds.photometry["phase"][test_ds.phot_idx[i]:test_ds.phot_idx[i+1]]
+            test_dict["band_indices"][:test_ds.N_obs[i],i] = test_ds.get_band_indices(None, test_ds.get_phot_subset(idx=i))
+            test_dict["mask"][:test_ds.N_obs[i],i] = 1
+        npt.assert_allclose(data.host_logmass, test_ds.host_logmass)
+        for attr in ("mjd", "flux", "flux_err", "band_indices", "mask"):
+            npt.assert_allclose(getattr(data, attr), test_dict[attr])
+
+    def test_make_bayesn_data_mag(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.set_all_rest_phases()
+        # Flipping flux sign in all observations in first band
+        flt_mask = test_ds.photometry["flt"] == test_ds.unique_bands[0]
+        test_ds.photometry.loc[flt_mask, "flux"] *= -1
+        test_ds.photometry.loc[flt_mask, ["mag", "mag_err"]] = -99
+        data = test_ds.make_bayesn_data(data_type="mag", cosmo=FakeCosmo())
+        np_mask = data.band_indices == 0
+        pd_mask = test_ds.photometry["mag"] <= 0
+        # flux and flux_err names used even when data_type is mag
+        for key in ("mjd", "flux", "mask"):
+            npt.assert_equal(getattr(data, key)[np_mask], 0)
+        npt.assert_equal(data.flux_err[np_mask], 1/np.sqrt(2*np.pi))
+        npt.assert_equal(data.flux.T[~np_mask.T], test_ds.photometry["mag"][~pd_mask].values)
+        npt.assert_equal(data.flux_err.T[~np_mask.T], test_ds.photometry["mag_err"][~pd_mask].values)
+
+    def test_make_bayesn_data_N_obs_max(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.set_all_rest_phases()
+        data = test_ds.make_bayesn_data(data_type="flux", cosmo=FakeCosmo(), N_obs_max=min(test_ds.N_obs))
+        kept_idx = np.argmin(test_ds.N_obs)
+        for data_attr, ds_attr in zip(
+            ("z_hel", "z_hel_err", "muhat", "MWEBV"),
+            ("z_helio", "z_helio_err", "z_hubble", "mwebv")
+        ):
+            npt.assert_allclose(getattr(data, data_attr), getattr(test_ds, ds_attr)[kept_idx])
+        phot = test_ds.get_phot_subset(idx=kept_idx)
+        for key in ("flux", "flux_err"):
+            npt.assert_allclose(getattr(data, key).flatten(), phot[key].values)
+        npt.assert_allclose(data.mjd.flatten(), phot["phase"].values)
+        npt.assert_equal(data.band_indices.flatten(), test_ds.get_band_indices(None, phot))
+        npt.assert_equal(data.mask, 1)
+
+    def test_make_bayesn_data_bad_data_type(self, dataset_two_sne):
+        with pytest.raises(ValueError, match="data_type should be"):
+            dataset_two_sne.make_bayesn_data(data_type="bad data type")
+
+    def test_make_bayesn_data_bad_cosmo(self, dataset_two_sne):
+        with pytest.raises(ValueError, match="does not have a 'distmod' method"):
+            dataset_two_sne.make_bayesn_data(data_type="flux", cosmo=Number)
+
+    def test_make_bayesn_data_missing_z(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.set_all_rest_phases()
+        test_ds.z_hubble = np.array([None, test_ds.z_hubble[1]])
+        with pytest.warns(UserWarning, match="will instead use their z_cmb"):
+            data = test_ds.make_bayesn_data(data_type="flux", cosmo=FakeCosmo())
+        test_ds.z_cmb = np.array([None, test_ds.z_cmb[1]])
+        with pytest.warns(UserWarning, match="will instead use their z_helio"):
+            data = test_ds.make_bayesn_data(data_type="flux", cosmo=FakeCosmo())
+
+class FakeCosmo:
+    def distmod(self, z):
+        return z
