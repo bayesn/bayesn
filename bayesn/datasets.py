@@ -169,10 +169,7 @@ def clean_peakmjd_key(
             "one of which can be interpreted as the value for peak_mjd."
         )
     elif len(found_keys) == 1:
-        try:
-            sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0])
-        except KeyError:
-            sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0].upper())
+        sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0])
     return sn_dict
 
 def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike], ) -> dict:
@@ -1411,9 +1408,9 @@ class SNDataset:
         meta = self.get_metadata_subset(use_defaults=True)
         varlist = ["SN:"] * self.N_sn
         if idsurvey_overwrite is None:
-            idsurvey = [idsurvey_overwrite,] * self.N_sn
-        else:
             idsurvey = meta["idsurvey"]
+        else:
+            idsurvey = [idsurvey_overwrite,] * self.N_sn
         t_ranges = np.zeros((self.N_sn, 2))
         snrmaxes = np.zeros((self.N_sn, 3))
         for i in range(self.N_sn):
@@ -1450,7 +1447,7 @@ class SNDataset:
             })
         if self.sim:
             arr_dict.update(dict(zip(
-                [get_SNANA_name[key] for key in meta_names["sim"]],
+                [get_SNANA_name(key) for key in meta_names["sim"]],
                 self.meta_sim
             )))
         fitres_table = QTable(names=list(arr_dict.keys()), data=list(arr_dict.values()))
@@ -1463,7 +1460,7 @@ class SNDataset:
         fitres_table: QTable,
         keep_dict: dict,
         cut_dict: dict,
-    ) -> tuple[QTable, QTable]:
+    ) -> tuple[QTable, pd.DataFrame]:
         """ Apply cuts to fitres_table based on cut_dict.
 
         Parameters
@@ -1496,7 +1493,14 @@ class SNDataset:
         """
         all_table = fitres_table.copy().to_pandas()
         all_table["DROP"] = ""
-        param_convert_dict = {"REDSHIFT": "zHD", "SNRMAX": "SNRMAX1"}
+        param_convert_dict = {
+            "REDSHIFT": "zHD",
+            "SNRMAX": "SNRMAX1",
+            "ZHD": "zHD",
+            "ZHHD_ERR": "zHDERR",
+            "ZHEL": "zHEL",
+            "ZHEL_ERR": "zHELERR",
+        }
         for d, cut in zip((keep_dict, cut_dict), (False, True)):
             if not len(d):
                 continue
@@ -1527,14 +1531,11 @@ class SNDataset:
             Number of SNe to use for lcplot. Use N_sn if None.
         """
         N = N or self.N_sn
-        orig_columns = ["mjd", "flux", "flux_err", "flt"]
-        renamed_columns = ["MJD", "FLUXCAL", "FLUXCALERR", "FLT"]
+        orig_columns = ["snid", "mjd", "flux", "flux_err", "flt"]
+        renamed_columns = ["CID", "MJD", "FLUXCAL", "FLUXCALERR", "FLT"]
         lcplot_data = self.photometry[:self.phot_idx[N]][orig_columns].copy()
         lcplot_data.columns = renamed_columns
-        cid_arr = np.concatenate(
-            [np.full(self.N_obs[i], self.snid[i]) for i in range(N)]
-        )
-        lcplot_data.insert(loc=0, column="CID", value=cid_arr)
+        lcplot_data["CID"] = lcplot_data["CID"].astype("O")
         return lcplot_data
     def make_bayesn_data(
         self,
@@ -1589,7 +1590,7 @@ class SNDataset:
                 mask: bool
         """
         if data_type.lower() not in ("mag", "flux"):
-            raise ValueError(f"datatype should be 'mag' or 'flux', not {data_type}.")
+            raise ValueError(f"data_type should be 'mag' or 'flux', not {data_type}.")
         if not hasattr(cosmo, "distmod"):
             raise ValueError(
                 f"The given cosmo {cosmo} does not have a 'distmod' method. This is "
@@ -1600,9 +1601,11 @@ class SNDataset:
         meta = self.get_metadata_subset(use_defaults=True)
         N_obs_max = N_obs_max or max(self.N_obs)
         if N_obs_max < max(self.N_obs):
-            meta, phot, phot_idx = self.cut_by_meta_numeric(
+            meta, phot = self.cut_by_meta_numeric(
                 "N_obs", ">", N_obs_max, inplace=False
             )
+            counts = phot["snid"].value_counts()
+            phot_idx = np.append(0, np.cumsum(counts))
         else:
             meta = self.get_metadata_subset(use_defaults=True)
             phot = self.photometry
@@ -1624,6 +1627,7 @@ class SNDataset:
             neg_mask = flux == negative_flux_mag_val
             mjd[neg_mask] = 0
             flux[neg_mask] = 0
+            flux_err[neg_mask] = 1/np.sqrt(2*np.pi)
             band_indices[neg_mask] = 0
             mask[neg_mask] = 0
         # The redshift to use for calculating muhat is z_hubble, but it may not always
@@ -1640,7 +1644,7 @@ class SNDataset:
         if any(replace_w_helio):
             warn(UserWarning(
                 "Some SNe are missing z_hubble, z_cmb, and ra/dec values. The muhat "
-                "(distance prior) calculation will instead use their z_cmb values. The "
+                "(distance prior) calculation will instead use their z_helio values. The "
                 f"affected SNe are\n{meta['snid'][replace_w_helio]}."
             ))
         z_hubble = np.where(replace_w_helio, meta["z_helio"], z_hubble)
