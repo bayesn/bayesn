@@ -858,6 +858,10 @@ class TestFactoryMethods:
         with pytest.raises(ValueError, match="file_format"):
             test_ds = SNDataset.from_ascii_files(path, file_format="unsupported_format")
 
+    def test_from_ascii_wrong_peakmjd_key(self):
+        path = TEST_DIR / "training_data/Foundation_DR1_2016W.txt"
+        test_ds = SNDataset.from_ascii_files(path, file_format="SNANA", peakmjd_key=["missing_key",])
+
     def test_from_multi_ascii(self):
         paths = [TEST_DIR / f"training_data/{fname}" for fname in ("Foundation_DR1_2016W.txt", "CSP_SN2004dt.snpy")]
         test_ds = SNDataset.from_ascii_files(paths, file_format=["SNANA", "snpy"])
@@ -921,10 +925,17 @@ class TestFactoryMethods:
         ref_ds.set_all_rest_phases()
         assert test_ds == ref_ds
 
-    def test_from_snana_list(self):
+    def test_from_snana_list_fits(self):
         fits_dir = TEST_DIR / f"training_data/BAYESN_test_fits/"
         test_ds = SNDataset.from_snana_list(fits_dir / "BAYESN_test_fits.LIST", data_root=fits_dir, peakmjd_key="PEAKMJD")
         ref_ds = SNDataset.from_snana_fits(fits_dir / "BAYESN_test_fits_HEAD.FITS", peakmjd_key="PEAKMJD")
+        assert test_ds == ref_ds
+
+    def test_from_snana_list_mixed(self):
+        fits_dir = TEST_DIR / f"training_data/BAYESN_test_fits/"
+        test_ds = SNDataset.from_snana_list(fits_dir / "BAYESN_test_mixed.LIST", data_root=fits_dir, peakmjd_key=["PEAKMJD", "SEARCH_PEAKMJD"])
+        ref_ds = SNDataset.from_snana_fits(fits_dir / "BAYESN_test_fits_HEAD.FITS", peakmjd_key="PEAKMJD")
+        ref_ds.append(SNDataset.from_ascii_files(fits_dir / "../Foundation_DR1_2016W.txt", file_format="SNANA", peakmjd_key="SEARCH_PEAKMJD"))
         assert test_ds == ref_ds
 
 class TestDataProducts:

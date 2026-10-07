@@ -146,7 +146,36 @@ def get_SNANA_name(name: str) -> str:
         warn(UserWarning(f"Not sure what SNANA key {name} refers to, returning input."))
     return name
 
-def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike]) -> dict:
+def clean_peakmjd_key(
+    sn_dict: dict[str, str | Number | ArrayLike],
+    peakmjd_key: str | list[str, ...] | None = None
+) -> dict:
+    """ peak_mjd can be specified in multiple ways. The default clean_sn_dict method
+    will use `get_standard_name` to interpret 'search_peakmjd', 'peakmjd', 'pkmjd', and
+    'tmax', but it may be useful to support other keys as well.
+    Keys specified with peakmjd_key will be sought in sn_dict (case-insensitive) and
+    peak_mjd will be replaced.
+    """
+    if isinstance(peakmjd_key, str):
+        peakmjd_key = [peakmjd_key,]
+    default_keys = ["search_peakmjd", "peakmjd", "pkmjd", "tmax"]
+    if peakmjd_key is None:
+        peakmjd_key = []
+    peakmjd_key += default_keys
+    found_keys = [key for key in sn_dict if key.lower() in peakmjd_key]
+    if len(found_keys) > 1:
+        raise ValueError(
+            f"Multiple peakmjd_keys found. The sn_dict contains {found_keys}, only "
+            "one of which can be interpreted as the value for peak_mjd."
+        )
+    elif len(found_keys) == 1:
+        try:
+            sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0])
+        except KeyError:
+            sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0].upper())
+    return sn_dict
+
+def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike], ) -> dict:
     """ Standardise the keys in an sn_dict to the keys expected in this class and
     ensure values are lists or np.arrays as appropriate.
 
@@ -1099,7 +1128,7 @@ class SNDataset:
         cls,
         fname: str | Path | StringIO | ArrayLike,
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str, ...] | str | None = None,
         file_format: str | ArrayLike = "SNANA",
         overrides: dict = {},
         jobid: int = 1,
@@ -1147,6 +1176,8 @@ class SNDataset:
         # Support string | Path values for single files/file formats.
         if isinstance(fname, str | Path):
             fname = [fname,]
+        if isinstance(peakmjd_key, str):
+            peakmjd_key = [peakmjd_key,]
         use_in_run = np.where((np.arange(len(fname)) + 1 - jobid) % njobtot == 0)
         fname = np.array(fname)[use_in_run]
         if isinstance(file_format, str):
@@ -1168,8 +1199,7 @@ class SNDataset:
                     "snpy, or snoopy, all case-insensitive."
                 )
             sn_dict, obs_df = read_fn(fname=f, fluxcal_zpt=fluxcal_zpt)
-            if peakmjd_key in sn_dict:
-                sn_dict["SEARCH_PEAKMJD"] = sn_dict.pop(peakmjd_key)
+            sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
             ds.append(sn_dict=sn_dict, obs_df=obs_df)
         ds.photometry.reset_index(drop=True, inplace=True)
 
@@ -1190,6 +1220,7 @@ class SNDataset:
         fname: str | Path | StringIO,
         data_root: str | Path = Path(),
         fluxcal_zpt: Number = 27.5,
+        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
         file_format: str | ArrayLike = "SNANA",
         comment="#",
         jobid: int = 1,
@@ -1252,7 +1283,8 @@ class SNDataset:
             row_ds = SNDataset.from_ascii_files(
                 [Path(data_root, f) for f in row.files.split(",")],
                 fluxcal_zpt=fluxcal_zpt,
-                fmt=file_format[i],
+                peakmjd_key=peakmjd_key,
+                file_format=file_format[i],
                 overrides=dict([(key, val[i]) for key, val in all_overrides.items()]),
             )
             ds.append(ds=row_ds)
@@ -1264,18 +1296,20 @@ class SNDataset:
         fname: str | Path,
         keep_list: list[str, ...] = [],
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
         **kwargs,
     ):
+        if isinstance(peakmjd_key, str):
+            peakmjd_key = [peakmjd_key,]
         ds = SNDataset()
         sn_dict, obs_df = io.read_snana_fits(
             fname,
             jobid=jobid,
             njobtot=njobtot
         )
-        sn_dict["peak_mjd"] = sn_dict.pop(peakmjd_key)
+        sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
         if "SIM_GENTYPE" in sn_dict:
             ds.sim = True
             for attr in meta_names["sim"]:
@@ -1294,7 +1328,7 @@ class SNDataset:
         data_root: str | Path = Path(),
         keep_list: list[str, ...] = [],
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
         **kwargs,
