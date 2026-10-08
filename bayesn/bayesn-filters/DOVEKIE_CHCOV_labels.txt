@@ -10,10 +10,6 @@ DES-g g_DES
 DES-r r_DES
 DES-i i_DES
 DES-z z_DES
-D3YR-g g_D3YR
-D3YR-r r_D3YR
-D3YR-i i_D3YR
-D3YR-z z_D3YR
 SNLS-g g_SNLS
 SNLS-r r_SNLS
 SNLS-i i_SNLS
@@ -46,6 +42,10 @@ CFA4P2-B B_KC_CFA4p2
 CFA4P2-V V_KC_CFA4p2
 CFA4P2-r r_KC_CFA4p2
 CFA4P2-i i_KC_CFA4p2
+D3YR-g g_D3YR
+D3YR-r r_D3YR
+D3YR-i i_D3YR
+D3YR-z z_D3YR
 Foundation-g g_Foundation
 Foundation-r r_Foundation
 Foundation-i i_Foundation
