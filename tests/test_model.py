@@ -124,7 +124,12 @@ class TestInit:
     def test_model_file_non_existent(self, initial_args: dict):
         non_existent_check()
         with pytest.raises(FileNotFoundError):
-            model = SEDmodel(load_model=NON_EXISTENT_PATH, filter_yaml=None)
+            model = SEDmodel(load_model=NON_EXISTENT_PATH)
+
+    def test_shift_file_non_existent(self, initial_args: dict):
+        non_existent_check()
+        with pytest.raises(FileNotFoundError):
+            model = SEDmodel(load_model="T21_model", shift_file=NON_EXISTENT_PATH)
 
     def test_custom_model_file(self, initial_args: dict, model: SEDmodel, custom_model: SEDmodel):
         for attr in ("l_knots", "L_Sigma", "tau_knots", "W0", "W1"):
@@ -215,9 +220,9 @@ class TestHsiao:
 
 class TestBandWeights:
     bp_caching_args: tuple[tuple, ...] = (
-        ([], 1, False),  # fresh init with just NULL_BAND
-        ([f"{bp}_PS1" for bp in "gr"], 3, False),
-        ([f"{bp}_PS1" for bp in "griz"]+["Y_LSST"], 6, True),
+        ([], 1, True, False),  # fresh init with just NULL_BAND
+        ([f"{bp}_PS1" for bp in "gr"], 3, False, False),
+        ([f"{bp}_PS1" for bp in "griz"]+["Y_LSST"], 6, False, True),
         )
     set_used_bands_args: tuple[tuple, ...] = (
         ([f"{bp}_PS1" for bp in "ri"], False),
@@ -263,8 +268,6 @@ class TestBandWeights:
 
     def test_load_band_weights_no_file(self, model: SEDmodel):
         non_existent_check()
-        with pytest.raises(FileNotFoundError):
-            model._load_band_weights(bands_to_load=[], shift_file=NON_EXISTENT_PATH)
         model.filter_dict["filters"]["test_filter"] = {"path": str(NON_EXISTENT_PATH)}
         with pytest.raises(FileNotFoundError):
             model._load_band_weights(bands_to_load=["test_filter"])
@@ -279,14 +282,14 @@ class TestBandWeights:
         with pytest.raises(ValueError):
             model._load_band_weights(bands_to_load=["non_existent"])
 
-    def test_load_band_weights_shift_file(self, model: SEDmodel):
+    def test_load_band_weights_shift_df(self, model: SEDmodel):
         shift_file = TEST_DIR / "test_shift_file_PS1.dat"
         shift_df = pd.read_csv(shift_file, comment="#")
         shift_model = copy.deepcopy(model)
-        model._load_band_weights(bands_to_load=[f"{bp}_PS1" for bp in "griz"], shift_file=None)
+        model._load_band_weights(bands_to_load=[f"{bp}_PS1" for bp in "griz"], shift_df=None)
         shift_model._load_band_weights(
             bands_to_load=[f"{bp}_PS1" for bp in "griz"],
-            shift_file=shift_file,
+            shift_df=shift_df,
             apply_lam_shifts=True,
             apply_mag_shifts=True,
         )
@@ -294,10 +297,11 @@ class TestBandWeights:
         dmag = shift_df[shift_df["BAND"] == "r_PS1"]["MAG_SHIFT"].values[0]
         assert model.zp_dict["r_PS1"] == shift_model.zp_dict["r_PS1"] - dmag
         assert all(np.array(model.band_lim_dict["g_PS1"]) == np.array(shift_model.band_lim_dict["g_PS1"]) - dlam)
-        model._init_band_weights()
 
-    @pytest.mark.parametrize("bands_to_load,new_N_bands,clean", bp_caching_args)
-    def test_bp_caching(self, model: SEDmodel, bands_to_load: list, new_N_bands: int, clean: bool):
+    @pytest.mark.parametrize("bands_to_load,new_N_bands,first_run,clean", bp_caching_args)
+    def test_bp_caching(self, model: SEDmodel, bands_to_load: list, new_N_bands: int, first_run: bool, clean: bool):
+        if first_run:
+            model._init_band_weights()
         model._load_band_weights(bands_to_load)
         for model_dict in (model.band_dict, model.zp_dict, model.band_lim_dict):
             assert len(set(bands_to_load).difference(set(model_dict))) == 0
