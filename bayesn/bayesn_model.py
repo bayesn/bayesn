@@ -197,10 +197,10 @@ class SEDmodel(object):
     apply_lam_shifts: bool, default False
         Whether to increase transmission functions by any "lam_shift" values in
         BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
-        "LAM_SHIFT" values from the shift_file.
+        "LAM_SHIFT" values from shift_df.
     ZPT: Number, default 27.5
         The Pogson zero point used for converting between fluxes and magnitudes:
-            mag = fluxcal_zpt - 2.5\log_{10}(flux).
+            mag = fluxcal_zpt - 2.5 log10(flux).
         This makes fluxes proportional to but not necessarily equal to spectral flux
         density (power/area/wavelength) in physical units.
     RV_MW: 0D Array, default jnp.array(3.1)
@@ -477,11 +477,11 @@ class SEDmodel(object):
 
         Parameters
         ----------
-        num_devices :
+        num_devices:
                 If running on a CPU, numpyro will by default see it as a single device.
                 This argument will set the number of available cores for numpyro to use
                 e.g. set to 4, you can train 4 chains on 4 cores in parallel.
-        load_model :
+        load_model:
             Can be either a pre-defined BayeSN model name (see table below), or
             a path to directory containing a set of .txt files from which a
             valid model can be constructed. Currently implemented default models
@@ -516,15 +516,15 @@ class SEDmodel(object):
                          treatment of host mass effects.  Global RV assumed. Trained on
                          low-z Avelino+19 (ApJ, 887, 106) compilation of CfA, CSP and
                          others.
-        fiducial_cosmology :
+        fiducial_cosmology:
             Dictionary containg keys "H0" and "Om0" for initialising an
             astropy.cosmology.FlatLambdaCDM instance.
             Default from Riess+16 (ApJ, 826, 56).
-        filter_yaml :
+        filter_yaml:
             Path to yaml file containing details on filters and standards to use.
             If not specified, will look for a file called filters.yaml in directory that
             BayeSN is called from.
-        load_ext_rel :
+        load_ext_rel:
             Name of dust extinction relation to load
             Available choices are listed below
             "CCM89"
@@ -546,7 +546,7 @@ class SEDmodel(object):
             Whether to add the mag_update and mag_cal elements from the
             BASE_DIR/bayesn/bayesn-filters/filters.yaml file to defined magnitudes.
             These values are based on the Dovekie analysis (Popovic et al. 2025).
-        shift_file: None | str | Path, default None
+        shift_file: None or str or Path, default None
             Used in SEDmodel.load_bandpass and SEDmodel._load_band_weights.
             If not None, then a path to a csv with columns/dtypes
                 BAND: strings
@@ -564,9 +564,9 @@ class SEDmodel(object):
             Whether to increase transmission functions by any "lam_shift" values in
             BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
             "LAM_SHIFT" values from the shift_file.
-        fluxcal_zpt :
+        fluxcal_zpt:
             The Pogson zero point used for converting between fluxes and magnitudes:
-            mag = fluxcal_zpt - 2.5\log_{10}(flux).
+            mag = fluxcal_zpt - 2.5 log10(flux).
             This makes fluxes proportional to but not necessarily equal to spectral flux
             density (power/area/wavelength) in physical units.
         """
@@ -980,7 +980,7 @@ class SEDmodel(object):
         apply_lam_shifts: bool, default False
             Whether to increase transmission functions by any "lam_shift" values in
             BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
-            "LAM_SHIFT" values from the shift_file.
+            "LAM_SHIFT" values from shift_df.
 
         Returns
         -------
@@ -1007,7 +1007,7 @@ class SEDmodel(object):
             )
         # By default, load attributes defined at init.
         apply_dovekie_mag_shifts = apply_dovekie_mag_shifts or self.apply_dovekie_mag_shifts
-        shift_df = shift_df or self.shift_df
+        shift_df = shift_df if shift_df is not None else self.shift_df
         apply_mag_shifts = apply_mag_shifts or self.apply_mag_shifts
         apply_lam_shifts = apply_lam_shifts or self.apply_lam_shifts
 
@@ -1072,7 +1072,7 @@ class SEDmodel(object):
         apply_lam_shifts: bool, default False
             Whether to increase transmission functions by any "lam_shift" values in
             BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
-            "LAM_SHIFT" values from the shift_file.
+            "LAM_SHIFT" values from shift_df.
         """
         def ab_standard_flam(l):  # Can just use analytic function for AB spectrum
             f = (const.c.to("AA/s").value / 1e23) * (l**-2) * 10 ** (-48.6 / 2.5) * 1e23
@@ -1083,7 +1083,7 @@ class SEDmodel(object):
         # Load filters------------------------------
         # If not working with lam_shifts, the transmission functions can be
         # pre-processed a bit. Thus, band_weights and band_weights_shift are both
-        # calculated and stored in band_interpolate_weights(_shift).
+        # calculated and stored in band_interpolate_weights
         band_ind = len(self.band_dict)
         new_bands = set(np.unique(bands_to_load)).difference(set(self.band_dict))
         new_bands_zeros = np.zeros(len(new_bands))
@@ -1098,7 +1098,7 @@ class SEDmodel(object):
             one_band_dict = self.load_bandpass(
                 band,
                 apply_dovekie_mag_shifts=apply_dovekie_mag_shifts,
-                shift_df=shift_file,
+                shift_df=shift_df,
                 apply_mag_shifts=apply_mag_shifts,
                 apply_lam_shifts=apply_lam_shifts
             )
@@ -1316,18 +1316,20 @@ class SEDmodel(object):
         for param, default in default_kwargs.items():
             args[param] = args.pop(param, default)
 
-        # Handle defaults that are "default" or based on model values.
+        # Handle default_kwargs that are "default" or based on model values.
         for key, val in args.items():
             if val != "default":
                 continue
             if key in ("l_knots", "tau_knots"):
                 args[key] = getattr(self, key).tolist()
             elif key == "outputdir":
-                args["outputdir"] = "."
+                args[key] = "."
             elif getattr(self, key) is not None:
                 args[key] = getattr(self, key)
-            elif key == "mu_R":  # backup if no mu_R in self
-                args[key] = getattr(self, "RV", default_kwargs[key])
+            elif key == "mu_R":
+                args[key] = float(self.mu_R) if self.mu_R is not None else self.RV
+            elif key == "sigma_R":
+                args[key] = float(self.sigma_R) if self.sigma_R is not None else 0.5
 
         # The VI fitting method uses a modified exponential for AV.
         if args.get("fit_method") == "vi":
@@ -1554,88 +1556,42 @@ class SEDmodel(object):
             distribution).
         """
         detected_shared_RV = args.get("shared_RV")
-        detected_RV = args.get("RV")
-        if isinstance(detected_RV, str) and detected_RV == "default":
-            msg = f"RV is 'default', which will be treated as "
-            if getattr(self, "RV") is not None:
-                detected_RV = self.RV
-                msg += f"{self.RV} to match the loaded model's 'RV' attribute."
-            elif getattr(self, "mu_R", None) is not None:
-                detected_RV = self.mu_R
-                msg += f"{self.mu_R} to match the loaded model's 'mu_R'."
-            else:
-                detected_RV = 3
-                msg += f"3 since the loaded model lacks the 'RV' and 'mu_R' attributes."
-            if verbose:
-                warn(UserWarning(msg))
-
-        if isinstance(detected_RV, Number):
-            if verbose and not detected_shared_RV:
-                warn(UserWarning(
-                    f"detected_shared_RV is {detected_shared_RV}, but detected_RV is "
-                    f"{detected_RV}, which will be used as the RV of all SNe as though "
-                    "detected_shared_RV was True."
-                ))
-            return True, detected_RV
-
+        detected_RV = args.get("RV", "default")
+        model_shared_RV = self.mu_R is None
         if detected_shared_RV is None:
+            detected_shared_RV = True if detected_RV != "default" else model_shared_RV
+        elif detected_shared_RV and (
+            (detected_RV == "default" and model_shared_RV)
+            or isinstance(detected_RV, Number)
+        ):
             detected_shared_RV = True
             if verbose:
-                warn(UserWarning(
-                    "shared_RV was not included in the arguments, and will default to "
-                    "True for this run, meaning all SNe will share single RV value "
-                    f"sampled from a RV={detected_RV} distribution."
-                ))
-        if detected_RV in ("uniform", "normal"):
-            return detected_shared_RV, detected_RV
-        elif isinstance(detected_RV, str):
+                msg = f"detected_shared_RV is False, but detected_RV is {detected_RV}, "
+                if detected_RV == "default":
+                    msg += f"which will be treated as {self.RV} and "
+                else:
+                    msg += "which will be "
+                msg += "used for all SNe as though shared_RV=True."
+                warn(UserWarning(msg))
+
+        if detected_RV == "default":
+            msg = f"RV is 'default', which will be treated as "
+            if model_shared_RV:
+                detected_RV = float(self.RV)
+                msg += f"{self.RV} to match the loaded model's 'RV' attribute. "
+            else:
+                detected_RV = "normal"
+                msg += f"'normal' since the loaded model has a 'mu_R' attribute. "
+            msg += "If this is not the desired behavior, provide more specific args."
+            if verbose:
+                warn(UserWarning(msg))
+        elif isinstance(detected_RV, str) and detected_RV not in ("uniform", "normal"):
             raise ValueError(
                 f"RV was specified as {detected_RV}, which is not a supported option. "
                 "RV should be a number or one of the strings 'default', 'uniform', or "
                 "'normal'."
             )
 
-        # If RV is not provided and is not in the mode, infer its value.
-        msg = "RV is not specified. "
-        uniform_keys = ("uniform_RV_min", "uniform_RV_max", "sigma_uniform_R")
-        normal_keys = ("mu_R", "sigma_R", "mu_R_min", "mu_R_max", "sigma_sigma_R")
-        uniform = [key for key in uniform_keys if key in args]
-        normal = [key for key in normal_keys if key in args]
-        if len(uniform) and len(pop):
-            msg +=  (
-                f"The arguments imply multiple RV distributions:  The keys {uniform} "
-                f" suggest uniform. while the keys {normal} suggest normal. Please "
-                "specify RV as 'uniform', 'normal', 'default', or a number."
-            )
-            raise ValueError(msg)
-        elif uniform:
-            detected_RV = "uniform"
-            if verbose:
-                warn(UserWarning(
-                    msg+f"Inferring uniform RV distribution from keys {uniform}."
-                ))
-        elif normal:
-            detected_RV = "normal"
-            if verbose:
-                warn(UserWarning(
-                    msg+f"Inferring normal RV distribution from keys {normal}."
-                ))
-        else:
-            msg += (
-                "RV cannot be inferred from the other arguments. The run will proceed "
-                f"with RV="
-            )
-            if getattr(self, "RV") is not None:
-                detected_RV = "uniform"
-                msg += "'uniform' based on the RV attribute of the loaded model. "
-            elif getattr(self, "mu_R", None) is not None:
-                detected_RV = "normal"
-                msg += "'normal' based on the mu_R attribute of the loaded model. "
-            else:
-                detected_RV = 3
-                msg += "3 based on the lack of RV and mu_R attributes in the loaded model."
-            if verbose:
-                warn(UserWarning(msg))
         return detected_shared_RV, detected_RV
 
     def _print_default_assignments(self, args: dict) -> None:
