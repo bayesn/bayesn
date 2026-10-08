@@ -164,271 +164,296 @@ class SEDmodel(object):
 
     General Attributes
     ------------------
-        __root_dir__: Path
-            Absolute path to the bayesn/bayesn directory.
-        example_lc: Path
-            Absolute path to a SNANA-format ascii file light curve.
-        sim: bool
-            Indicates whether data is simulated.
-        cosmo: astropy.cosmology.FlatLambdaCDM
-            Defines the fiducial cosmology assumed by the model when training. Can be
-            anything that has a `distmod` method to convert cosmological redshifts to
-            distance moduli.
-        sigma_pec: 0D Array, default jnp.array(150/constants.C_LIGHT)
-            Peculiar velocity to be used in calculating redshift uncertainties
-        ZPT: Number
-            Common fluxcal zero point for all bands
-        RV_MW: 0D Array, default jnp.array(3.1)
-            RV value for calculating Milky Way extinction
-        trunc_val: Number, default 1.2
-            Lower limit for RV based on pure Rayleigh Scattering
-        spectrum_bins: int, default 300
-            Number of wavelength bins used for modelling spectra and calculating
-            photometry. Based on ParSNiP as presented in Boone+21.
-        band_oversampling: int, default 51
-            Affects hires_spacing, which affects hires_wave, which is used to perform
-            fast interpolations when mapping between the observer-frame and the
-            rest-frame. Must be odd
-        max_redshift: Number, default 4
-            The greatest redshift at which observer-frame bandpasses and effects can be
-            mapped to the rest-frame model.
-        hsiao_l: 1D Array, length defines N_hsiao_l
-            The wavelengths (Angstroms) where the Hsiao SED time-series is defined.
-        hsiao_t: 1D Array, length defines N_hsiao_t
-            The rest-frame phases (days) where the Hsiao SED time-series is defined.
-        min_hsiao_wave: Number
-            The bluest wavelength in hsiao_l
-        max_hsiao_wave: Number
-            The reddest wavelength in hsiao_l
-        hsiao_offset: Number
-            The difference between t=0 and earliest phase in hsiao_t
-        J_l_T_hsiao: Array, shape (spectrum_bins, N_hsiao_l + 1)
-            Matrix that can be multiplied with spline knot values (at hsiao_l) to
-            interpolate the spline to model_wave.
-            Currently only used within _load_hsiao_template.
-        KD_t_hsiao: Array, shape (N_hsiao_t, N_hsiao_t + 1)
-            Matrix that can be used to construct J_t_hsiao, which can be multiplied
-            with spline knot values (at hsiao_t) to interpolate the spline to arbitrary
-            phases.
-            Currently not used by anything.
-        hsiao_flux: Array, shape (spectrum_bins, N_hsiao_t)
-            The fluxes of the Hsiao SED time-series interpolated to model_wave.
-            Combines with hsiao_interp to interpolate to interpolate to the desired
-            phases in _get_spectra.
-        ext_rel: DustExtRel
-            The extinction relation parametrizing Ax/AV as a fn of RV and wavelength.
+    __root_dir__: Path
+        Absolute path to the bayesn/bayesn directory.
+    example_lc: Path
+        Absolute path to a SNANA-format ascii file light curve.
+    sim: bool
+        Indicates whether data is simulated.
+    cosmo: astropy.cosmology.FlatLambdaCDM
+        Defines the fiducial cosmology assumed by the model when training. Can be
+        anything that has a `distmod` method to convert cosmological redshifts to
+        distance moduli.
+    sigma_pec: 0D Array, default jnp.array(150/constants.C_LIGHT)
+        Peculiar velocity to be used in calculating redshift uncertainties
+    apply_dovekie_mag_shifts: bool, default True
+        Whether to add the mag_update and mag_cal elements from the
+        BASE_DIR/bayesn/bayesn-filters/filters.yaml file to defined magnitudes.
+        These values are based on the Dovekie analysis (Popovic et al. 2025).
+    shift_df: None | pd.DataFrame, default None
+        Used in SEDmodel.load_bandpass and SEDmodel._load_band_weights.
+        If not None, then a pd.DataFrame with columns/dtypes
+            BAND: strings
+                bandpass names in BayeSN convention
+            MAG_SHIFT: Numbers
+                Magnitude value to add to defined magnitude (zero-point).
+            LAM_SHIFT: Numbers
+                Angstrom value to add to the wavelengths of the transmission fn.
+        These values override the mag_shift and lam_shift values taken from
+        bayesn/bayesn-filters/filters.yaml.
+    apply_mag_shifts: bool, default False
+        Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
+        This overrides the effects of apply_dovekie_mag_shifts.
+    apply_lam_shifts: bool, default False
+        Whether to increase transmission functions by any "lam_shift" values in
+        BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
+        "LAM_SHIFT" values from the shift_file.
+    ZPT: Number, default 27.5
+        The Pogson zero point used for converting between fluxes and magnitudes:
+            mag = fluxcal_zpt - 2.5\log_{10}(flux).
+        This makes fluxes proportional to but not necessarily equal to spectral flux
+        density (power/area/wavelength) in physical units.
+    RV_MW: 0D Array, default jnp.array(3.1)
+        RV value for calculating Milky Way extinction
+    trunc_val: Number, default 1.2
+        Lower limit for RV based on pure Rayleigh Scattering
+    spectrum_bins: int, default 300
+        Number of wavelength bins used for modelling spectra and calculating
+        photometry. Based on ParSNiP as presented in Boone+21.
+    band_oversampling: int, default 51
+        Affects hires_spacing, which affects hires_wave, which is used to perform
+        fast interpolations when mapping between the observer-frame and the
+        rest-frame. Must be odd
+    max_redshift: Number, default 4
+        The greatest redshift at which observer-frame bandpasses and effects can be
+        mapped to the rest-frame model.
+    hsiao_l: 1D Array, length defines N_hsiao_l
+        The wavelengths (Angstroms) where the Hsiao SED time-series is defined.
+    hsiao_t: 1D Array, length defines N_hsiao_t
+        The rest-frame phases (days) where the Hsiao SED time-series is defined.
+    min_hsiao_wave: Number
+        The bluest wavelength in hsiao_l
+    max_hsiao_wave: Number
+        The reddest wavelength in hsiao_l
+    hsiao_offset: Number
+        The difference between t=0 and earliest phase in hsiao_t
+    J_l_T_hsiao: Array, shape (spectrum_bins, N_hsiao_l + 1)
+        Matrix that can be multiplied with spline knot values (at hsiao_l) to
+        interpolate the spline to model_wave.
+        Currently only used within _load_hsiao_template.
+    KD_t_hsiao: Array, shape (N_hsiao_t, N_hsiao_t + 1)
+        Matrix that can be used to construct J_t_hsiao, which can be multiplied
+        with spline knot values (at hsiao_t) to interpolate the spline to arbitrary
+        phases.
+        Currently not used by anything.
+    hsiao_flux: Array, shape (spectrum_bins, N_hsiao_t)
+        The fluxes of the Hsiao SED time-series interpolated to model_wave.
+        Combines with hsiao_interp to interpolate to interpolate to the desired
+        phases in _get_spectra.
+    ext_rel: DustExtRel
+        The extinction relation parametrizing Ax/AV as a fn of RV and wavelength.
 
     Definable Model-Specific Attributes
     -----------------------------------
-        model_name: str
-            The name of a loaded built-in model or path to a custom model.
-        l_knots: 1D Array, length defines N_l_knots
-            Array of wavelength knots defining the model's warping surfaces.
-        tau_knots: 1D Array, length defines N_tau_knots
-            Array of phase knots defining the model's warping surfaces.
-        M0: 0D Array
-            Reference absolute magnitude for scaling the Hsiao template.
-            Inferred in _sample_M0_by_mass if splitting populations by host logmass.
-            Affects get_flux_batch.
-        sigma0: 0D Array
-            Scale factor for the achromatic offset parameter.
-            Inferred in _sample_model_dust_params.
-            Affects _sample_SN_params.
-        tauA: 0D Array
-            Scale factor for the Exponential distribution of host-galaxy AV.
-            Inferred in _sample_model_dust_parmas.
-            Affects _sample_SN_dust_params.
-        W0: Array, shape (N_l_knots, N_tau_knots)
-            W0 matrix for loaded model. Smoothly warps the hsiao SED time-series to the
-            sample mean of a dataset.
-            Inferred in _sample_model_params and _sample_W0_by_mass if splitting
-            populations by host logmass.
-            Affects _get_spectra.
-        W1: Array, shape (N_l_knots, N_tau_knots)
-            W1 matrix for loaded model. When combined with theta, parametrizes the first
-            functional principal component of sample variation.
-            Inferred in _sample_model_params.
-            Affects _get_spectra.
-        L_Sigma: Array shape (N_knots_sig, N_knots_sig)
-            Covariance matrix describing epsilon distribution for loaded model.
-            See _sample_model_params for details on its inference.
-            See _sample_SN_params for details on its effect.
-        RV: None | 0D Array
-            The shared host-galaxy RV value for models using shared_RV=True.
-            Inferred in _sample_shared_RV.
-            Affects _sample_SN_dust_params.
-        mu_R: None | 0D Array
-            The mean of a truncated normal distribution for host-galaxy RV values for
-            models using shared_RV=False.
-            Inferred in _sample_model_dust_params.
-            Affects _sample_SN_dust_params.
-        sigma_R: None | 0D Array
-            The scale factor of a truncated normal distribution for host-galaxy RV
-            values for models using shared_RV=False.
-            Inferred in _sample_model_dust_params.
-            Affects _sample_SN_dust_params.
+    model_name: str
+        The name of a loaded built-in model or path to a custom model.
+    l_knots: 1D Array, length defines N_l_knots
+        Array of wavelength knots defining the model's warping surfaces.
+    tau_knots: 1D Array, length defines N_tau_knots
+        Array of phase knots defining the model's warping surfaces.
+    M0: 0D Array
+        Reference absolute magnitude for scaling the Hsiao template.
+        Inferred in _sample_M0_by_mass if splitting populations by host logmass.
+        Affects get_flux_batch.
+    sigma0: 0D Array
+        Scale factor for the achromatic offset parameter.
+        Inferred in _sample_model_dust_params.
+        Affects _sample_SN_params.
+    tauA: 0D Array
+        Scale factor for the Exponential distribution of host-galaxy AV.
+        Inferred in _sample_model_dust_parmas.
+        Affects _sample_SN_dust_params.
+    W0: Array, shape (N_l_knots, N_tau_knots)
+        W0 matrix for loaded model. Smoothly warps the hsiao SED time-series to the
+        sample mean of a dataset.
+        Inferred in _sample_model_params and _sample_W0_by_mass if splitting
+        populations by host logmass.
+        Affects _get_spectra.
+    W1: Array, shape (N_l_knots, N_tau_knots)
+        W1 matrix for loaded model. When combined with theta, parametrizes the first
+        functional principal component of sample variation.
+        Inferred in _sample_model_params.
+        Affects _get_spectra.
+    L_Sigma: Array shape (N_knots_sig, N_knots_sig)
+        Covariance matrix describing epsilon distribution for loaded model.
+        See _sample_model_params for details on its inference.
+        See _sample_SN_params for details on its effect.
+    RV: None | 0D Array
+        The shared host-galaxy RV value for models using shared_RV=True.
+        Inferred in _sample_shared_RV.
+        Affects _sample_SN_dust_params.
+    mu_R: None | 0D Array
+        The mean of a truncated normal distribution for host-galaxy RV values for
+        models using shared_RV=False.
+        Inferred in _sample_model_dust_params.
+        Affects _sample_SN_dust_params.
+    sigma_R: None | 0D Array
+        The scale factor of a truncated normal distribution for host-galaxy RV
+        values for models using shared_RV=False.
+        Inferred in _sample_model_dust_params.
+        Affects _sample_SN_dust_params.
 
     Calculated Model-Specific Attributes
     ------------------------------------
-        N_knots_sig_l: int
-            N_l_knots - 2, so the bluest and reddest l_knots can remain 0 for epsilon
-            calculations.
-        N_knots_sig: int
-            N_knots_sig_l * N_tau_knots, the number of epsilon knots excluding the
-            bluest and reddest rows. Used in epsilon calculations.
-        min_wave: 0D Array
-            The bluest l_knot.
-        max_wave: 0D Array
-            The reddest l_knot.
-        model_wave: Array, shape (spectrum_bins,)
-            The rest-frame model wavelength vector. Spaced log-uniformly between
-            min_wave and max_wave.
-        hires_wave: Array, length defines N_hires
-            A high-resolution log-uniform wavelength vector whose red end is based on
-            hsiao_max_wave * (1+max_redshift). This is used to map the rest-frame to
-            the observer-frame for redshifts up to max_redshift.
-        hires_spacing: 0D Array
-            Log10 spacing between neighboring elements in hires_wave. Based on the
-            linear spacing in hsiao_l and band_oversampling.
-        J_l_T: Array, shape (spectrum_bins, N_l_knots+1)
-            Matrix that can be multiplied with spline knot values (at l_knots) to
-            interpolate the spline to model_wave.
-        KD_t: Array, shape (N_tau_knots, N_tau_knots+1)
-            Matrix used to construct J_t, which can be multiplied with spline knot
-            values (at tau_knots) interpolate the spline to arbitrary phases.
-        J_t_map: Callable
-            jit-compiled vmap of spline_utils.spline_coeffs_step.
-            Used in get_J_t.
-        mw_ext: Array, shape (N_hires,)
-            High resolution vector of Ax/AV values based on ext_rel and RV_MW.
-            Used in _calculate_band_weights.
+    N_knots_sig_l: int
+        N_l_knots - 2, so the bluest and reddest l_knots can remain 0 for epsilon
+        calculations.
+    N_knots_sig: int
+        N_knots_sig_l * N_tau_knots, the number of epsilon knots excluding the
+        bluest and reddest rows. Used in epsilon calculations.
+    min_wave: 0D Array
+        The bluest l_knot.
+    max_wave: 0D Array
+        The reddest l_knot.
+    model_wave: Array, shape (spectrum_bins,)
+        The rest-frame model wavelength vector. Spaced log-uniformly between
+        min_wave and max_wave.
+    hires_wave: Array, length defines N_hires
+        A high-resolution log-uniform wavelength vector whose red end is based on
+        hsiao_max_wave * (1+max_redshift). This is used to map the rest-frame to
+        the observer-frame for redshifts up to max_redshift.
+    hires_spacing: 0D Array
+        Log10 spacing between neighboring elements in hires_wave. Based on the
+        linear spacing in hsiao_l and band_oversampling.
+    J_l_T: Array, shape (spectrum_bins, N_l_knots+1)
+        Matrix that can be multiplied with spline knot values (at l_knots) to
+        interpolate the spline to model_wave.
+    KD_t: Array, shape (N_tau_knots, N_tau_knots+1)
+        Matrix used to construct J_t, which can be multiplied with spline knot
+        values (at tau_knots) interpolate the spline to arbitrary phases.
+    J_t_map: Callable
+        jit-compiled vmap of spline_utils.spline_coeffs_step.
+        Used in get_J_t.
+    mw_ext: Array, shape (N_hires,)
+        High resolution vector of Ax/AV values based on ext_rel and RV_MW.
+        Used in _calculate_band_weights.
 
     Attributes affecting likelihood construction
     --------------------------------------------
-        photoz: bool
-            Indicates whether redshift should be sampled or not.
-        shared_RV: bool
-            Indicates whether all SNe should share a single RV value or not.
+    photoz: bool
+        Indicates whether redshift should be sampled or not.
+    shared_RV: bool
+        Indicates whether all SNe should share a single RV value or not.
 
     Attributes based on data
     ------------------------
-        Data is in N_used_bands bandpasses for N_sn targets with N_max_epochs
-        observations for the most observed target
-        data: None | ObsData
-            The NamedTuple populated by process_dataset and expected by _model.
-            The first five fields are Arrays with shape (N_sn,):
-                host_logmass, z_hel, z_hel_err, muhat, and MWEBV.
-            The second five are Arrays with shape (N_max_epochs, N_sn):
-                mjd, flux, flux_err, band_indices, and mask.
-            The flux and flux_err field names are used even for magnitudes.
-        dataset: None | SNDataset
-            The dataclass populated by process_dataset. The class has many methods for
-            transforming/cutting data, and generating data products in specific formats.
-            See datasets.py for details.
-        band_weights: None | Array, shape (N_sn, spectrum_bins, N_used_bands)
-            Populated by process_dataset and get_flux_from_chains using the output of
-            _calculate_band_weights. Since BayeSN is a rest-frame SED model, the
-            observer-frame total transmission functions need to be transformed before
-            they can be multiplied with the SED model and integrated to get fluxes.
-        J_t: None | Array, shape (N_sn, N_tau_knots.shape+1, N_max_epochs)
-            Populated by process_dataset using the output of get_J_t. This matrix can
-            be multiplied with spline knot values (at tau_knots) to interpolate the
-            spline to arbitrary phases.
-        hsiao_interp: None | Array, shape (3, N_max_epochs, N_sn)
-            Populated by process_dataset using the output of get_hsiao_interp. This
-            matrix is used in _get_spectra to perform quick linear interpolation of
-            hsiao_flux values to the desired phases.
-        z_u_grid: 1D Array, length defines N_z_u
-            CDF probability levels of the host photo-z quantiles
-        z_icdf_grid: None | Array, shape (N_sn, N_z_u)
-            SN-specific z at the levels specified by z_u_grid.
-        fitres_table: QTable
-            Populated by process_dataset. Contains a row per SN and the columns
-            VARNAMES:, CID, IDSURVEY, TYPE, FIELD, zHEL, zHELERR, zHD, zHDERR, VPEC,
-            VPECERR, MWEBV, HOST_LOGMASS, HOST_LOGMASS_ERR, SNRMAX1, SNRMAX2, and
-            SNRMAX3.
-        lcplot_data: pd.DataFrame
-            Populated by process_dataset. Contains a row per observation and the columns
-            CID, MJD, FLUXCAL, FLUXCALERR, and FLT.
+    Data is in N_used_bands bandpasses for N_sn targets with N_max_epochs
+    observations for the most observed target
+    data: None | ObsData
+        The NamedTuple populated by process_dataset and expected by _model.
+        The first five fields are Arrays with shape (N_sn,):
+            host_logmass, z_hel, z_hel_err, muhat, and MWEBV.
+        The second five are Arrays with shape (N_max_epochs, N_sn):
+            mjd, flux, flux_err, band_indices, and mask.
+        The flux and flux_err field names are used even for magnitudes.
+    dataset: None | SNDataset
+        The dataclass populated by process_dataset. The class has many methods for
+        transforming/cutting data, and generating data products in specific formats.
+        See datasets.py for details.
+    band_weights: None | Array, shape (N_sn, spectrum_bins, N_used_bands)
+        Populated by process_dataset and get_flux_from_chains using the output of
+        _calculate_band_weights. Since BayeSN is a rest-frame SED model, the
+        observer-frame total transmission functions need to be transformed before
+        they can be multiplied with the SED model and integrated to get fluxes.
+    J_t: None | Array, shape (N_sn, N_tau_knots.shape+1, N_max_epochs)
+        Populated by process_dataset using the output of get_J_t. This matrix can
+        be multiplied with spline knot values (at tau_knots) to interpolate the
+        spline to arbitrary phases.
+    hsiao_interp: None | Array, shape (3, N_max_epochs, N_sn)
+        Populated by process_dataset using the output of get_hsiao_interp. This
+        matrix is used in _get_spectra to perform quick linear interpolation of
+        hsiao_flux values to the desired phases.
+    z_u_grid: 1D Array, length defines N_z_u
+        CDF probability levels of the host photo-z quantiles
+    z_icdf_grid: None | Array, shape (N_sn, N_z_u)
+        SN-specific z at the levels specified by z_u_grid.
+    fitres_table: QTable
+        Populated by process_dataset. Contains a row per SN and the columns
+        VARNAMES:, CID, IDSURVEY, TYPE, FIELD, zHEL, zHELERR, zHD, zHDERR, VPEC,
+        VPECERR, MWEBV, HOST_LOGMASS, HOST_LOGMASS_ERR, SNRMAX1, SNRMAX2, and
+        SNRMAX3.
+    lcplot_data: pd.DataFrame
+        Populated by process_dataset. Contains a row per observation and the columns
+        CID, MJD, FLUXCAL, FLUXCALERR, and FLT.
 
     Attributes for Bandpass Management
     -------------------
-        Attributes are split into three levels.
-        Level 1 is loaded during initialisation.
-        Level 2 bandpass information is laoded as needed and never deleted.
-        Level 3 information is a subset of level 2, restricted to only the bandpasses
-        used in the data currently being analysed.
-        See the docstring for SEDmodel._init_band_weights for more details.
+    Attributes are split into three levels.
+    Level 1 is loaded during initialisation.
+    Level 2 bandpass information is laoded as needed and never deleted.
+    Level 3 information is a subset of level 2, restricted to only the bandpasses
+    used in the data currently being analysed.
+    See the docstring for SEDmodel._init_band_weights for more details.
 
         Level 1
         -------
-            filter_yaml: None | Path
-                The path to a yaml specified during initialisation. This yaml should
-                contain information for custom bandpasses in the format of
-                bayesn/bayesn/bayesn-filters/filters.yaml
-            filter_dict: dict[str, dict[str, str | np.ndarray | Number]]
-                A dictionary containing the keys standards and filters.  Both are based
-                on bayesn/bayesn/bayesn-filters/filters.yaml, but the standards subdict
-                contains wavelengths and fluxes under the keys lam and f_lam.
-            dovekie_labels: 1D np.ndarray, length defines N_dovekie
-                The BayeSN names of the bandpasses in Dovekie, Popovic et al. 2026,
-                https://ui.adsabs.harvard.edu/abs/2026A%26A...712A.131P/abstract
-            dovekie_cov: Array, shape (N_dovekie, N_dovekie)
-                The covariance matrix of zero-point shifts (mag) for the bandpasses
-                listed in dovekie_labels.
+        filter_yaml: None | Path
+            The path to a yaml specified during initialisation. This yaml should
+            contain information for custom bandpasses in the format of
+            bayesn/bayesn/bayesn-filters/filters.yaml
+        filter_dict: dict[str, dict[str, str | np.ndarray | Number]]
+            A dictionary containing the keys standards and filters.  Both are based
+            on bayesn/bayesn/bayesn-filters/filters.yaml, but the standards subdict
+            contains wavelengths and fluxes under the keys lam and f_lam.
+        dovekie_labels: 1D np.ndarray, length defines N_dovekie
+            The BayeSN names of the bandpasses in Dovekie, Popovic et al. 2026,
+            https://ui.adsabs.harvard.edu/abs/2026A%26A...712A.131P/abstract
+        dovekie_cov: Array, shape (N_dovekie, N_dovekie)
+            The covariance matrix of zero-point shifts (mag) for the bandpasses
+            listed in dovekie_labels.
 
         Level 2
         -------
-            band_dict: dict[str, int], N_bands keys
-                The keys are BayeSN bandpass names and the values are the order in which
-                they were loaded.
-            band_interpolate_weights: Array, shape (N_bands, N_hires)
-                The linear interpolation of observer-frame bandpass transmission
-                functions, upsampled to the wavelength grid of hires_wave for fast linear
-                interpolation on a log-uniform grid. The ordering matches the values of
-                band_dict.
-            band_lim_dict: dict[str, tuple[Number, Number]], N_bands keys
-                The keys are BayeSN bandpass names and the values are 2-tuples providing
-                the 1% cut-on and cut-off wavelengths of the transmission functions.
-            zp_dict: dict[str, Number], N_bands keys
-                The keys are BayeSN bandpass names and the values are instrumental
-                zero-points, e.g. the magnitude of an SED of 1 erg/s/cm^2/Angstrom.
-                The zero-point for NULL_BAND is arbitrary.
-            zps: Array, shape(N_bands,)
-                The values of zp_dict in the order of the band_dict values.
-            calib_cov: Array, shape (N_bands, N_bands)
-                The covariance matrix of zero-point shifts (mag) for the bandpasses in
-                the order of the band_dict values. Bandpasses not present in
-                dovekie_labels are treated as independent of all other bandpasses.  These
-                bandpasses may have zero-point errors from filter_dict, but if not, they
-                are treated as having Gaussian errors of 0.01 mag.
-            wave_sigmas: Array, shape (N_bands,)
-                The array of uncertainties in wavelength shifts for the bandpasses in the
-                order of the band_dict values. All bandpasses are treated as independent.
-                Bandpasses may have wavelength shift uncertainties from filter_dict, but
-                if not, they are treated as having Gaussian errors of 10 Angstroms.
+        band_dict: dict[str, int], N_bands keys
+            The keys are BayeSN bandpass names and the values are the order in which
+            they were loaded.
+        band_interpolate_weights: Array, shape (N_bands, N_hires)
+            The linear interpolation of observer-frame bandpass transmission
+            functions, upsampled to the wavelength grid of hires_wave for fast linear
+            interpolation on a log-uniform grid. The ordering matches the values of
+            band_dict.
+        band_lim_dict: dict[str, tuple[Number, Number]], N_bands keys
+            The keys are BayeSN bandpass names and the values are 2-tuples providing
+            the 1% cut-on and cut-off wavelengths of the transmission functions.
+        zp_dict: dict[str, Number], N_bands keys
+            The keys are BayeSN bandpass names and the values are instrumental
+            zero-points, e.g. the magnitude of an SED of 1 erg/s/cm^2/Angstrom.
+            The zero-point for NULL_BAND is arbitrary.
+        zps: Array, shape(N_bands,)
+            The values of zp_dict in the order of the band_dict values.
+        calib_cov: Array, shape (N_bands, N_bands)
+            The covariance matrix of zero-point shifts (mag) for the bandpasses in
+            the order of the band_dict values. Bandpasses not present in
+            dovekie_labels are treated as independent of all other bandpasses.  These
+            bandpasses may have zero-point errors from filter_dict, but if not, they
+            are treated as having Gaussian errors of 0.01 mag.
+        wave_sigmas: Array, shape (N_bands,)
+            The array of uncertainties in wavelength shifts for the bandpasses in the
+            order of the band_dict values. All bandpasses are treated as independent.
+            Bandpasses may have wavelength shift uncertainties from filter_dict, but
+            if not, they are treated as having Gaussian errors of 10 Angstroms.
 
         Level 3
         -------
-            These attributes are populated by the _set_used_bands method, which takes a
-            "bands argument". This may not match the order of band_dict.
-            used_band_inds: np.ndarray, shape (N_used_bands,)
-                This array gives the band_dict value in the order of the bands argument.
-                It is used to populate other level 3 attributes in the order of the bands
-                argument.
-            used_band_dict: dict[int, int], N_used_bands keys
-                The keys match used_band_inds and the values give their order in the
-                bands argument. Given a BayeSN name x, the corresponding index in a level
-                3 array is found with used_band_dict[band_dict[x]].
-            used_zps: Array, shape (N_used_bands,)
-                The values of zps in the order of the bands argument.
-            used_calib_cov: Array, shape (N_used_bands, N_used_bands)
-                A sub-matrix of calib_cov re-arranged to the ordering of the bands
-                argument.
-            used_calib_chcov: Array, shape (N_used_bands, N_used_bands)
-                A cholesky decomposition of used_calib_cov.
-            used_wave_sigmas: Array, shape (N_used_bands,)
-                The values of wave_sigmas in the order of the bands_argument.
+        These attributes are populated by the _set_used_bands method, which takes a
+        "bands argument". This may not match the order of band_dict.
+        used_band_inds: np.ndarray, shape (N_used_bands,)
+            This array gives the band_dict value in the order of the bands argument.
+            It is used to populate other level 3 attributes in the order of the bands
+            argument.
+        used_band_dict: dict[int, int], N_used_bands keys
+            The keys match used_band_inds and the values give their order in the
+            bands argument. Given a BayeSN name x, the corresponding index in a level
+            3 array is found with used_band_dict[band_dict[x]].
+        used_zps: Array, shape (N_used_bands,)
+            The values of zps in the order of the bands argument.
+        used_calib_cov: Array, shape (N_used_bands, N_used_bands)
+            A sub-matrix of calib_cov re-arranged to the ordering of the bands
+            argument.
+        used_calib_chcov: Array, shape (N_used_bands, N_used_bands)
+            A cholesky decomposition of used_calib_cov.
+        used_wave_sigmas: Array, shape (N_used_bands,)
+            The values of wave_sigmas in the order of the bands_argument.
     """
     ######################
     ### Initialisation ###
@@ -441,9 +466,9 @@ class SEDmodel(object):
         fiducial_cosmology: dict[str, float] = {"H0": 73.24, "Om0": 0.28},
         load_ext_rel: str = "G23",
         apply_dovekie_mag_shifts: bool = True,
+        shift_file: str | None = None,
         apply_mag_shifts: bool = False,
         apply_lam_shifts: bool = False,
-        shift_file: str | None = None,
         fluxcal_zpt: float = 27.50,
     ):
         """
@@ -517,16 +542,33 @@ class SEDmodel(object):
             "F19"
             "D22"
             "G23"
-        apply_dovekie_mag_shifts :
-            Argument passed to SEDmodel.load_band_weights
-            Shift the zero-points of bandpasses used in the Dovekie analysis
-            (Popovic et al. 2025)
-        apply_mag_shifts :
-            Argument passed to SEDmodel.load_band_weights
-        apply_lam_shifts :
-            Argument passed to SEDmodel.load_band_weights
-        shift_file :
-            Argument passed to SEDmodel.load_band_weights
+        apply_dovekie_mag_shifts: bool, default True
+            Whether to add the mag_update and mag_cal elements from the
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml file to defined magnitudes.
+            These values are based on the Dovekie analysis (Popovic et al. 2025).
+        shift_file: None | str | Path, default None
+            Used in SEDmodel.load_bandpass and SEDmodel._load_band_weights.
+            If not None, then a path to a csv with columns/dtypes
+                BAND: strings
+                    bandpass names in BayeSN convention
+                MAG_SHIFT: Numbers
+                    Magnitude value to add to defined magnitude (zero-point).
+                LAM_SHIFT: Numbers
+                    Angstrom value to add to the wavelengths of the transmission fn.
+            These values override the mag_shift and lam_shift values taken from
+            bayesn/bayesn-filters/filters.yaml.
+        apply_mag_shifts: bool, default False
+            Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
+            This overrides the effects of apply_dovekie_mag_shifts.
+        apply_lam_shifts: bool, default False
+            Whether to increase transmission functions by any "lam_shift" values in
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
+            "LAM_SHIFT" values from the shift_file.
+        fluxcal_zpt :
+            The Pogson zero point used for converting between fluxes and magnitudes:
+            mag = fluxcal_zpt - 2.5\log_{10}(flux).
+            This makes fluxes proportional to but not necessarily equal to spectral flux
+            density (power/area/wavelength) in physical units.
         """
 
         # Settings for jax/numpyro
@@ -544,10 +586,24 @@ class SEDmodel(object):
 
         # Model-independent terms
         self.cosmo = FlatLambdaCDM(**fiducial_cosmology)
+        self.shift_df = None
+        if shift_file is not None:
+            if not Path(shift_file).exists():
+                raise FileNotFoundError(f'Specified shift file {shift_file} does not exist')
+            self.shift_df = pd.read_csv(shift_file, comment='#')
+            req_cols = {"BAND", "LAM_SHIFT", "MAG_SHIFT"}
+            missing_cols = req_cols.difference(self.shift_df.columns)
+            if len(missing_cols):
+                raise ValueError(
+                    f"shift_file {shift_file} lacks required columns: {missing_cols}"
+                )
+        self.apply_dovekie_mag_shifts = apply_dovekie_mag_shifts
+        self.apply_mag_shifts = apply_mag_shifts
+        self.apply_lam_shifts = apply_lam_shifts
+        self.ZPT = fluxcal_zpt  # Common fluxcal zero point for all bands
         self.RV_MW = device_put(jnp.array(3.1))
         self.sigma_pec = device_put(jnp.array(150 / 3e5))
         self.trunc_val = 1.2  # lower limit for RV based on pure Rayleigh Scattering
-        self.ZPT = fluxcal_zpt  # Common fluxcal zero point for all bands
         self.spectrum_bins = 300
         self.band_oversampling = 51
         self.max_redshift = 4
@@ -889,16 +945,72 @@ class SEDmodel(object):
     def load_bandpass(
         self,
         name: str,
-        apply_dovekie_mag_shifts: bool = True,
+        apply_dovekie_mag_shifts: None | bool = None,
         shift_df: pd.DataFrame | None = None,
-        apply_mag_shifts: bool = False,
-        apply_lam_shifts: bool = False
-        ):
+        apply_mag_shifts: None | bool = None,
+        apply_lam_shifts: None | bool = None
+        ) -> dict[str, ArrayLike | Number]:
+        """
+        Read the subdictionary stored in self.filter_dict["filters"][name], apply any
+        relevant shifts, either from the subdictionary itself or a provided shift_df,
+        then return a sanitised and potentially processed dictionary.
+
+        All arguments except bands_to_load may be None, in which case they will be
+        taken from the attributes of the same names assigned at initialisation.
+
+        Parameters
+        ----------
+        apply_dovekie_mag_shifts: bool, default True
+            Whether to add the mag_update and mag_cal elements from the
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml file to defined magnitudes.
+            These values are based on the Dovekie analysis (Popovic et al. 2025).
+        shift_df: None | pd.DataFrame, default None
+            If not None, then a pd.DataFrame with columns/dtypes
+                BAND: strings
+                    bandpass names in BayeSN convention
+                MAG_SHIFT: Numbers
+                    Magnitude value to add to defined magnitude (zero-point).
+                LAM_SHIFT: Numbers
+                    Angstrom value to add to the wavelengths of the transmission fn.
+            These values override the mag_shift and lam_shift values taken from
+            bayesn/bayesn-filters/filters.yaml.
+        apply_mag_shifts: bool, default False
+            Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
+            This overrides the effects of apply_dovekie_mag_shifts.
+        apply_lam_shifts: bool, default False
+            Whether to increase transmission functions by any "lam_shift" values in
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
+            "LAM_SHIFT" values from the shift_file.
+
+        Returns
+        -------
+        ret_dict :
+            The dictionary in self.filter_dict["filters"][name], with the following
+            additional keys:
+                defined_mag : Number
+                    The agreed upon magnitude of the standard of the magnitude system.
+                    This can be affected by magupdate + magcal if
+                    apply_dovekie_mag_shifts or overridden by shift_df["MAG_SHIFT"] if
+                    apply_mag_shifts.
+                lam : np.ndarray
+                    The wavelengths at which the transmission function is defined.
+                    If apply_lam_shifts, this can be affected by lam_shift or
+                    overridden by shift_df["LAM_SHIFT"].
+                trans : np.ndarray
+                    The unnormalised transmission function measured at lam.
+                    This array is insensitive to the arguments.
+        """
         if name not in self.filter_dict["filters"]:
             raise ValueError(
                 f"Unrecognised bandpass name: {name}. Valid options can be found by"
                 "calling SEDmodel.list_bandpasses()."
             )
+        # By default, load attributes defined at init.
+        apply_dovekie_mag_shifts = apply_dovekie_mag_shifts or self.apply_dovekie_mag_shifts
+        shift_df = shift_df or self.shift_df
+        apply_mag_shifts = apply_mag_shifts or self.apply_mag_shifts
+        apply_lam_shifts = apply_lam_shifts or self.apply_lam_shifts
+
         ret_dict = self.filter_dict["filters"][name]
         ret_dict["defined_mag"] = ret_dict.pop("magzero", 0)
         lam_shift = ret_dict.pop("lam_shift", 0) * int(apply_lam_shifts)
@@ -925,41 +1037,43 @@ class SEDmodel(object):
     def _load_band_weights(
         self,
         bands_to_load: list[str],
-        apply_dovekie_mag_shifts: bool = True,
-        shift_file: None | str | Path = None,
-        apply_mag_shifts: bool = False,
-        apply_lam_shifts: bool = False
+        apply_dovekie_mag_shifts: None | bool = None,
+        shift_df: None | pd.DataFrame = None,
+        apply_mag_shifts: None | bool = None,
+        apply_lam_shifts: None | bool = None
     ) -> None:
         """
         Sets up the interpolation for the band weights used for photometry as well as
         calculating the zero points for each band. This code is partly based off
         ParSNiP from Boone+21.
 
+        All arguments except bands_to_load may be None, in which case they will be
+        taken from the attributes of the same names assigned at initialisation.
+
         Parameters
         ----------
-        apply_dovekie_mag_shifts :
-            Boolean indicating whether to add the mag_update and mag_cal elements from
-            the bayesn/bayesn-filters/filters.yaml file to each defined magnitude.
-        shift_file :
-            If not None, then a path to a csv file with columns
-                BAND : strings
+        apply_dovekie_mag_shifts: bool, default True
+            Whether to add the mag_update and mag_cal elements from the
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml file to defined magnitudes.
+            These values are based on the Dovekie analysis (Popovic et al. 2025).
+        shift_df: None | pd.DataFrame, default None
+            If not None, then a pd.DataFrame with columns/dtypes
+                BAND: strings
                     bandpass names in BayeSN convention
-                MAG_SHIFT : scalar
-                    Magnitude value to add to defined magnitude (zero-point)..
-                LAM_SHIFT : scalar
+                MAG_SHIFT: Numbers
+                    Magnitude value to add to defined magnitude (zero-point).
+                LAM_SHIFT: Numbers
                     Angstrom value to add to the wavelengths of the transmission fn.
             These values override the mag_shift and lam_shift values taken from
             bayesn/bayesn-filters/filters.yaml.
-        apply_mag_shifts :
-            Whether the defined magnitude should be shifted.
-        apply_lam_shifts :
-            Whether the transmission functions should be shifted.
+        apply_mag_shifts: bool, default False
+            Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
+            This overrides the effects of apply_dovekie_mag_shifts.
+        apply_lam_shifts: bool, default False
+            Whether to increase transmission functions by any "lam_shift" values in
+            BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
+            "LAM_SHIFT" values from the shift_file.
         """
-        if shift_file is not None:
-            if not Path(shift_file).exists():
-                raise FileNotFoundError(f'Specified shift file {shift_file} does not exist')
-            shift_file = pd.read_csv(shift_file, comment='#')
-
         def ab_standard_flam(l):  # Can just use analytic function for AB spectrum
             f = (const.c.to("AA/s").value / 1e23) * (l**-2) * 10 ** (-48.6 / 2.5) * 1e23
             return f
@@ -1069,6 +1183,10 @@ class SEDmodel(object):
         simulate_lightcurve,
         sample_lambda_shift,
         sample_mag_shift,
+
+        The SEDmodel._load_band_weights call uses the default arguments of None for the
+        shift booleans and shift_df, leading to the use of the attributes loaded during
+        initialisation.
         """
         if bands is None:  # Assumes all bands in the level 2 cache are to be used.
             bands = list(self.band_dict.keys())
