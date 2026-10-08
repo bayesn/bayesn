@@ -1145,9 +1145,13 @@ class SEDmodel(object):
         self.zps = jnp.array(zps)
         self.wave_sigmas = jnp.array(wave_sigmas)
         calib_cov = np.diag(zp_errs**2)
-        dovekie_inds = jnp.array([self.band_dict[band] for band in self.dovekie_labels if band in self.band_dict])
-        for dov_ind_1, ind_1 in enumerate(dovekie_inds):
-            for dov_ind_2, ind_2 in enumerate(dovekie_inds):
+        dov_inds = []
+        for dov_idx, bp in enumerate(self.dovekie_labels):
+            if bp not in self.band_dict:
+                continue
+            dov_inds.append((dov_idx, self.band_dict[bp]))
+        for dov_ind_1, ind_1 in dov_inds:
+            for dov_ind_2, ind_2 in dov_inds:
                 calib_cov[ind_1, ind_2] = self.dovekie_cov[dov_ind_1, dov_ind_2]
         self.calib_cov = calib_cov
 
@@ -1689,12 +1693,12 @@ class SEDmodel(object):
                 check_scalar(name)
             if float(args["mu_R_min"]) >= float(args["mu_R_max"]):
                 raise ValueError("mu_R_min must be less than mu_R_max.")
-            if float(args["sigma_sigma_R"]) < 0:
+            if float(args["sigma_sigma_R"]) <= 0:
                 raise ValueError("sigma_sigma_R must be positive.")
         elif args["RV"] == "normal" and not args["infer_dust_properties"]:
             for name in ("mu_R", "sigma_R"):
                 check_scalar(name)
-            if float(args["sigma_R"]) < 0:
+            if float(args["sigma_R"]) <= 0:
                 raise ValueError("sigma_R must be positive.")
         elif args["RV"] == "uniform":
             for name in ("uniform_RV_min", "uniform_RV_max"):
@@ -1703,7 +1707,7 @@ class SEDmodel(object):
                 raise ValueError("uniform_RV_min must be less than uniform_RV_max. ")
             if args["infer_dust_properties"]:
                 check_scalar("sigma_uniform")
-                if float(args["sigma_uniform"]) < 0:
+                if float(args["sigma_uniform"]) <= 0:
                     raise ValueError("sigma_uniform must be positive.")
 
         choice_dict = {
