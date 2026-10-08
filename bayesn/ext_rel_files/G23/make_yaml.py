@@ -12,7 +12,7 @@ from numpy.polynomial import Polynomial as P
 from numpy.polynomial.polynomial import polydiv as pdiv
 from math import prod
 
-# A(lambda)/A(V) = a(x) + b(x)*(1/Rv - 1/3.1)
+# A(lambda)/A(V) = [a(x) + b(x)*(1/Rv - 1/3.1)]/renormalization
 N = 23
 wns = np.zeros((N, 2))
 exps = np.zeros(N)
@@ -48,6 +48,15 @@ uv_F90_a = [0.81297, 0.2775, 1.06295, 0.11303, 4.60, 0.99]
 uv_F90_b = [-2.97868, 1.89808, 3.10334, 0.65484, 4.60, 0.99]
 F90_quad = 0.5392
 F90_cubic = 0.05644
+
+# G23 originally used F19 photoemtry for RV and F19 spectroscopy for A(lambda)/A(V)
+# dust_extinction v1.7 addresses the ~1.5% offset between the two by dividing by
+renormalization = 0.9854
+# since dust_extinction is Karl Gordon's package and G23 is his model, we follow suit.
+# The renormalization affects all "poly" and "rem" coefficients, the amplitude (first)
+# parameter in 'drude' coefficients. The latter is handled here, the former at the end.
+ir_drude_1[0] /= renormalization
+ir_drude_2[0] /= renormalization
 
 # subdomains are split into IR, NIR, optical, UV, FUV, with overlaps between
 # adjacent regions except for UV/FUV. The breakpoints (in microns) are
@@ -154,7 +163,7 @@ exps[4] = alpha_1
 # This applies between 1.1 and 32 microns
 for i, drude_params in zip((5, 6), (ir_drude_1, ir_drude_2)):
     wns[i] = (1 / IR[1], 1 / NIR[0])
-    coeffs["A"]["poly"][i] = [1]
+    coeffs["A"]["poly"][i] = P([1])
     coeffs["A"]["drude"][i] = drude_params
 
 ################################### OPTICAL ###################################
@@ -319,7 +328,7 @@ for var in "AB":
 #     coeffs[var]["rem"][16] = P(uv_rem_coef)
 #     coeffs[var]["div"][16] = w_div * uv_div
 
-# G23 is parametrized as A(x)/A(V) = a(x) + b(x)*(1/RV - 1/3.1)
+# The un-normalized G23 is parametrized as A(x)/A(V) = a(x) + b(x)*(1/RV - 1/3.1)
 # but BayeSN wants a(x) + b(x)/Rv + sp(x).
 # Thus, a(x) should be decreased by b(x)/3.1 in each subdomain
 # If b(x) is defined in a subdomain where a(x) is not, the empty a(x) can be set to -b(x)/3.1.
@@ -340,6 +349,13 @@ for subdomains in (
     coeffs["A"]["div"][a_subdomain] = coeffs["B"]["div"][b_subdomain]
     wns[a_subdomain] = wns[b_subdomain]
     exps[a_subdomain] = exps[b_subdomain]
+
+# The renormalization constant must be applied to all "poly" and "rem" coefficients.
+# The "drude" amplitudes were already renormalized.
+for subdomain in range(N):
+    for ab in ("A", "B"):
+        for coeff_type in ("poly", "rem"):
+            coeffs[ab][coeff_type][subdomain] /= renormalization
 
 with open("BAYESN.YAML", "w") as f:
     f.write("UNITS: inverse microns\n")
