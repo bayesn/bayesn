@@ -1,0 +1,6 @@
+SNID SEARCH_PEAKMJD REDSHIFT_CMB REDSHIFT_CMB_ERR source files
+2016W 57418.12 0.02013 7e-05 Foundation_DR1 training_data/Foundation_DR1_2016W.txt
+2016afk 57440.00 0.04686 1e-05 Foundation_DR1 training_data/Foundation_DR1_2016afk.txt
+ASASSN-15bc 57046.93 0.03801 0.0001 Foundation_DR1 training_data/Foundation_DR1_ASASSN-15bc.txt
+ASASSN-15fa 57103.76 0.02726 1e-05 Foundation_DR1 training_data/Foundation_DR1_ASASSN-15fa.txt
+ASASSN-15fs 57112.71 0.02925 5e-05 Foundation_DR1 training_data/Foundation_DR1_ASASSN-15fs.txt

@@ -1,0 +1,83 @@
+NGENTOT_LC:  200
+GENVERSION:  BAYESN_test_fits
+GENTYPE:     1
+RANSEED:     12345   # random number seed
+
+GENSOURCE:     RANDOM
+GENMODEL:      $SNANA_LSST_ROOT/models/bayesn/BAYESN.T21
+GENMAG_SMEAR:  0.0   # <=== remove this later when intrinsic scatter is ready
+
+# rate model
+# DNDZ: POWERLAW2  1.0E-3  1.0  0.00 0.08
+DNDZ: POWERLAW2  2.6E-5  1.5  0.0 1.4   # Dilday 2008
+
+GENMODEL_MSKOPT: 1
+
+PATH_SNDATA_SIM:  $SNANA_LSST_SIM
+
+SIMLIB_FILE:   $SNDATA_ROOT/simlib/DES/DES-SN5YR_FOUND.SIMLIB
+SOLID_ANGLE:   6.28
+
+HOSTLIB_FILE:  $ELASTICC_HOSTLIB/SNIa_GHOST.HOSTLIB.gz
+HOSTLIB_WGTMAP_FILE: $ELASTICC_WGTMAP/SNIa_GHOST_nox1.WGTMAP
+
+GENMEAN_THETA:   0.00
+GENRANGE_THETA: -5 5
+GENSIGMA_THETA:   1 1
+
+GENPEAK_DELTAM:   0.0
+GENSIGMA_DELTAM:  0.1    0.1
+GENRANGE_DELTAM: -0.264  0.264
+
+GENRANGE_PEAKMJD: 57000.0  57480.0
+OPT_SETPKMJD:      16  # Fmax clump method
+#GENSIGMA_SEARCH_PEAKMJD:  1.0       # sigma-smearing for  SEARCH_PEAKMJD
+
+
+GENRANGE_TREST:   -12.50 45.0     # rest epoch relative to peak (days)
+GENRANGE_REDSHIFT:  0.015  0.08
+GENSIGMA_REDSHIFT:  1.0E-3
+
+GENRANGE_AV:   0.00   8.0
+GENTAU_AV:     0.25
+#GENSIGMA_AV:  0.05
+
+GENMEAN_RV: 2.51
+GENRANGE_RV:   1.2  6
+GENSIGMA_RV:   0.65 0.65
+
+GENSIGMA_VPEC:      0  # peculiar velocity, km/sec
+VPEC_ERR:           0
+
+GENFILTERS:   griz
+KCOR_FILE:    $SNDATA_ROOT/kcor/DES/DES-SN5YR/calib_DES-SN5YR_Foundation.fits.gz
+
+# Output in Dump files
+SIMGEN_DUMP:  19
+   CID GENTYPE  SNTYPE  NON1A_INDEX  GENZ
+   LIBID RA DEC MWEBV MU AV RV THETA PEAKMJD SNRMAX
+   PEAKMAG_g PEAKMAG_r PEAKMAG_i PEAKMAG_z
+
+
+OPT_MWEBV:      3    # 3=Schlaffly 2011
+OPT_MWCOLORLAW: 99   # 99=Fitzpatrick99
+
+SMEARFLAG_FLUX:    1   # photo-stat smearing of signal, sky, etc ...
+SMEARFLAG_ZEROPT:  1   # smear zero-point with zptsig
+
+APPLY_SEARCHEFF_OPT:  1
+#SEARCHEFF_SPEC_FILE:  ?? # no spec file --> 100% specEff
+#SEARCHEFF_PIPELINE_EFF_FILE: $SNANA_LSST_ROOT/models/searcheff/SEARCHEFF_PIPELINE_ELASTICC_WFD.DAT
+#SEARCHEFF_PIPELINE_LOGIC_FILE: $SNDATA_ROOT/models/searcheff/SEARCHEFF_PIPELINE_LOGIC.DAT
+
+NEWMJD_DIF: 0.02  # .02 day (30') separation between 2 obs for trigger
+
+# FORMAT_MASK: 2  # Text format
+FORMAT_MASK: 32  # FITS format
+
+APPLY_CUTWIN_OPT: 1                 # 1=implement cuts
+CUTWIN_NEPOCH:   5 3.              # require 5 epochs > SNR 3
+CUTWIN_SNRMAX:   3 griz 2 -20. 60.  # 2 filters with SNRAMX>3
+CUTWIN_TRESTMIN: -20  0
+CUTWIN_TRESTMAX:   0  40
+CUTWIN_MWEBV:      0  0.30

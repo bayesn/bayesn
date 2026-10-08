@@ -1,0 +1,7 @@
+standards:
+  test_standard:
+    path: test_standard.fits
+filters_root: $BAYESN_TEST_VAR
+filters:
+  test_filter:
+    path: non_existent

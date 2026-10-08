@@ -1,0 +1,4 @@
+U_tjo TJO_MEIA.U.dat VegaB=0.0 TJO MEIA U-band
+B_tjo TJO_MEIA.B.dat VegaB=0.0 TJO MEIA B-band
+V_tjo TJO_MEIA.V.dat VegaB=0.0 TJO MEIA V-band
+I_tjo TJO_MEIA.Ic.dat VegaB=0.0 TJO MEIA Ic-band

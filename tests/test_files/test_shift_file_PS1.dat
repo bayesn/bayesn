@@ -1,0 +1,4 @@
+# Sample shift file, not entirely sure what it's supposed to look like though...
+BAND,LAM_SHIFT,MAG_SHIFT
+g_PS1,10,0
+r_PS1,0,-2
