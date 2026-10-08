@@ -195,8 +195,8 @@ class SEDmodel(object):
         Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
         This overrides the effects of apply_dovekie_mag_shifts.
     apply_lam_shifts: bool, default False
-        Whether to increase transmission functions by any "lam_shift" values in
-        BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
+        Whether to increase transmission function wavelengths by any "lam_shift" values
+        in BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
         "LAM_SHIFT" values from shift_df.
     ZPT: Number, default 27.5
         The Pogson zero point used for converting between fluxes and magnitudes:
@@ -978,9 +978,9 @@ class SEDmodel(object):
             Whether to add any "MAG_SHIFT" values from shift_df to defined magnitudes.
             This overrides the effects of apply_dovekie_mag_shifts.
         apply_lam_shifts: bool, default False
-            Whether to increase transmission functions by any "lam_shift" values in
-            BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be overridden by
-            "LAM_SHIFT" values from shift_df.
+            Whether to increase transmission function wavelengths by any "lam_shift"
+            values in BASE_DIR/bayesn/bayesn-filters/filters.yaml, which can be
+            overridden by "LAM_SHIFT" values from shift_df.
 
         Returns
         -------
@@ -1011,7 +1011,7 @@ class SEDmodel(object):
         apply_mag_shifts = apply_mag_shifts or self.apply_mag_shifts
         apply_lam_shifts = apply_lam_shifts or self.apply_lam_shifts
 
-        ret_dict = self.filter_dict["filters"][name]
+        ret_dict = {key: val for key, val in self.filter_dict["filters"][name].items()}
         ret_dict["defined_mag"] = ret_dict.pop("magzero", 0)
         lam_shift = ret_dict.pop("lam_shift", 0) * int(apply_lam_shifts)
         lam, trans = np.loadtxt(ret_dict["path"]).T
@@ -1257,7 +1257,10 @@ class SEDmodel(object):
 
         # Calculating float indices of SEDmodel.hires_wave for obs_frame_wave
         # Integer indices and remainder allow for interpolation
-        obs_frame_wave = self.model_wave[None,:,None] * (1+redshifts)[:,None,None] + lam_shifts[None, None, :]
+        obs_frame_wave = self.model_wave[None,:,None] * (1+redshifts)[:,None,None]
+        # Positive lam_shifts correspond to redshifts. Since the weights are
+        # interpolated, obs_frame_wave must be decreased by lam_shift.
+        obs_frame_wave -= lam_shifts[None, None, :]
         locs = jnp.log10(obs_frame_wave/self.min_hsiao_wave)/self.hires_spacing
         int_locs = locs.astype(jnp.int32)
         remainders = locs - int_locs
