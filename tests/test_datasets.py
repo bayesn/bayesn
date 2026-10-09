@@ -691,9 +691,9 @@ class TestAstroSetter:
         ]
         v = vpec / C_LIGHT
         dv = vpec_err / C_LIGHT
-        z_cmb = (1 + z_hubble) / (1 + v) - 1
-        dz_pv = z_hubble_err / (1 + v)
-        z_dpv = -dv * (1 + z_hubble) / (1 + v)**2
+        z_cmb = (1 + z_hubble) * (1 + v) - 1
+        dz_pv = z_hubble_err * (1 + v)
+        z_dpv = dv * (1 + z_hubble)
         z_cmb_err = np.hypot(dz_pv, z_dpv)
         z_hel, z_hel_err = convert_z(
                 z=z_cmb, ra=ra, dec=dec, z_in_type="cmb", z_err=z_cmb_err
@@ -716,9 +716,9 @@ class TestAstroSetter:
         z_cmb, z_cmb_err = convert_z(
                 z=z_hel, ra=ra, dec=dec, z_in_type="hel", z_err=z_hel_err
         )
-        z_hubble = (1 + z_cmb) * (1 + v) - 1
-        dz_pv = z_cmb_err * (1 + v)
-        z_dpv = dv * (1 + z_cmb)
+        z_hubble = (1 + z_cmb) / (1 + v) - 1
+        dz_pv = z_cmb_err / (1 + v)
+        z_dpv = -dv * (1 + z_cmb) / (1 + v)**2
         z_hubble_err = np.hypot(dz_pv, z_dpv)
         for attr in ("z_hubble", "z_hubble_err", "z_cmb", "z_cmb_err"):
             setattr(dataset_two_sne, attr, np.full(N_sn, None))
@@ -737,8 +737,8 @@ class TestAstroSetter:
         z_cmb, other_z_cmb = convert_z(
                 z=z_hel, ra=ra, dec=dec, z_in_type="hel", z_err=z_hel_err
         )
-        z_hubble = (1 + z_cmb) * (1 + v) - 1
-        z_hubble_err = z_cmb_err * (1 + v)   # for vpec_err = None
+        z_hubble = (1 + z_cmb) / (1 + v) - 1
+        z_hubble_err = z_cmb_err / (1 + v)   # for vpec_err = None
         for attr in ("z_hubble", "z_hubble_err", "z_cmb", "vpec_err"):
             setattr(dataset_two_sne, attr, np.full(N_sn, None))
         dataset_two_sne.fill_out_redshifts()
@@ -850,6 +850,42 @@ class TestAstroSetter:
             assert test_ds.photometry.mag_err[idx] == floor
             assert test_ds.photometry.flux_err[idx] == floor*np.log(10)/2.5*test_ds.photometry.flux[idx]
 
+    def test_apply_overrides_coords_vpec(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.ra = np.array([None, test_ds.ra[1]])  # cannot get z_helio
+        test_ds.vpec = np.array([test_ds.vpec[0], None])  # cannot get z_hubble
+        overrides = {"z_cmb": 0.02, "missing_key": 1}
+        with pytest.warns(UserWarning, match="treated as having no error"):
+            test_ds.apply_overrides(overrides)
+        npt.assert_equal(test_ds.z_cmb_err, np.full(2, None))
+        npt.assert_equal(test_ds.z_cmb, 0.02)
+        npt.assert_equal(test_ds.z_helio, [dataset_two_sne.z_helio[0], None])
+        npt.assert_equal(test_ds.z_helio_err, [dataset_two_sne.z_helio_err[0], None])
+        npt.assert_equal(test_ds.z_hubble, [None, dataset_two_sne.z_hubble[1]])
+        npt.assert_equal(test_ds.z_hubble_err, [None, dataset_two_sne.z_hubble_err[1]])
+
+    def test_apply_overrides_err_but_not_z(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        overrides = {"z_helio_err": [1e-8, None], "z_hubble": 0.02, "z_hubble_err": 1e-5}
+        with pytest.warns(UserWarning, match="will not propagate to z_helio_err"):
+            test_ds.apply_overrides(overrides)
+        npt.assert_equal(test_ds.z_hubble, 0.02)
+        npt.assert_equal(test_ds.z_hubble_err, 1e-5)
+        npt.assert_equal(test_ds.z_cmb, None)
+        npt.assert_equal(test_ds.z_cmb_err, None)
+        npt.assert_equal(test_ds.z_helio, None)
+        npt.assert_equal(test_ds.z_helio_err, [1e-8, None])
+
+    def test_apply_overrides_overridden_coords_vpec(self, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        test_ds.ra, test_ds.dec, test_ds.vpec = [np.full(2, None) for _ in range(3)]
+        overrides = {"ra": 0, "dec": 0, "vpec": 0, "z_helio": 0.02, "z_helio_err": 1e-5}
+        test_ds.apply_overrides(overrides)
+        npt.assert_equal(test_ds.z_helio, 0.02)
+        npt.assert_equal(test_ds.z_helio_err, 1e-5)
+        for attr in ("z_cmb", "z_cmb_err", "z_hubble", "z_hubble_err"):
+            npt.assert_equal(getattr(test_ds, attr), None)
+
 class TestFactoryMethods:
     @pytest.mark.parametrize("fname,file_format,read_fn", (("Foundation_DR1_2016W.txt", "SNANA", io.read_snana_ascii), ("CSP_SN2004dt.snpy", "snpy", io.read_snpy)))
     def test_from_one_ascii(self, fname: str, file_format: str, read_fn: Callable):
@@ -883,13 +919,6 @@ class TestFactoryMethods:
         ref_ds.fill_out_redshifts()
         ref_ds.set_all_rest_phases()
         assert test_ds == ref_ds
-
-    def test_from_ascii_overrides(self):
-        paths = [TEST_DIR / f"training_data/Foundation_DR1_2016{name}.txt" for name in ("W", "afk")]
-        ors = {"z_helio_err": 2e-5, "mwebv_err": [0.1, 0.2]}
-        test_ds = SNDataset.from_ascii_files(paths, file_format="SNANA", overrides=ors)
-        npt.assert_allclose(test_ds.z_helio_err, 2e-5)
-        npt.assert_allclose(test_ds.mwebv_err, [0.1, 0.2])
 
     def test_from_table_file(self):
         table_path = TEST_DIR / "T21_mini_set.txt"
