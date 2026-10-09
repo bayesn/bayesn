@@ -49,14 +49,14 @@ uv_F90_b = [-2.97868, 1.89808, 3.10334, 0.65484, 4.60, 0.99]
 F90_quad = 0.5392
 F90_cubic = 0.05644
 
-# G23 originally used F19 photoemtry for RV and F19 spectroscopy for A(lambda)/A(V)
+# G23 originally used F19 photometry for RV and F19 spectroscopy for A(lambda)/A(V)
 # dust_extinction v1.7 addresses the ~1.5% offset between the two by dividing by
 renormalization = 0.9854
 # since dust_extinction is Karl Gordon's package and G23 is his model, we follow suit.
-# The renormalization affects all "poly" and "rem" coefficients, the amplitude (first)
-# parameter in 'drude' coefficients. The latter is handled here, the former at the end.
-ir_drude_1[0] /= renormalization
-ir_drude_2[0] /= renormalization
+# The renormalization affects all "poly" and "rem" coefficients, and would affect the
+# amplitude (first) parameter in 'drude' coefficients, but in our implementation the
+# drude profile is added as a multiplication with a constant poly function.
+# The end result is that that renormalizing the amplitudes would be double counting.
 
 # subdomains are split into IR, NIR, optical, UV, FUV, with overlaps between
 # adjacent regions except for UV/FUV. The breakpoints (in microns) are
@@ -351,7 +351,7 @@ for subdomains in (
     exps[a_subdomain] = exps[b_subdomain]
 
 # The renormalization constant must be applied to all "poly" and "rem" coefficients.
-# The "drude" amplitudes were already renormalized.
+# The "drude" amplitudes are affected by the poly coeffs in their subdomains.
 for subdomain in range(N):
     for ab in ("A", "B"):
         for coeff_type in ("poly", "rem"):

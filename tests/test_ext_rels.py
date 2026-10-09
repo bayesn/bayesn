@@ -13,6 +13,7 @@ import astropy.units as u
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpy.testing as npt
 import pandas as pd
 import pytest
 try:
@@ -21,6 +22,7 @@ try:
 except ModuleNotFoundError:
     ext_loaded: bool = False
 try:
+    import dust_extinction
     from dust_extinction import parameter_averages as de
     de_loaded: bool = True
 except ModuleNotFoundError:
@@ -133,7 +135,7 @@ def test_set_x(F99: DustExtRel, x_units: str, factor: int | float):
     test_der.default_min_wave /= factor
     test_der.default_max_wave /= factor
     test_der.set_x(x_in="default", x_units=x_units)
-    np.testing.assert_allclose(test_der.x, F99.x)
+    npt.assert_allclose(test_der.x, F99.x)
 
 def test_set_x_bad_units(F99: DustExtRel):
     with pytest.raises(ValueError, match="Unit string"):
@@ -142,7 +144,7 @@ def test_set_x_bad_units(F99: DustExtRel):
 def test_set_x_custom_x(F99: DustExtRel):
     test_der = copy.deepcopy(F99)
     test_der.set_x(x_in=F99.x, x_units="inverse microns")
-    np.testing.assert_allclose(test_der.x, F99.x)
+    npt.assert_allclose(test_der.x, F99.x)
 
 
 def test_ext_rel_short_wl_coverage():
@@ -213,9 +215,14 @@ def test_vs_de(name: str, atol: float, RV: float = 3.1):
     RVs = np.linspace(*RV_overlap, 30)
     test_axav = ext_rel._get_axav(RVs)
     ref_axav = np.zeros((30, len(inv_microns[idx])))
+    # G23 was renormalized in dust_extinction 1.7. This is in the BayeSN implementation.
+    # Comparisons against earlier versions must be unrenormalized.
+    renorm = 1
+    if name == "G23" and dust_extinction.__version__ < "1.7":
+        renorm = 0.9854
     for i, RV in enumerate(RVs):
-        ref_axav[i] = ref_der(RV)(inv_microns[idx]/u.micron)
-    assert jnp.isclose(test_axav[:,idx[0]], ref_axav, rtol=0, atol=atol).all()
+        ref_axav[i] = ref_der(RV)(inv_microns[idx]/u.micron) / renorm
+    npt.assert_allclose(test_axav[:,idx[0]], ref_axav, rtol=0, atol=atol)
 
 
 def test_getaxav_wrapper_RV_shape(F99: DustExtRel):
