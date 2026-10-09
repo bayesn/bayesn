@@ -1015,6 +1015,9 @@ class SEDmodel(object):
         ret_dict["defined_mag"] = ret_dict.pop("magzero", 0)
         lam_shift = ret_dict.pop("lam_shift", 0) * int(apply_lam_shifts)
         lam, trans = np.loadtxt(ret_dict["path"]).T
+        idx = np.argsort(lam)
+        lam = lam[idx]
+        trans = trans[idx]
         # Convert wavelength units if required, model is defined in Angstroms
         units = ret_dict.get("lam_unit", "AA").lower()
         if "nm" in units or "nanomet" in units:
@@ -5032,7 +5035,7 @@ class SEDmodel(object):
         match group_by:
             case "bp_name":
                 for bp in set(name.split("_")[0] for name in full_names):
-                    ret_dict[bp] = [name for name in full_names if name.startswith(bp)]
+                    ret_dict[bp] = [name for name in full_names if name.startswith(bp+"_") or name == bp]
             case "site":
                 for site in [path.split('/')[0] for path in paths]:
                     ret_dict[site] = [name for i,name in enumerate(full_names) if paths[i].startswith(site)]

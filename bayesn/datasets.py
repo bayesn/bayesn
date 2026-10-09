@@ -1044,11 +1044,11 @@ class SNDataset:
             # zhel -> zcmb takes priority over zhub -> zcmb
             # There is no error checking if the two do not produce the same zcmb.
             if dzcmb is None and None not in (zhub, dzhub, v):
-                dz_pv = dzhub/(1+v)
-                z_dpv = 0 if dv is None else -dv*(1+zhub)/(1+v)**2
+                dz_pv = dzhub*(1+v)
+                z_dpv = 0 if dv is None else dv*(1+zhub)
                 dzcmb = self.z_cmb_err[i] = np.hypot(dz_pv, z_dpv)
             if zcmb is None and None not in (zhub, v):
-                zcmb = self.z_cmb[i] = (1+zhub)/(1+v) - 1
+                zcmb = self.z_cmb[i] = (1+zhub)*(1+v) - 1
 
 
             # Populating zcmb first allows for potential z_hel <-> zhub.
@@ -1058,11 +1058,11 @@ class SNDataset:
                 self.z_helio[i] = utils.convert_z(zcmb, ra, dec, "cmb")
 
             if dzhub is None and None not in (zcmb, dzcmb, v):
-                dz_pv = dzcmb*(1+v)
-                z_dpv = 0 if dv is None else dv*(1+zcmb)
+                dz_pv = dzcmb/(1+v)
+                z_dpv = 0 if dv is None else -dv*(1+zcmb)/(1+v)**2
                 self.z_hubble_err[i] = np.hypot(dz_pv, z_dpv)
             if zhub is None and None not in (zcmb, v):
-                self.z_hubble[i] = (1+zcmb)*(1+v) - 1
+                self.z_hubble[i] = (1+zcmb)/(1+v) - 1
 
     def set_all_rest_phases(self) -> None:
         self.photometry["phase"] = np.concatenate([self.calculate_rest_phases(snid) for snid in self.snid])
