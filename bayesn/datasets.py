@@ -1116,6 +1116,74 @@ class SNDataset:
             np.full_like(self.photometry["mag_err"], error_floor)
         )
 
+    def apply_overrides(self, overrides: dict = {}) -> None:
+        # Ensure overrides map to attributes.
+        for key in list(overrides.keys()):
+            std_name = get_standard_name(key)
+            if hasattr(self, std_name):
+                overrides[std_name] = overrides.pop(key)
+            else:
+                del overrides[key]
+
+        # Support 0D broadcasting to N_sn.
+        for key, val in overrides.items():
+            if isinstance(val, Number | str | None):
+                overrides[key] = np.full(self.N_sn, val)
+
+        # If a redshift/err is overridden, set other redshifts/errs to None if they can
+        # be recalculated with the overridden redshift via fill_out_redshifts.
+        redshift_types = {"z_helio", "z_cmb", "z_hubble"}
+        err_types = {f"{z_type}_err" for z_type in redshift_types}
+        overridden_redshifts = set(overrides.keys()).intersection(redshift_types)
+        overridden_errs = set(overrides.keys()).intersection(err_types)
+        if overrides.get("ra") is not None and overrides.get("dec") is not None:
+            has_coords = (overrides["ra"] != None) & (overrides["dec"] != None)
+        else:
+            has_coords = (self.ra != None) & (self.dec != None)
+        if overrides.get("vpec") is not None:
+            has_vpec = overrides["vpec"] != None
+        else:
+            has_vpec = (self.vpec != None) | ("vpec" in overrides)
+        for z_err in overridden_errs:
+            z_type = z_err[:-4]
+            if z_type in overridden_redshifts:
+                continue
+            other_overrides = overridden_redshifts.difference({z_type})
+            if other_overrides:
+                warn(UserWarning(
+                    f"{z_err} was overridden, but {z_type} was not. Other redshifts "
+                    "have been overridden {other_overrides}, but their errors (or lack "
+                    f"thereof) will not propagate to {z_err}."
+                ))
+        for z_type in overridden_redshifts:
+            z_err = f"{z_type}_err"
+            if z_err not in overridden_errs:
+                warn(UserWarning(
+                    f"{z_type} was overridden, but {z_err} was not. The redshift will "
+                    "be treated as having no error, even if values exist in the files."
+                ))
+                overrides[z_err] = np.full(self.N_sn, None)
+
+        # Wiping attributes allows other overrides to take priority.
+        if "z_helio" in overridden_redshifts:
+            self.z_cmb = np.where(has_coords, None, self.z_cmb)
+            self.z_cmb_err = np.where(has_coords, None, self.z_cmb_err)
+            self.z_hubble = np.where(has_coords & has_vpec, None, self.z_hubble)
+            self.z_hubble_err = np.where(has_coords & has_vpec, None, self.z_hubble_err)
+        if "z_cmb" in overridden_redshifts:
+            self.z_helio = np.where(has_coords, None, self.z_helio)
+            self.z_helio_err = np.where(has_coords, None, self.z_helio_err)
+            self.z_hubble = np.where(has_vpec, None, self.z_hubble)
+            self.z_hubble_err = np.where(has_vpec, None, self.z_hubble_err)
+        if "z_hubble" in overridden_redshifts:
+            self.z_helio = np.where(has_coords & has_vpec, None, self.z_helio)
+            self.z_helio_err = np.where(has_coords & has_vpec, None, self.z_helio_err)
+            self.z_cmb = np.where(has_vpec, None, self.z_cmb)
+            self.z_cmb_err = np.where(has_vpec, None, self.z_cmb_err)
+
+        for key, val in overrides.items():
+            setattr(self, key, val)
+
     #######################
     ### Factory methods ###
     #######################
@@ -1170,7 +1238,7 @@ class SNDataset:
                     text after the comment string will be ignored.
 
         """
-        # Support string | Path values for single files/file formats.
+        # Support non-array values.
         if isinstance(fname, str | Path):
             fname = [fname,]
         if isinstance(peakmjd_key, str):
@@ -1199,11 +1267,7 @@ class SNDataset:
             sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
             ds.append(sn_dict=sn_dict, obs_df=obs_df)
         ds.photometry.reset_index(drop=True, inplace=True)
-
-        for key, val in overrides.items():
-            if isinstance(val, Number | str | None):
-                val = np.full(ds.N_sn, val)
-            setattr(ds, key, val)
+        ds.apply_overrides(overrides=overrides)
 
         # Cleaning
         ds.recalibrate_fluxcal_zpt()
@@ -1253,27 +1317,7 @@ class SNDataset:
             )
         ds = SNDataset()
 
-        # metadata overrides
-        all_overrides = {}
-        for col in sn_list.columns:
-            std_name = get_standard_name(col)
-            if hasattr(ds, std_name):
-                all_overrides[std_name] = sn_list[col]
-        # If a redshift/err is overridden, set other redshifts/errs to None so they are
-        # recalculated with the overridden redshift when fill_out_redshifts is called
-        # in the from_ascii_files method.
-        redshift_types = {"z_helio", "z_cmb", "z_hubble"}
-        overridden_redshifts = set(all_overrides.keys()).intersection(redshift_types)
-        if overridden_redshifts:
-            for other_key in redshift_types.difference(overridden_redshifts):
-                all_overrides[other_key] = np.full(sn_list.shape[0], None)
-
-        err_types = {f"{z_type}_err" for z_type in redshift_types}
-        overridden_errs = set(all_overrides.keys()).intersection(err_types)
-        if overridden_errs:
-            for other_err in err_types.difference(overridden_errs):
-                all_overrides[other_err] = np.full(sn_list.shape[0], None)
-
+        overrides = {col: sn_list[col] for col in sn_list.columns}
         print("Reading light curves...")
         for i, row in tqdm(sn_list.iterrows()):
             # All metadata from files should match, even if they will be overridden.
@@ -1282,7 +1326,7 @@ class SNDataset:
                 fluxcal_zpt=fluxcal_zpt,
                 peakmjd_key=peakmjd_key,
                 file_format=file_format[i],
-                overrides=dict([(key, val[i]) for key, val in all_overrides.items()]),
+                overrides=dict([(key, val[i]) for key, val in overrides.items()]),
             )
             ds.append(ds=row_ds)
         return ds
