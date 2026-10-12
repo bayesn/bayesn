@@ -75,7 +75,7 @@ from .spline_utils import invKD, spline_coeffs, spline_coeffs_step
 from .extinction_relations import DustExtRel
 from .io import write_snana_lcfile, read_snana_spectra, read_snana_ascii
 from bayesn.datasets import SNDataset, ObsData
-from bayesn.utils import _predict, _prior_pot
+from bayesn.utils import _predict, _prior_pot, find_data_dir_in_SNANA
 import bayesn.zltn_utils as zltn
 from bayesn import constants
 
@@ -1774,9 +1774,9 @@ class SEDmodel(object):
             defines model wavelength range and data set to load.
         """
         if args.get("version_photometry"):
-            data_dir, survey_dict = utils.find_data_dir_in_SNANA(
+            data_dir, survey_dict = find_data_dir_in_SNANA(
                 private_data_path=args["private_data_path"]
-            ) if args["snana"] else args["version_photometry"], {}
+            ) if args["snana"] else (args["version_photometry"], {})
             list_file = Path(data_dir, Path(data_dir).name+".LIST")
             ds = SNDataset.from_snana_list(
                 list_file,
