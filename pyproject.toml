@@ -25,6 +25,7 @@ dependencies = [
     "numpyro >= 0.14.0",
     "pandas >= 1.4.0",
     "ruamel.yaml >= 0.16.0",
+    "sfdmap2 >= 0.2.1",
     "scipy >= 1.15.0",
     "sncosmo >= 2.10",
     "tqdm >= 4.29.1"
