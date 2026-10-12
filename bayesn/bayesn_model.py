@@ -1373,8 +1373,7 @@ class SEDmodel(object):
         else:
             args["jobsplit"] = [1, 1]
             args["snana"] = False
-        args["jobid"] = args["jobsplit"][0]
-        args["njobtot"] = args["jobsplit"][1] * args["sim_prescale"]
+        args["jobid"], args["njobtot"] = args["jobsplit"]
 
         if not (args["mode"].startswith("fit") and args["snana"]):
             try:
@@ -1786,6 +1785,7 @@ class SEDmodel(object):
                 peakmjd_key=args["peakmjd_key"],
                 jobid=args["jobid"],
                 njobtot=args["njobtot"],
+                sim_prescale=args["sim_prescale"],
             )
             surveys = [s for s in ds.idsurvey if s is not None]
             if len(surveys) == 1:
@@ -1803,6 +1803,7 @@ class SEDmodel(object):
                 peakmjd_key=args["peakmjd_key"],
                 jobid=args["jobid"],
                 njobtot=args["njobtot"],
+                sim_prescale=args["sim_prescale"],
             )
 
         ds.apply_filter_map(args["map"])

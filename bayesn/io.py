@@ -332,6 +332,7 @@ def read_snana_fits(
     fluxcal_zpt: Number = 27.5,
     jobid: int = 1,
     njobtot: int = 1,
+    sim_prescale: int = 1,
 ) -> tuple[dict, pd.DataFrame]:
     """ Given a path to an SNANA format fits (or fits.gz) HEAD file, read it and the
     corresponding PHOT file, extract relevant data, and return the data in two standard
@@ -416,11 +417,16 @@ def read_snana_fits(
     head_file = Path(fname)
     if not head_file.exists():
         head_file = Path(str(fname) + ".gz")
-    head_data = np.array(fits.open(head_file)[1].data).view(np.ndarray)
+    with fits.open(head_file) as hdu:
+        survey = hdu[0].header.get("SURVEY", "NULL")
+        zpt = hdu[0].header.get("ZP_FLUXCAL", fluxcal_zpt)
+        head_data = np.array(hdu[1].data).view(np.ndarray)
     phot_file = str(head_file).replace("HEAD", "PHOT")
     head_data = head_data.byteswap().view(head_data.dtype.newbyteorder())
     phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
     n_sne_in_file = head_data.shape[0]
+    if "SIM_REDSHIFT_HELIO" in head_data.dtype.names:
+        njobtot *= sim_prescale
     use_in_run = (np.arange(n_sne_in_file) + 1 - jobid) % njobtot == 0
     idx = np.where(use_in_run)[0]
     head_names = head_data.dtype.names
@@ -434,6 +440,7 @@ def read_snana_fits(
     for key in head_names:
         sn_dict[key] = head_data[key]
     sn_dict["SNID"] = snid_decoded
+    sn_dict["SURVEY"] = np.full_like(snid_decoded, survey)
     for key in ("VARLIST", "FILTERS"):
         sn_dict.pop(key, None)
 
@@ -464,6 +471,8 @@ def read_snana_fits(
     phot_df = phot_df.iloc[keep].reset_index(drop=True)
     sn_idx = sn_idx[keep]
 
+    flux_scaling = 10**(-0.4*(zpt - fluxcal_zpt))
+    phot_df.loc[:,["flux","flux_err"]] *= flux_scaling
     phot_df['mag'], phot_df['mag_err'] = utils.flux_to_mag(
             flux=phot_df['flux'].values.astype(float),
             flux_err=phot_df['flux_err'].values.astype(float),
