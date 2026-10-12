@@ -1,5 +1,6 @@
 import functools
 from numbers import Number
+import os
 from pathlib import Path
 
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -357,6 +358,7 @@ def find_data_dir_in_SNANA(private_data_path) -> tuple[str, dict]:
     survey_def_path = os.path.join(
         os.environ.get("SNDATA_ROOT"), "SURVEY.DEF"
     )
+    survey_dict = {}
     with open(survey_def_path) as fp:
         for line in fp:
             if line[: line.find(":")] == "SURVEY":
