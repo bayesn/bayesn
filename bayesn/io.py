@@ -418,7 +418,7 @@ def read_snana_fits(
         head_file = Path(str(fname) + ".gz")
     head_data = np.array(fits.open(head_file)[1].data).view(np.ndarray)
     phot_file = str(head_file).replace("HEAD", "PHOT")
-    head_data = head_data.byteswap().newbyteorder()
+    head_data = head_data.byteswap().view(head_data.dtype.newbyteorder())
     phot_data = fits.getdata(phot_file, 1, view=np.ndarray, memmap=True)
     n_sne_in_file = head_data.shape[0]
     use_in_run = (np.arange(n_sne_in_file) + 1 - jobid) % njobtot == 0
