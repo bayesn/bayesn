@@ -123,7 +123,11 @@ class TestRead:
             sn_dict, obs_df = sample
             assert set(io.obs_df_columns).issubset(obs_df.columns)
             assert "BAND" not in obs_df
-            for key in io.sn_dict_keys:
+            for key in (
+                "SURVEY", "SNTYPE", "SNID", "RA", "DECL", "MWEBV", "REDSHIFT_HELIO",
+                "REDSHIFT_CMB", "REDSHIFT_FINAL", "SEARCH_PEAKMJD", "HOSTGAL_LOGMASS",
+                "VPEC", "VPEC_ERR", "PIXSIZE",
+            ):
                 assert key in sn_dict
 
         def test_pogson_relation(self, sample: READ_DTYPE):

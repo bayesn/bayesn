@@ -120,6 +120,7 @@ def sample_data_two_sne() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.ndarr
 def sample_data_sim() -> tuple[dict[str, np.ndarray], pd.DataFrame, np.ndarray]:
     N_sn = 5
     sn_dict = random_sn_dict(RNG_seed=0, N=N_sn, sim=True)
+    sn_dict["test_key"] = np.arange(N_sn)
     obs_dfs = [random_obs_df(RNG_seed=i) for i in range(N_sn)]
     obs_df = pd.concat(obs_dfs, ignore_index=True)
     return sn_dict, obs_df
@@ -523,16 +524,15 @@ class TestGetterMethods:
         pdt.assert_frame_equal(dataset_two_sne.get_phot_subset(snid=["test1", "test0"]), switched_df)
 class TestDataRemoval:
     def test_remove_sn(self, dataset_sim):
+        test_ds = copy.deepcopy(dataset_sim)
         ref_meta = dataset_sim.get_metadata_subset(idx=[0, 2, 4])
         ref_phot = dataset_sim.get_phot_subset(idx=[0, 2, 4])
-        ref_phot_idx = dataset_sim.get_phot_idx_subset(idx=[0, 2, 4])
         with pytest.raises(IndexError, match="index 10 is out of bounds"):
-            dataset_sim.remove_sn(idx=10)
-        dataset_sim.remove_sn(snid=["test3", "test1"])
-        assert dataset_sim.N_sn == 3
-        assert_dicts_match(ref_meta, dataset_sim.metadata)
-        pdt.assert_frame_equal(ref_phot, dataset_sim.photometry)
-        # npt.assert_equal(ref_phot_idx, dataset_sim.phot_idx)
+            test_ds.remove_sn(idx=10)
+        test_ds.remove_sn(snid=["test3", "test1"])
+        assert test_ds.N_sn == 3
+        assert_dicts_match(ref_meta, test_ds.metadata)
+        pdt.assert_frame_equal(ref_phot, test_ds.photometry)
 
     def test_keep_according_to_list(self, dataset_sim):
         ref_meta = dataset_sim.get_metadata_subset(idx=[2, 3])
@@ -915,7 +915,7 @@ class TestAstroSetter:
             npt.assert_equal(getattr(test_ds, attr), None)
 
 class TestFactoryMethods:
-    @pytest.mark.parametrize("fname,file_format,read_fn", (("Foundation_DR1_2016W.txt", "SNANA", io.read_snana_ascii), ("CSP_SN2004dt.snpy", "snpy", io.read_snpy)))
+    @pytest.mark.parametrize("fname,file_format,read_fn", (("sim_2016W.txt", "SNANA", io.read_snana_ascii), ("CSP_SN2004dt.snpy", "snpy", io.read_snpy)))
     def test_from_one_ascii(self, fname: str, file_format: str, read_fn: Callable):
         path = TEST_DIR / f"training_data/{fname}"
         test_ds = SNDataset.from_ascii_files(path, file_format=file_format)

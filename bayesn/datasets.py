@@ -559,31 +559,6 @@ class SNDataset:
         phot_subset = pd.concat([self.photometry[self.photometry["snid"] == self.snid[i]] for i in idx])
         return phot_subset.reset_index(drop=True)
 
-    def get_phot_idx_subset(
-        self,
-        snid: None | str | ArrayLike = None,
-        idx: None | int | ArrayLike = None
-    ):
-        """ The get_phot_subset method does not provide phot_idx data for mapping SNe
-        to photometry. This method will provide an updated phot_idx array if the
-        arguments are identical.
-
-        Parameters
-        ----------
-        snid:
-            The snid (or snids) of SN(e) whose phot indices are being requested.
-        idx:
-            The index (or indices) of SN(e) whose phot indices are being requested.
-
-        Returns
-        -------
-        phot_subset:
-            Array of indices appropriate for the photometry subset restricted to SN(e)
-            specified by snid or idx.
-        """
-        idx = np.atleast_1d(self._parse_snid_idx_args(snid, idx)).astype(int)
-        return np.append(0, np.cumsum(self.N_obs[idx]))
-
     #####################
     ### Data Addition ###
     #####################
@@ -1236,6 +1211,7 @@ class SNDataset:
         overrides: dict = {},
         jobid: int = 1,
         njobtot: int = 1,
+        sim_prescale: int = 1,
         **kwargs,
     ):
         """ Instantiate a SNDataset from a file or list of files in the ascii format.
@@ -1279,6 +1255,12 @@ class SNDataset:
         # Support non-array values.
         if isinstance(fname, str | Path):
             fname = [fname,]
+        sim = False
+        if (isinstance(file_format, str) and file_format.lower() == "snana") or file_format[0].lower() == "snana":
+            meta = io.read_snana_ascii_meta(fname[0])
+            sim = "SIM_REDSHIFT_HELIO" in meta
+            if sim:
+                njobtot *= sim_prescale
         use_in_run = np.where((np.arange(len(fname)) + 1 - jobid) % njobtot == 0)
         fname = np.array(fname)[use_in_run]
         if isinstance(file_format, str):
@@ -1288,7 +1270,7 @@ class SNDataset:
 
         # Instantiate SNDataset then loop over files and append them, not the most
         # efficient so may need to look for other solutions.
-        ds = SNDataset()
+        ds = SNDataset(sim=sim)
         for f, fmt in zip(fname, file_format):
             if fmt.lower() == "snana":
                 read_fn = io.read_snana_ascii
@@ -1322,6 +1304,7 @@ class SNDataset:
         comment="#",
         jobid: int = 1,
         njobtot: int = 1,
+        sim_prescale: int = 1,
         **kwargs,
     ):
         """ Instantiate an SNDataset from a space-separated file. The only required
@@ -1339,6 +1322,11 @@ class SNDataset:
                 f"The file {fname} does not have a header row with a column named "
                 "'files'. This column is required."
             )
+        if (isinstance(file_format, str) and file_format.lower() == "snana") or file_format[0].lower() == "snana":
+            first_path = Path(data_root) / sn_list["files"][0].split(",")[0]
+            meta = io.read_snana_ascii_meta(first_path)
+            if "SIM_REDSHIFT_HELIO" in meta:
+                njobtot *= sim_prescale
         use_in_run = np.where((np.arange(sn_list.shape[0]) + 1 - jobid) % njobtot == 0)
         sn_list = sn_list.iloc[use_in_run].reset_index(drop=True)
         if isinstance(file_format, str):
@@ -1363,6 +1351,7 @@ class SNDataset:
                 peakmjd_key=peakmjd_key,
                 file_format=file_format[i],
                 overrides=dict([(key, val[i]) for key, val in overrides.items()]),
+                # Already handled jobid/njobtot/sim_prescale
             )
             ds.append(ds=row_ds)
         return ds
@@ -1376,19 +1365,20 @@ class SNDataset:
         peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
+        sim_prescale: int = 1,
         **kwargs,
     ):
-        ds = SNDataset()
         sn_dict, obs_df = io.read_snana_fits(
             fname,
+            keep_list=keep_list,
+            fluxcal_zpt=fluxcal_zpt,
             jobid=jobid,
-            njobtot=njobtot
+            njobtot=njobtot,
+            sim_prescale=sim_prescale,
         )
         sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
-        if "SIM_GENTYPE" in sn_dict:
-            ds.sim = True
-            for attr in meta_names["sim"]:
-                setattr(ds, attr, np.array([]))
+        sim = "SIM_REDSHIFT_HELIO" in sn_dict
+        ds = SNDataset(sim=sim)
         ds.append(sn_dict=sn_dict, obs_df=obs_df)
         # Cleaning
         ds.recalibrate_fluxcal_zpt()
@@ -1406,6 +1396,7 @@ class SNDataset:
         peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
+        sim_prescale: int = 1,
         **kwargs,
     ):
         """ Instantiate a SNDataset from a path to a LIST file as produced by SNANA.
@@ -1419,25 +1410,28 @@ class SNDataset:
         fits_files = np.where(file_format == "fits")
         ascii_files = np.where(file_format != "fits")
 
-        use_in_run = np.where((np.arange(len(ascii_files[0])) + 1 - jobid) % njobtot == 0)
         ds = SNDataset()
         for sn_file in tqdm(sn_list[fits_files]):
-            file_ds = SNDataset.from_snana_fits(
+            row_ds = SNDataset.from_snana_fits(
                 fname=Path(data_root, sn_file),
-                keep_list=kwargs.get("keep_list", []),
+                keep_list=keep_list,
                 fluxcal_zpt=fluxcal_zpt,
                 peakmjd_key=peakmjd_key,
                 jobid=jobid,
                 njobtot=njobtot,
+                sim_prescale=sim_prescale,
             )
-            ds.append(ds=file_ds)
-        for sn_file in sn_list[ascii_files][use_in_run]:
+            ds.append(ds=row_ds)
+        for sn_file in sn_list[ascii_files]:
             row_ds = SNDataset.from_ascii_files(
                 Path(data_root, sn_file),
                 fluxcal_zpt=fluxcal_zpt,
                 peakmjd_key=peakmjd_key,
                 file_format="SNANA",
                 overrides={},
+                jobid=jobid,
+                njobtot=njobtot,
+                sim_prescale=sim_prescale,
             )
             ds.append(row_ds)
         ds.recalibrate_fluxcal_zpt()
