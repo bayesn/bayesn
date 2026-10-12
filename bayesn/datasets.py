@@ -691,6 +691,10 @@ class SNDataset:
         # compare metadata to make sure numeric values are in agreement.
         indices = self.get_idx(sn_dict["snid"])
         meta = self.get_metadata_subset(idx=indices)
+        # some metadata should be allowed to vary.
+        for key in ("idsurvey", "N_obs"):
+            meta.pop(key, None)
+            sn_dict.pop(key, None)
         utils.assert_dicts_match(meta, sn_dict, flag_missing_data=False)
         # Replace Nones in metadata if sn_dict has actual values.
         for key, val in sn_dict.items():
