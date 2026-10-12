@@ -1348,7 +1348,7 @@ class SEDmodel(object):
         args["outputdir"] = Path(args["outputdir"]).absolute()
         args["photoz"] = args.get("photoz", False)
         args["num_zltn_iter"] = args.get("num_zltn_iter", 4000 if args["photoz"] else 1500)
-        if args["keep_list"] is not None:
+        if isinstance(args["keep_list"], str | Path) and Path(args["keep_list"]).exists():
             keep_list = pd.read_csv(args["keep_list"], comment="#", sep=r"\s+")
             if "CID" in keep_list.columns:
                 keep_list = keep_list["CID"].values
@@ -1357,6 +1357,10 @@ class SEDmodel(object):
             else:
                 keep_list = pd.read_csv(args["keep_list"], header=None)[0].values
             args["keep_list"] = keep_list.astype(str)
+        elif isinstance(args["keep_list"], str):
+            args["keep_list"] = [args["keep_list"]]
+        elif hasattr(args["keep_list"], "__iter__"):
+            args["keep_list"] = list(args["keep_list"])
         else:
             args["keep_list"] = None
 
