@@ -1836,8 +1836,8 @@ class SEDmodel(object):
         self.J_t = self.get_J_t(t)
         self.hsiao_interp = self.get_hsiao_interp(t)
         self.band_weights = self._calculate_band_weights(
-            redshifts=self.dataset.z_helio,
-            ebv=self.dataset.mwebv,
+            redshifts=self.data.z_hel,
+            ebv=self.data.MWEBV,
             lam_shifts=np.zeros(len(self.dataset.unique_bands)+1),
         )
 
