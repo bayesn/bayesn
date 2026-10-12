@@ -191,9 +191,14 @@ def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike], ) -> dict:
     sn_dict:
         A metadata dictionary such as those produced by bayesn.io.read_* methods.
     """
+    # REDSHIFT_CMB and REDSHIFT_FINAL (and errs) both map to z_cmb.
+    # This can create a race condition. Instead, prioritise FINAL.
+    if all(sn_dict.get(f"REDSHIFT_{key}") is not None for key in ("FINAL", "CMB")):
+        sn_dict.pop("REDSHIFT_CMB")
+    if all(sn_dict.get(f"REDSHIFT_{key}_ERR") is not None for key in ("FINAL", "CMB")):
+        sn_dict.pop("REDSHIFT_CMB_ERR")
     # Standardising keys
-    keys = list(sn_dict.keys())  # avoid changing keys during loop
-    for key in keys:
+    for key in list(sn_dict.keys()):
         sn_dict[get_standard_name(key)] = sn_dict.pop(key)
     # Sanitising 0D values.
     for key in sn_dict:
