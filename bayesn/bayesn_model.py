@@ -1334,12 +1334,21 @@ class SEDmodel(object):
                 args[key] = getattr(self, key).tolist()
             elif key == "outputdir":
                 args[key] = "."
-            elif getattr(self, key) is not None:
-                args[key] = getattr(self, key)
+            elif key == "RV":
+                if self.RV is not None:
+                    args["RV"] = float(self.RV)
+                elif self.mu_R is not None:
+                    args["RV"] == "normal"
             elif key == "mu_R":
-                args[key] = float(self.mu_R) if self.mu_R is not None else self.RV
+                args[key] = float(self.mu_R or self.RV)
             elif key == "sigma_R":
-                args[key] = float(self.sigma_R) if self.sigma_R is not None else 0.5
+                args[key] = float(self.sigma_R or 0.5)
+            elif hasattr(self, key):
+                args[key] = getattr(self, key)
+            elif key in default_kwargs:
+                args[key] = default_kwargs[key]
+            else:
+                raise NotImplementedError(f"There is no default value for key {key}.")
 
         # The VI fitting method uses a modified exponential for AV.
         if args.get("fit_method") == "vi":
@@ -1418,15 +1427,13 @@ class SEDmodel(object):
             dict_cmd_args = cmd_args
         else:
             dict_cmd_args = vars(cmd_args)
-        for arg in dict_cmd_args:
-            if arg in ["input", "filters"]:
+        for arg, arg_val in dict_cmd_args.items():
+            if arg in ["input", "filters"] or arg_val is None:
                 continue
-            arg_val = getattr(cmd_args, arg)
-            if arg_val is not None:
-                if arg == "map":
-                    filt_map = np.loadtxt(cmd_args.map, dtype=str)
-                    arg_val = {row[0]: row[1] for row in filt_map}
-                args[arg] = arg_val
+            if arg == "map":
+                filt_map = np.loadtxt(dict_cmd_args["map"], dtype=str)
+                arg_val = {row[0]: row[1] for row in filt_map}
+            args[arg] = arg_val
         return args
 
     def _parse_mode(self, args: dict, verbose: bool = True) -> dict:
@@ -1476,11 +1483,7 @@ class SEDmodel(object):
                 continue
             for key, val in expected_values.items():
                 # hard-coding dust_redshift since it contains the dust substring.
-                if (
-                    substr == "dust"
-                    and "redshift" in args["mode"]
-                    and key == "vary_redshift"
-                ):
+                if substr == "dust" and "redshift" in mode and key == "vary_redshift":
                     val[mode_idx] = True
                 if key not in args:
                     args[key] = val[mode_idx]
@@ -1675,7 +1678,7 @@ class SEDmodel(object):
                 float(args[val_name])
             except (ValueError, TypeError):
                 raise TypeError(
-                    f"{val_name} must be a float-like value. Instead got {val}."
+                    f"{val_name} must be a float-like value. Instead got {args[val_name]}."
                 )
 
         # Warnings for weird configurations that do not break things.
@@ -1714,9 +1717,9 @@ class SEDmodel(object):
             if float(args["uniform_RV_min"]) >= float(args["uniform_RV_max"]):
                 raise ValueError("uniform_RV_min must be less than uniform_RV_max. ")
             if args["infer_dust_properties"]:
-                check_scalar("sigma_uniform")
-                if float(args["sigma_uniform"]) <= 0:
-                    raise ValueError("sigma_uniform must be positive.")
+                check_scalar("sigma_uniform_R")
+                if float(args["sigma_uniform_R"]) <= 0:
+                    raise ValueError("sigma_uniform_R must be positive.")
 
         choice_dict = {
             "data_type": {"flux", "mag"},
@@ -2711,7 +2714,7 @@ class SEDmodel(object):
         tau_z_max: float = 0.5,
         uniform_RV_min: float = 1,
         uniform_RV_max: float = 6,
-        sigma_uniform: float = 0.5,
+        sigma_uniform_R: float = 0.5,
         **kwargs: Any,
     ) -> tuple[Array, Array, Array | None, Array | None, Array | None, Array | None, Array | None, Array | None]:
         """Draw SN population level parameters that may vary by sub-population
@@ -2724,11 +2727,11 @@ class SEDmodel(object):
         if RV == "uniform":
             uniform_RV_min = numpyro.sample(
                 f"uniform_RV_min{suffix}",
-                dist.TruncatedNormal(uniform_RV_min, sigma_uniform, low=0)
+                dist.TruncatedNormal(uniform_RV_min, sigma_uniform_R, low=0)
             )
             uniform_RV_max = numpyro.sample(
                 f"uniform_RV_max{suffix}",
-                dist.TruncatedNormal(uniform_RV_max, sigma_uniform, low=uniform_RV_min)
+                dist.TruncatedNormal(uniform_RV_max, sigma_uniform_R, low=uniform_RV_min)
             )
         elif RV == "normal":
             mu_R = numpyro.sample(f"mu_R{suffix}", dist.Uniform(mu_R_min, mu_R_max))
@@ -2740,7 +2743,7 @@ class SEDmodel(object):
                 dist.Uniform(mu_R_min - mu_R, mu_R_max - mu_R)
             )
             tau_z_grad = numpyro.sample(
-                "tau_z_grad{suffix}",
+                f"tau_z_grad{suffix}",
                 dist.Uniform(tau_z_min, tau_z_max)
             )
         return DustHyperParams(
@@ -2869,7 +2872,7 @@ class SEDmodel(object):
     def _sample_shared_RV(self, dust_pop: DustPop, RV: str | Number) -> DustPop:
         """ Sample the RV used by all SNe within a given population. """
         split = dust_pop.LM is not None
-        suffix = "HM" if split else ""
+        suffix = "_HM" if split else ""
         hm_dust, lm_dust = dust_pop.HM, dust_pop.LM
         if RV == "uniform":
             hm_RV = numpyro.sample(
@@ -2895,7 +2898,7 @@ class SEDmodel(object):
             hm_RV = lm_RV = RV
         hm_dust = DustHyperParams(*hm_dust[:-1], hm_RV)
         if split:
-            lm_dust = DustHyperParams(*lm_dust[:-1], hm_RV)
+            lm_dust = DustHyperParams(*lm_dust[:-1], lm_RV)
         dust_pop = DustPop(hm_dust, lm_dust, dust_pop.HM_flag, dust_pop.sigma0)
         return dust_pop
 
@@ -3273,14 +3276,18 @@ class SEDmodel(object):
         if args['laplace_method'] == 'lm':
             from numpyro.infer.util import initialize_model
             noeps_kwargs, vi_kwargs = [copy.deepcopy(args) for _ in range(2)]
-            noeps_kwargs.update({"fix_eps": True, "rv_type": "global", "RV": self.RV})
+            try:
+                RV = float(args["RV"])
+            except ValueError:
+                RV = self.RV or self.mu_R
+            noeps_kwargs.update({"fix_eps": True, "rv_type": "global", "RV": RV})
             vi_kwargs.update({
                 "fix_eps": False,
                 "AV_dist": zltn.My_Exponential,
                 "muhat_err": 5,
                 "prior_only": False,
                 "rv_type": "global",
-                "RV": self.RV,
+                "RV": RV,
             })
             self._lm_model_info = initialize_model(
                 PRNGKey(0), self._model,
