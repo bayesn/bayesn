@@ -44,12 +44,12 @@ peakmjd_key: PEAKMJD
 jobsplit: null
 save_fit_errors: False
 # A dictionary with keys of metadata parameter names and values of 2-tuples indicating
-# the lower and upper limits beyond which data will be cut. THIS DOES NOT AFFECT THE
-# SAMPLING, ONLY THE FITRES TABLE.
+# the lower and upper limits beyond which data will be cut. The reason why SNe get cut
+# are stored in the SEDmodel.all_table["DROP"] during SEDmodel.process_dataset.
 lc_cuts: {}
 save_summary: False
 # A list of SN names to be retained, with data for all others dropped. If null, retain
-# all SNe.
+# all SNe. Can also be a path to a file with a row per SN to be kept.
 keep_list: null
 # A lower-limit for magnitude errors. The flux equivalent is calculated and applied.
 # This is in magnitude space regardless of data_type being "flux" or "mag".

@@ -1350,16 +1350,15 @@ class SEDmodel(object):
         args["num_zltn_iter"] = args.get("num_zltn_iter", 4000 if args["photoz"] else 1500)
         if args["keep_list"] is not None:
             keep_list = pd.read_csv(args["keep_list"], comment="#", sep=r"\s+")
-            if keep_list.shape[1] == 1:
-                keep_list = pd.read_csv(args["keep_list"], header=None)[0].astype(str).values
+            if "CID" in keep_list.columns:
+                keep_list = keep_list["CID"].values
+            elif "SNID" in keep_list.columns:
+                keep_list = keep_list["SNID"].values
             else:
-                if "CID" in keep_list.columns:
-                    keep_list = keep_list.CID.values
-                elif "SNID" in keep_list.columns:
-                    keep_list = keep_list.SNID.values
-            args["SNID_keep_list"] = keep_list.astype(str)
+                keep_list = pd.read_csv(args["keep_list"], header=None)[0].values
+            args["keep_list"] = keep_list.astype(str)
         else:
-            args["SNID_keep_list"] = None
+            args["keep_list"] = None
 
         for key in {"mode", "fit_method", "laplace_method", "lm_solver"}:
             args[key] = args[key].lower()
@@ -1778,7 +1777,7 @@ class SEDmodel(object):
             ds = SNDataset.from_snana_list(
                 list_file,
                 data_root=data_dir,
-                keep_list=args["SNID_keep_list"],
+                keep_list=args["keep_list"],
                 fluxcal_zpt=self.ZPT,
                 peakmjd_key=args["peakmjd_key"],
                 jobid=args["jobid"],
@@ -1802,20 +1801,23 @@ class SEDmodel(object):
             )
 
         ds.apply_filter_map(args["map"])
-        self._set_used_bands(ds.unique_bands)
         ds.drop_bands(args["drop_bands"])
         ds.drop_by_band_lims(self.band_lim_dict, wave_min=self.model_wave[0], wave_max=self.model_wave[-1])
         ds.cut_by_phot_numeric("phase", "<=", self.tau_knots[0])
         ds.cut_by_phot_numeric("phase", ">=", self.tau_knots[-1])
         ds.cut_by_meta_numeric("z_helio", ">", args["zlim"])
-        if args["keep_list"]:
-            ds.keep_according_to_list(args["keep_list"])
-        if args["SNID_keep_list"]:
-            ds.keep_according_to_list(args["SNID_keep_list"])
         ds.apply_error_floor(args["error_floor"])
+        if args["keep_list"] is not None:
+            ds.keep_according_to_list(args["keep_list"])
+
+        # Making all_table before lc_cuts to store reasons why things were cut
+        self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
+        for key, val in args["lc_cuts"].items():
+            ds.cut_by_meta_numeric(key, "<", val[0])
+            ds.cut_by_meta_numeric(key, ">", val[1])
 
         self.dataset = ds
-        self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
+        self._set_used_bands(ds.unique_bands)
         self.lcplot_data = ds.make_lcplot_data(args["num_lcplot"])
         self.data = device_put(ds.make_bayesn_data(
             data_type=args["data_type"],
