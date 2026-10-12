@@ -750,9 +750,8 @@ class SNDataset:
         self.photometry = self.photometry[~self.photometry["snid"].isin(snids)].reset_index(drop=True)
         for attr in attrs_to_prune:
             setattr(self, attr, np.delete(getattr(self, attr), idx))
-        counts = self.photometry["snid"].value_counts()
-        N_obs = np.array([counts.get(s, 0) for s in self.snid], dtype=int)
-        # self.phot_idx = np.append(0, np.cumsum(N_obs))
+        for key in self.other_metadata:
+            self.other_metadata[key] = np.delete(self.other_metadata[key], idx)
         self.N_sn -= len(idx)
 
     def keep_according_to_list(self, keep_list: list[str, ...]) -> None:
