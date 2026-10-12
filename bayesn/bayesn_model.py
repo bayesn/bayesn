@@ -1800,6 +1800,7 @@ class SEDmodel(object):
                 table_path,
                 data_root=data_root,
                 fluxcal_zpt=self.ZPT,
+                peakmjd_key=args["peakmjd_key"],
                 jobid=args["jobid"],
                 njobtot=args["njobtot"],
             )

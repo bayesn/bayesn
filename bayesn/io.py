@@ -28,19 +28,6 @@ import sncosmo
 
 from bayesn import constants, utils
 
-sn_dict_keys = (
-    # SNANA keys
-    "SNID", "RA", "DECL", "MWEBV", "HOSTGAL_LOGMASS", "REDSHIFT_HELIO", "REDSHIFT_CMB",
-    "REDSHIFT_FINAL", "VPEC", "VPEC_ERR", "SEARCH_PEAKMJD", "ZP_FLUXCAL",
-    # Added keys
-    "MWEBV_ERR", "HOSTGAL_LOGMASS_ERR", "REDSHIFT_HELIO_ERR", "REDSHIFT_CMB_ERR",
-    "REDSHIFT_FINAL_ERR",
-)
-aliases = {
-    "DECL": "DEC",
-    "SEARCH_PEAKMJD": "PEAKMJD",
-    "ZP_FLUXCAL": "FLUXCAL_ZPT",
-}
 obs_df_columns = ["MJD", "FLT", "flux", "flux_err", "mag", "mag_err"]  # list for df indexing
 
 ###############
@@ -310,14 +297,11 @@ def read_snana_ascii(
             mag_err: Uncertainty on those magnitudes.
     """
     # --- get sn_dict from file ---
-    file_meta = read_snana_ascii_meta(fname=copy.deepcopy(fname), tablename=tablename, comment=comment)
-    sn_dict = odict()
-    for key in set(file_meta).union(set(sn_dict_keys)):
-        sn_dict[key] = file_meta.get(key)
+    sn_dict = read_snana_ascii_meta(fname=copy.deepcopy(fname), tablename=tablename, comment=comment)
     if isinstance(fluxcal_zpt, Number):
         sn_dict["ZP_FLUXCAL"] = fluxcal_zpt
     else:
-        fluxcal_zpt = sn_dict["ZP_FLUXCAL"] = file_meta.get("ZP_FLUXCAL", 27.5)
+        sn_dict["ZP_FLUXCAL"] = sn_dict.get("ZP_FLUXCAL", 27.5)
     for key in ("VARLIST", "FILTERS"):
         sn_dict.pop(key, None)
 
@@ -334,7 +318,7 @@ def read_snana_ascii(
     obs_df["mag"], obs_df["mag_err"] = utils.flux_to_mag(
             obs_df["flux"].values.astype(float),
             obs_df["flux_err"].values.astype(float),
-            fluxcal_zpt,
+            sn_dict["ZP_FLUXCAL"],
             nan_val=-99  # for backwards compatibility/consistency.
             # mags and mag_errs for negative flux should probably be nans at some point.
     )
@@ -489,6 +473,7 @@ def read_snpy(
     fname: str | Path | StringIO,
     fluxcal_zpt: Number = 27.5,
     comment: str = "#",
+    **kwargs,
 ) -> tuple[odict[str, str | Number], pd.DataFrame]:
     """ Given an ascii file in the SNooPy format, read it, extract relevant data, and
     return the data in two standard formats. SN-level data are returned as a dictionary
@@ -557,7 +542,6 @@ def read_snpy(
     z_hel, ra, dec = map(lambda x: float(x), (z_hel, ra, dec))
     z_cmb = utils.convert_z(z_hel, ra, dec, z_in_type="hel")
     MWEBV = utils.get_MWEBV(ra, dec)
-    # sn_dict = odict(zip(sn_dict_keys, [None for _ in sn_dict_keys]))
     sn_dict = odict({
         "SNID": SNID,
         "RA": ra,
