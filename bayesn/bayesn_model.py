@@ -22,7 +22,7 @@ from numpyro.infer.autoguide import AutoDelta, AutoMultivariateNormal, AutoDiago
 import h5py
 import sncosmo
 from .spline_utils import invKD_irr, spline_coeffs_irr, spline_coeffs_irr_vec
-from .bayesn_io import write_snana_lcfile
+from .bayesn_io import write_snana_lcfile, read_systematics, write_systematics
 from .lm_optim import run_lm_laplace_gn, compute_gn_scale_tril
 import functools
 from numpyro.handlers import substitute, trace
@@ -123,47 +123,20 @@ def load_training_systematics(model_dir):
                 'band_shift_names': [str(nm) for nm in d['band_shift_names']]}
 
 
-def write_systematics(stem, delta_mu, sn_list, labels, fmt):
+def merge_systematics(syst_files, output=None, save=True):
     """
-    Write a fit's per-SN delta_mu table as {stem}.syst.npz and/or {stem}.syst.txt. The text form is a
-    header row of column labels (first entry CID) followed by one row per SN; both carry the same arrays.
-    """
-    if len(labels) != delta_mu.shape[1]:
-        raise ValueError(f'{len(labels)} column labels for {delta_mu.shape[1]} columns of delta_mu')
-    if fmt in ('npz', 'both'):
-        np.savez(f'{stem}.syst.npz', delta_mu=delta_mu, sn_list=np.array(sn_list, dtype=str),
-                 labels=np.array(labels, dtype=str))
-    if fmt in ('txt', 'both'):
-        with open(f'{stem}.syst.txt', 'w') as f:
-            f.write(' '.join(['CID'] + list(labels)) + '\n')
-            for sn, row in zip(sn_list, delta_mu):
-                f.write(' '.join([str(sn)] + [f'{v:.10e}' for v in row]) + '\n')
-
-
-def read_systematics(path):
-    """Read a .syst.npz or .syst.txt file back to (delta_mu, sn_list, labels)."""
-    if path.endswith('.npz'):
-        with np.load(path) as d:
-            return d['delta_mu'], d['sn_list'], d['labels']
-    rows = np.loadtxt(path, dtype=str, ndmin=2)
-    return rows[1:, 1:].astype(float), rows[1:, 0], rows[0, 1:]
-
-
-def merge_systematic_covariance(syst_files):
-    """
-    Merge per-SN delta_mu tables into total and per-systematic covariances. Rows follow input file
-    order, which must match the Hubble diagram. Shared labels are aligned; missing responses are zero.
-    Repeated labels are matched in their order within the group, so training axes must come from the
-    same model artifact. Writes the upper triangle (row-major, float32) in the input formats.
+    Merge response rows in file order, aligning shared labels and zero-filling missing ones.
+    Repeated labels are matched in their order within the group; training must use the same artifact.
+    Saves one .SYST.NPZ/.SYST.TEXT table unless save=False, as used by make_covariance.
     """
     if not syst_files:
         raise ValueError('No systematics files to merge')
     by_stem = {}  # one file per job, preferring npz when both formats are supplied
     for syst_file in syst_files:
-        file_stem = re.sub(r'\.syst\.(npz|txt)$', '', syst_file)
-        if file_stem not in by_stem or syst_file.endswith('.npz'):
+        file_stem = re.sub(r'\.syst\.(npz|text)$', '', syst_file, flags=re.IGNORECASE)
+        if file_stem not in by_stem or syst_file.lower().endswith('.npz'):
             by_stem[file_stem] = syst_file
-    jobs, column_indices, group_sizes = [], {}, {}
+    jobs, sn_lists, column_indices, group_sizes = [], [], {}, {}
     for syst_file in by_stem.values():
         job_rows, sn_list, labels_i = read_systematics(syst_file)
         if job_rows.ndim != 2 or job_rows.shape != (len(sn_list), len(labels_i)):
@@ -185,6 +158,7 @@ def merge_systematic_covariance(syst_files):
                                  f'shared systematics must have the same axes in every file')
             group_sizes[label] = count
         jobs.append((job_rows, job_columns))
+        sn_lists.append(sn_list)
 
     delta_mu = np.zeros((sum(rows.shape[0] for rows, _ in jobs), len(column_indices)))
     start = 0
@@ -193,23 +167,69 @@ def merge_systematic_covariance(syst_files):
         delta_mu[start:stop, job_columns] = rows
         start = stop
     labels = np.array([label for label, _ in column_indices], dtype=str)
+    sn_list = np.concatenate(sn_lists).astype(str)
+    if not save:
+        return delta_mu, sn_list, labels
+    stem = output or re.sub(r'(_SPLIT\d+)?\.syst\.(npz|text)$', '', syst_files[0], flags=re.IGNORECASE)
+    formats = {'npz' if f.lower().endswith('.npz') else 'txt' for f in syst_files}
+    for fmt in formats:
+        extension = 'NPZ' if fmt == 'npz' else 'TEXT'
+        if any(os.path.abspath(f) == os.path.abspath(f'{stem}.SYST.{extension}') for f in syst_files):
+            raise ValueError('Merged output would overwrite an input; give a different output path')
+    write_systematics(stem, delta_mu, sn_list, labels, 'both' if len(formats) == 2 else next(iter(formats)))
+    written = ', '.join('NPZ' if fmt == 'npz' else 'TEXT' for fmt in sorted(formats))
+    print(f'Merged {delta_mu.shape[0]} SNe over {delta_mu.shape[1]} columns into '
+          f'{os.path.basename(stem)}.SYST ({written})')
+    return delta_mu, sn_list, labels
 
-    formats = {'npz' if f.endswith('.npz') else 'txt' for f in syst_files}
+
+def make_covariance(syst_files, output=None, reference_table=None):
+    """
+    Construct total and per-systematic covariances from survey responses, in file order or the
+    selection and order of reference_table. Writes the upper triangle (row-major, float32).
+    """
+    delta_mu, sn_list, labels = merge_systematics(syst_files, save=False)
+    if reference_table is not None:
+        with open(reference_table) as f:
+            for header_row, line in enumerate(f):
+                words = line.split()
+                if words and words[0] in ('VARNAMES:', 'CID', 'SNID'):
+                    break
+            else:
+                raise ValueError(f'{reference_table}: no CID or SNID table header')
+        table = pd.read_csv(reference_table, skiprows=header_row, comment='#', sep=r'\s+',
+                            dtype=str, keep_default_na=False)
+        cid_column = next((key for key in ('CID', 'SNID') if key in table), None)
+        if cid_column is None or table.empty:
+            raise ValueError(f'{reference_table}: no SN rows with a CID or SNID column')
+        cids = table[cid_column].to_numpy()
+        if len(set(cids)) != len(cids):
+            raise ValueError(f'{reference_table}: duplicate CIDs make row matching ambiguous')
+        if len(set(sn_list)) != len(sn_list):
+            raise ValueError('Response tables contain duplicate CIDs; reference matching is ambiguous')
+        row_indices = {cid: i for i, cid in enumerate(sn_list)}
+        missing = [cid for cid in cids if cid not in row_indices]
+        if missing:
+            raise ValueError(f'{reference_table}: {len(missing)} CIDs have no systematic response: {missing[:5]}')
+        delta_mu = delta_mu[[row_indices[cid] for cid in cids]]
+
+    formats = {'npz' if f.lower().endswith('.npz') else 'txt' for f in syst_files}
 
     def write(cov, path):  # the same arrays either way: the number of SNe, then the upper triangle
         cov_triu = cov[np.triu_indices_from(cov)].astype(np.float32)
         if 'npz' in formats:
             np.savez(path, nsn=[cov.shape[0]], cov=cov_triu, allow_pickle=False)
         if 'txt' in formats:
-            with open(f'{path}.txt', 'w') as f:
+            with open(f'{path}.TEXT', 'w') as f:
                 f.write(f'{cov.shape[0]}\n')
                 f.write('\n'.join(f'{v:.10e}' for v in cov_triu) + '\n')
 
     # named after the first file, beside it: {version}_{fitopt}_COVSYS.npz, split or not
-    cov_file = re.sub(r'(_SPLIT\d+)?\.syst\.(npz|txt)$', '', syst_files[0]) + '_COVSYS'
+    cov_file = output or re.sub(r'(_SPLIT\d+)?\.syst\.(npz|text)$', '', syst_files[0],
+                                flags=re.IGNORECASE) + '_COVSYS'
     write(delta_mu @ delta_mu.T, cov_file)
-    written = ', '.join(sorted(formats))
-    print(f'Merged {len(by_stem)} systematics files ({delta_mu.shape[0]} SNe) into '
+    written = ', '.join('npz' if fmt == 'npz' else 'TEXT' for fmt in sorted(formats))
+    print(f'Constructed covariance for {delta_mu.shape[0]} SNe in '
           f'{os.path.basename(cov_file)} ({written})')
     for label in dict.fromkeys(str(l) for l in labels):  # one file per systematic, contributions are additive
         cols = delta_mu[:, labels == label]
@@ -2904,9 +2924,9 @@ class SEDmodel(object):
             write_systematics(os.path.join(args['outputdir'], args['outfile_prefix']), delta_mu, self.sn_list,
                               self._syst['col_labels'], args['syst_format'])
             exts = ['npz', 'txt'] if args['syst_format'] == 'both' else [args['syst_format']]
-            written = ', '.join(f'{args["outfile_prefix"]}.syst.{e}' for e in exts)
+            written = ', '.join(f'{args["outfile_prefix"]}.SYST.{"NPZ" if e == "npz" else "TEXT"}' for e in exts)
             print(f'Systematics: per-SN Delta-mu over {delta_mu.shape[1]} columns written to {written}; '
-                  f'merge jobs with --merge_systematics')
+                  f'merge jobs with --merge_systematics, then construct covariance with --make_covariance')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
@@ -3286,7 +3306,7 @@ class SEDmodel(object):
                 self.lcplot_data = pd.concat([self.lcplot_data] + fit_dfs, ignore_index=True)
 
                 self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
-                self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT'),
+                self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT.TEXT'),
                                         index=False)
 
             # Create FITRES file
@@ -3357,6 +3377,7 @@ class SEDmodel(object):
                 'NEVT_LC_CUTS': self.data.shape[-1],
                 'NEVT_LCFIT_CUTS': int(self.data.shape[-1] - drop_count),
                 'CPU_MINUTES': round(cpu_time / 60, 2),
+                'SYSTEMATICS': self._syst is not None,
             }
             with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)

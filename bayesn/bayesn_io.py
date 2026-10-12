@@ -1,6 +1,5 @@
 """
-BayeSN I/O Utilities. Currently defines function for writing output SNANA-format light curves for simulated light
-curves
+BayeSN I/O utilities for SNANA light curves and systematics response tables.
 """
 
 import os
@@ -8,6 +7,32 @@ import numpy as np
 import astropy.table as at
 import sncosmo
 import time
+
+
+def write_systematics(stem, delta_mu, sn_list, labels, fmt):
+    """
+    Write a fit's per-SN delta_mu table as {stem}.SYST.NPZ and/or {stem}.SYST.TEXT. The text form is a
+    header row of column labels (first entry CID) followed by one row per SN; both carry the same arrays.
+    """
+    if len(labels) != delta_mu.shape[1]:
+        raise ValueError(f'{len(labels)} column labels for {delta_mu.shape[1]} columns of delta_mu')
+    if fmt in ('npz', 'both'):
+        with open(f'{stem}.SYST.NPZ', 'wb') as f:
+            np.savez(f, delta_mu=delta_mu, sn_list=np.array(sn_list, dtype=str), labels=np.array(labels, dtype=str))
+    if fmt in ('txt', 'both'):
+        with open(f'{stem}.SYST.TEXT', 'w') as f:
+            f.write(' '.join(['CID'] + list(labels)) + '\n')
+            for sn, row in zip(sn_list, delta_mu):
+                f.write(' '.join([str(sn)] + [f'{v:.10e}' for v in row]) + '\n')
+
+
+def read_systematics(path):
+    """Read a .SYST.NPZ or .SYST.TEXT file back to (delta_mu, sn_list, labels)."""
+    if path.lower().endswith('.npz'):
+        with np.load(path) as d:
+            return d['delta_mu'], d['sn_list'], d['labels']
+    rows = np.loadtxt(path, dtype=str, ndmin=2)
+    return rows[1:, 1:].astype(float), rows[1:, 0], rows[0, 1:]
 
 
 def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio, z_cmb, z_cmb_err, ebv_mw, ra=None,

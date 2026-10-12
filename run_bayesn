@@ -4,7 +4,7 @@ import os
 import sys
 
 from bayesn import SEDmodel
-from bayesn.bayesn_model import merge_systematic_covariance
+from bayesn.bayesn_model import merge_systematics, make_covariance
 import argparse
 from ruamel.yaml import YAML
 
@@ -45,7 +45,15 @@ parser.add_argument('--num_lcplot', type=float, required=False)
 parser.add_argument('--save_summary', type=float, required=False)
 #CLI overrides for systematics begin here. 
 parser.add_argument('--systematic', dest='systematics_variations', action='append', nargs='+')
-parser.add_argument('--merge_systematics', type=str, nargs='+', required=False)
+merge_options = parser.add_mutually_exclusive_group()
+merge_options.add_argument('--merge_systematics', type=str, nargs='+',
+                           help='Merge split response files into one survey response table')
+merge_options.add_argument('--make_covariance', type=str, nargs='+',
+                           help='Construct joint covariance from survey response tables')
+parser.add_argument('--output', type=str,
+                    help='Output path and base name for merging; format extensions are added automatically')
+parser.add_argument('--reference_table', type=str,
+                    help='FITRES/HD table selecting and ordering SNe for --make_covariance')
 parser.add_argument('--syst_format', type=str, choices=['npz', 'txt', 'both'], required=False)
 parser.add_argument('--magobs_shift_zp_params', type=float, nargs=3, required=False)
 parser.add_argument('--redshift_final_shift', type=float, required=False)
@@ -54,9 +62,25 @@ parser.add_argument('--mwebv_shift', type=float, required=False)
 
 cmd_args = parser.parse_args()
 
+if cmd_args.outfile_prefix is not None and (cmd_args.merge_systematics is not None or
+                                          cmd_args.make_covariance is not None):
+    parser.error('--outfile_prefix is for fitting; use --output for merging')
+
 if cmd_args.merge_systematics is not None:
-    merge_systematic_covariance(cmd_args.merge_systematics)
+    if cmd_args.reference_table is not None:
+        parser.error('--reference_table is only used with --make_covariance')
+    merge_systematics(cmd_args.merge_systematics, cmd_args.output)
     sys.exit(0)
+
+if cmd_args.make_covariance is not None:
+    make_covariance(cmd_args.make_covariance, cmd_args.output, cmd_args.reference_table)
+    sys.exit(0)
+
+if cmd_args.reference_table is not None:
+    parser.error('--reference_table is only used with --make_covariance')
+
+if cmd_args.output is not None:
+    parser.error('--output is only used with --merge_systematics or --make_covariance')
 
 if cmd_args.input is None:
     parser.error('input is required')
