@@ -464,8 +464,13 @@ def read_snana_fits(
     phot_df = phot_df.iloc[keep].reset_index(drop=True)
     sn_idx = sn_idx[keep]
 
-    phot_df['mag'] = fluxcal_zpt - 2.5 * np.log10(phot_df['flux'].values)
-    phot_df['mag_err'] = (2.5 / np.log(10)) * phot_df['flux_err'].values / phot_df['flux'].values
+    phot_df['mag'], phot_df['mag_err'] = utils.flux_to_mag(
+            flux=phot_df['flux'].values.astype(float),
+            flux_err=phot_df['flux_err'].values.astype(float),
+            zp=fluxcal_zpt,
+            nan_val=-99  # for backwards compatibility/consistency.
+            # mags and mag_errs for negative flux should probably be nans at some point.
+        )
     phot_df["snid"] = snid_decoded[sn_idx]
     return sn_dict, phot_df
 
