@@ -87,6 +87,10 @@ def get_standard_name(name: str) -> str:
         return name
     misc = {
         # metadata names
+        "zhel":                "z_hubble",
+        "zhel_err":            "z_hubble_err",
+        "zhd":                 "z_hubble",
+        "zhd_err":             "z_hubble_err",
         "redshift_final":      "z_cmb",
         "redshift_final_err":  "z_cmb_err",
         "right_ascension":     "ra",
@@ -98,11 +102,17 @@ def get_standard_name(name: str) -> str:
         "tmax":                "peak_mjd",
         "hostgal_logmass":     "host_logmass",
         "hostgal_logmass_err": "host_logmass_err",
+        "vpecerr":             "vpec_err",
         "survey":              "idsurvey",
+        "nepoch":              "N_obs",
+        "nobs":                "N_obs",
+        "n_obs":               "N_obs",
         "sim_dlmu":            "sim_dlmags",
         "sim_template_index":  "sim_template_ids",
         "sim_av":              "sim_AVs",
         "sim_rv":              "sim_RVs",
+        "trestmin":            "phase_min",
+        "trestmax":            "phase_max",
         # photometry columns
         "fluxcal":             "flux",
         "fluxcalerr":          "flux_err",
@@ -336,10 +346,22 @@ class SNDataset:
         return np.array([counts.get(s, 0) for s in self.snid], dtype=int)
 
     @property
-    def phot_idx(self):
+    def phot_idx(self) -> np.ndarray[int, ...]:
         if not len(self.photometry):
             return np.array([0])
         return np.append(0, np.cumsum(self.N_obs))
+
+    @property
+    def phase_min(self) -> np.ndarray[float | None, ...]:
+        if "phase" not in self.photometry.columns:
+            return np.full(self.N_sn, None)
+        return self.photometry.groupby("snid")["phase"].transform("min").unique()
+
+    @property
+    def phase_max(self) -> np.ndarray[float | None, ...]:
+        if "phase" not in self.photometry.columns:
+            return np.full(self.N_sn, None)
+        return self.photometry.groupby("snid")["phase"].transform("max").unique()
 
     ######################
     ### Initialisation ###
@@ -719,6 +741,8 @@ class SNDataset:
             The index (or indices) of the SN(e) to be removed.
         """
         idx = np.atleast_1d(self._parse_snid_idx_args(snid, idx))
+        if not len(idx):
+            return
         snids = self.snid[idx]
         attrs_to_prune = meta_names["str"] + meta_names["num"]
         if self.sim:
@@ -819,7 +843,7 @@ class SNDataset:
         val: Number,
         inplace: bool = True,
         use_defaults: bool = False
-    ) -> None | tuple[dict[str, str | Number | ArrayLike], pd.DataFrame, np.ndarray]:
+    ) -> None | tuple[dict[str, str | Number | ArrayLike], pd.DataFrame]:
         """ Remove data from SNe selected based on numeric metadata.
 
         Parameters
@@ -838,13 +862,19 @@ class SNDataset:
             If True, replace metadata stored as None with the default values in
             default_values when determining cuts.
         """
-        if name not in meta_names["num"] and name != "N_obs":
-            raise ValueError(
-                f"{name} not recognised. "
-                f"Valid options are {meta_names['num']+meta_names['sim']}."
-            )
+        old_name = name
+        name = get_standard_name(old_name)
         defaults = default_values if use_defaults else {}
-        meta_arr = [defaults[name] if x is None else x for x in getattr(self, name)]
+        if hasattr(self, name) and len(getattr(self, name)) == self.N_sn:
+            meta_arr = [defaults[name] if x is None else x for x in getattr(self, name)]
+        elif name.startswith("snrmax"):
+            idx = int(name.strip("snrmax"))
+            meta_arr = [self.calculate_snrmaxes(snid, N=idx)[idx-1] for snid in self.snid]
+        else:
+            raise ValueError(
+                f"{old_name} not recognised. Valid options are {meta_names['num']}, "
+                f"{meta_names['sim']}, N_obs, or SNRMAXN for int N."
+            )
         drop = utils.where_logic(arr=meta_arr, val=val, logic=logic)[0]
         if not inplace:
             keep = list(set(np.arange(self.N_sn)).difference(drop))
@@ -1455,14 +1485,7 @@ class SNDataset:
             idsurvey = meta["idsurvey"]
         else:
             idsurvey = [idsurvey_overwrite,] * self.N_sn
-        t_ranges = np.zeros((self.N_sn, 2))
-        snrmaxes = np.zeros((self.N_sn, 3))
-        for i in range(self.N_sn):
-            snid = self.snid[i]
-            phot = self.get_phot_subset(snid)
-            snrmaxes[i] = self.calculate_snrmaxes(snid, N=3, default_value=-99)
-            if version_photometry:  # can be a bit lazy if not using t_ranges
-                t_ranges[i] = phot["phase"].min(), phot["phase"].max()
+        snrmaxes = np.array([self.calculate_snrmaxes(snid, N=3, default_value=-99) for snid in self.snid])
         arr_dict = {
             "VARNAMES:": varlist,
             "CID": meta["snid"],
@@ -1486,8 +1509,8 @@ class SNDataset:
             arr_dict.update({
                 "SEARCH_PEAKMJD": self.peak_mjd,
                 "NEPOCH": self.N_obs,
-                "TRESTMIN": t_ranges[:,0],
-                "TRESTMAX": t_ranges[:,1],
+                "TRESTMIN": self.phase_min,
+                "TRESTMAX": self.phase_max,
             })
         if self.sim:
             arr_dict.update(dict(zip(
@@ -1541,7 +1564,7 @@ class SNDataset:
             "REDSHIFT": "zHD",
             "SNRMAX": "SNRMAX1",
             "ZHD": "zHD",
-            "ZHHD_ERR": "zHDERR",
+            "ZHD_ERR": "zHDERR",
             "ZHEL": "zHEL",
             "ZHEL_ERR": "zHELERR",
         }
@@ -1557,12 +1580,12 @@ class SNDataset:
                     keep = (fitres_table[param] < low) | (fitres_table[param] > high)
                 else:
                     keep = (fitres_table[param] > low) & (fitres_table[param] < high)
-            drop = (1 - keep).sum()
-            # Record what cut caused a row to be dropped.
-            all_table.loc[
-                all_table["CID"].isin(fitres_table[~keep]["CID"]), "DROP"
-            ] = param_cut
-            fitres_table = fitres_table[keep]
+                drop = (1 - keep).sum()
+                # Record what cut caused a row to be dropped.
+                all_table.loc[
+                    all_table["CID"].isin(fitres_table[~keep]["CID"]), "DROP"
+                ] = param_cut
+                fitres_table = fitres_table[keep]
         return fitres_table, all_table
 
     def make_lcplot_data(self, N: None | int = None) -> pd.DataFrame:
