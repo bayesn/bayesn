@@ -302,6 +302,19 @@ class TestAttributesProperties:
         ))
         assert_dicts_match(ref_meta, dataset_sim.metadata)
 
+    def test_phase_min_max(self, sample_data_two_sne, dataset_two_sne):
+        test_ds = copy.deepcopy(dataset_two_sne)
+        assert "phase" not in test_ds.photometry.columns
+        npt.assert_equal(dataset_two_sne.phase_min, np.full(dataset_two_sne.N_sn, None))
+        npt.assert_equal(dataset_two_sne.phase_max, np.full(dataset_two_sne.N_sn, None))
+        mask = test_ds.photometry["snid"] == "test0"
+        for idx, m in enumerate((mask, ~mask)):
+            test_ds.photometry.loc[m, "phase"] = (test_ds.photometry["mjd"][m] - test_ds.peak_mjd[idx])/(1+test_ds.z_helio[idx])
+        for idx, m in enumerate((mask, ~mask)):
+            assert test_ds.phase_min[idx] == test_ds.photometry["phase"][m].min()
+            assert test_ds.phase_max[idx] == test_ds.photometry["phase"][m].max()
+
+
 class TestDataAddition:
     def test_append_new_single(self, sample_data_single_sn, dataset_single_sn):
         sn_dict, obs_df = sample_data_single_sn
@@ -632,6 +645,21 @@ class TestDataRemoval:
         with pytest.raises(ValueError, match="foo not recognised."):
             dataset_sim.cut_by_phot_numeric("foo", "<", 1)
 
+    def test_cut_by_meta_numeric_snrmax(self, dataset_sim):
+        test_ds = copy.deepcopy(dataset_sim)
+        snrmaxes = np.array([test_ds.calculate_snrmaxes(snid, N=3)[2] for snid in test_ds.snid])
+        high_idx = np.where(snrmaxes > np.average(snrmaxes))[0]
+        ref_meta = test_ds.get_metadata_subset(idx=high_idx)
+        ref_phot = test_ds.get_phot_subset(idx=high_idx)
+        test_meta, test_phot = test_ds.cut_by_meta_numeric("SNRMAX3", "<=", np.average(snrmaxes), inplace=False)
+        assert test_ds == dataset_sim
+        assert_dicts_match(test_meta, ref_meta)
+        pdt.assert_frame_equal(test_phot, ref_phot)
+        test_ds.cut_by_meta_numeric("SNRMAX3", "<=", np.average(snrmaxes), inplace=True)
+        assert test_ds != dataset_sim
+        assert_dicts_match(test_ds.metadata, ref_meta)
+        pdt.assert_frame_equal(test_ds.photometry, ref_phot)
+
 class TestAstroGetter:
     def test_calculate_snrmaxes(self, dataset_two_sne):
         N_extra = 2
@@ -904,9 +932,10 @@ class TestFactoryMethods:
         with pytest.raises(ValueError, match="file_format"):
             test_ds = SNDataset.from_ascii_files(path, file_format="unsupported_format")
 
-    def test_from_ascii_wrong_peakmjd_key(self):
+    def test_from_ascii_multiple_peakmjd_keys(self):
         path = TEST_DIR / "training_data/Foundation_DR1_2016W.txt"
-        test_ds = SNDataset.from_ascii_files(path, file_format="SNANA", peakmjd_key=["missing_key",])
+        with pytest.raises(ValueError, match="Multiple peakmjd_keys found"):
+            test_ds = SNDataset.from_ascii_files(path, file_format="SNANA", peakmjd_key="MWEBV")
 
     def test_from_multi_ascii(self):
         paths = [TEST_DIR / f"training_data/{fname}" for fname in ("Foundation_DR1_2016W.txt", "CSP_SN2004dt.snpy")]

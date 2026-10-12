@@ -167,11 +167,11 @@ def clean_peakmjd_key(
     peak_mjd will be replaced.
     """
     if isinstance(peakmjd_key, str):
-        peakmjd_key = [peakmjd_key,]
-    default_keys = ["search_peakmjd", "peakmjd", "pkmjd", "tmax"]
-    if peakmjd_key is None:
+        peakmjd_key = [peakmjd_key]
+    elif peakmjd_key is None:
         peakmjd_key = []
-    peakmjd_key += default_keys
+    default_keys = ["search_peakmjd", "peakmjd", "pkmjd", "tmax"]
+    peakmjd_key = [key.lower() for key in peakmjd_key] + default_keys
     found_keys = [key for key in sn_dict if key.lower() in peakmjd_key]
     if len(found_keys) > 1:
         raise ValueError(
@@ -355,13 +355,13 @@ class SNDataset:
     def phase_min(self) -> np.ndarray[float | None, ...]:
         if "phase" not in self.photometry.columns:
             return np.full(self.N_sn, None)
-        return self.photometry.groupby("snid")["phase"].transform("min").unique()
+        return self.photometry.groupby("snid", observed=True)["phase"].transform("min").unique()
 
     @property
     def phase_max(self) -> np.ndarray[float | None, ...]:
         if "phase" not in self.photometry.columns:
             return np.full(self.N_sn, None)
-        return self.photometry.groupby("snid")["phase"].transform("max").unique()
+        return self.photometry.groupby("snid", observed=True)["phase"].transform("max").unique()
 
     ######################
     ### Initialisation ###
@@ -1271,8 +1271,6 @@ class SNDataset:
         # Support non-array values.
         if isinstance(fname, str | Path):
             fname = [fname,]
-        if isinstance(peakmjd_key, str):
-            peakmjd_key = [peakmjd_key,]
         use_in_run = np.where((np.arange(len(fname)) + 1 - jobid) % njobtot == 0)
         fname = np.array(fname)[use_in_run]
         if isinstance(file_format, str):
@@ -1293,7 +1291,7 @@ class SNDataset:
                     f"{fmt} in file_format {file_format} not recognised. Use snana, "
                     "snpy, or snoopy, all case-insensitive."
                 )
-            sn_dict, obs_df = read_fn(fname=f, fluxcal_zpt=fluxcal_zpt)
+            sn_dict, obs_df = read_fn(fname=f, fluxcal_zpt=fluxcal_zpt, **kwargs)
             sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
             ds.append(sn_dict=sn_dict, obs_df=obs_df)
         ds.photometry.reset_index(drop=True, inplace=True)
@@ -1372,8 +1370,6 @@ class SNDataset:
         njobtot: int = 1,
         **kwargs,
     ):
-        if isinstance(peakmjd_key, str):
-            peakmjd_key = [peakmjd_key,]
         ds = SNDataset()
         sn_dict, obs_df = io.read_snana_fits(
             fname,
