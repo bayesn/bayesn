@@ -3587,7 +3587,7 @@ class SEDmodel(object):
                 n_dupe = batch_size - n_real
                 batch_data = ObsData(*[
                     np.append(real, np.repeat(dupe, n_dupe, axis=1), axis=1)
-                    if len(dupe.shape) == 2 else np.append(real, np.repeat(dupe, n_dupe))
+                    if dupe.ndim == 2 else np.append(real, np.repeat(dupe, n_dupe))
                     for real, dupe in zip(real_batch_data, dupe_batch_data)
                 ])
                 batch_weights = np.empty(
@@ -3607,11 +3607,11 @@ class SEDmodel(object):
         expand_dim = False
         for key, val in samples.items():
             val = np.squeeze(val)
-            if len(val.shape) == 1:  # In case fitting only one object
+            if val.ndim == 1:  # In case fitting only one object
                 expand_dim = True
             if expand_dim:
                 val = val[None, ...]
-            if len(val.shape) == 3:
+            if val.ndim == 3:
                 samples[key] = val.transpose(1, 2, 0)
             else:
                 samples[key] = val.transpose()
@@ -3940,21 +3940,9 @@ class SEDmodel(object):
         self.J_t = self.get_J_t(self.data.mjd)
         self.hsiao_interp = self.get_hsiao_interp(self.data.mjd)
 
-        if "mode" not in kwargs:
-            expected_fitting = {
-                "infer_dust_properties": False,
-                "train_new_model": False,
-                "fix_tmax": False,
-                "vary_redshift": False,
-            }
-            if any(kwargs.get(k) is not None and kwargs.get(k) != v for k, v in expected_fitting.items()):
-                kwargs["mode"] = "custom"
-            else:
-                kwargs["mode"] = "fitting"
-        # Required for parse_args to nnot throw an error.
+        # Required for parse_args to not throw an error.
         kwargs.update({"data_root": ".", "data_table": None})
         kwargs = self.parse_args(kwargs, {}, verbose=verbose)
-        kwargs["shared_RV"], kwargs["RV"] = self._get_rv_type(kwargs, verbose=verbose)
         kwargs["muhat_err"] = 5
 
         nuts_kernel = NUTS(
@@ -4044,11 +4032,13 @@ class SEDmodel(object):
         if args["fix_tmax"]:
             samples["tmax"] = np.zeros_like(samples["Ds"])
         if args["fix_eps"]:
-            samples["eps"] = np.zeros((*samples["Ds"].shape[:2], self.N_knots_sig, samples["Ds"].shape[2]))
+            samples["eps_tform"] = np.zeros((*samples["Ds"].shape[:2], self.N_knots_sig, samples["Ds"].shape[2]))
         if args["fix_theta"] is not None:
             samples["theta"] = np.full_like(samples["Ds"], args["fix_theta"])
         if args["fix_AV"] is not None:
             samples["AV"] = np.full_like(samples["Ds"], args["fix_AV"])
+        if isinstance(args["RV"], Number | Array) and getattr(args["RV"], "ndim", 0) == 0:
+            samples["RV"] = np.full_like(samples["Ds"], float(args["RV"]))
         if args["train_new_model"]:
             # Breaking the degeneracy will change the samples, so save a copy first.
             with open(args["outputdir"] / "initial_chains.pkl", "wb") as file:
@@ -4381,13 +4371,16 @@ class SEDmodel(object):
     def get_hsiao_interp(self, t: ArrayLike) -> Array:
         return jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
 
-    def get_fitprob(self, samples, batch_size=None):
+    def get_fitprob(self, samples: dict, batch_size: int | None = None):
         """
         Compute FITPROB for each SN using posterior mean parameters.
 
-        Uses the BayeSN joint test statistic T = chi2_data + chi2_epsilon,
-        where chi2_data is the standard flux chi-squared at the posterior mean
-        and chi2_epsilon = sum(eps_tform_mean^2) penalizes extreme epsilon.
+        Uses the BayeSN joint test statistic T = chi2_data + chi2_epsilon, where
+        chi2_data is the standard flux chi-squared at the posterior mean (does not
+        include "model" uncertainties, only data) and chi2_epsilon is defines as
+        sum(means["eps_tform"]^2) to penalize extreme epsilon values.
+
+        Sampling W0, W1, L_Omega, etc. not yet supported.
 
         Parameters
         ----------
@@ -4408,17 +4401,20 @@ class SEDmodel(object):
         n_sne = self.data.z_hel.shape[0]
 
         # --- 1. Posterior means ---
-        theta_mean = np.array(samples['theta'].mean(axis=(0, 1)))
-        AV_mean = np.array(samples['AV'].mean(axis=(0, 1)))
-        tmax_mean = np.array(samples['tmax'].mean(axis=(0, 1)))
-        Ds_mean = np.array(samples['Ds'].mean(axis=(0, 1)))
+        means = {
+            key: np.array(samples[key].mean(axis=(0, 1))) for key in
+            # These should always be in samples due to postprocessing.
+            ("theta", "AV", "tmax", "Ds", "eps_tform", "RV")
+        }
+        # These may not be in samples, default to 0.
+        lam_shift = np.array(samples.get("lam_shift", [[0]])).mean(axis=(0, 1))
+        mag_shift = np.array(samples.get("mag_shift", [[0]])).mean(axis=(0, 1))
 
         # eps_tform: mean over chains/samples -> ensure (N_knots_sig, n_sne)
-        eps_tform_mean = np.array(samples['eps_tform'].mean(axis=(0, 1)))
-        if eps_tform_mean.shape[0] == n_sne and eps_tform_mean.shape[1] == self.L_Sigma.shape[0]:
-            eps_tform_mean = eps_tform_mean.T
+        if means["eps_tform"].shape[0] == n_sne and means["eps_tform"].shape[1] == self.L_Sigma.shape[0]:
+            means["eps_tform"] = means["eps_tform"].T
         # Reconstruct eps via L_Sigma transform (mirrors fit_model_globalRV lines 864-869)
-        eps = np.matmul(self.L_Sigma, eps_tform_mean)
+        eps = np.matmul(self.L_Sigma, means["eps_tform"])
         eps = eps.T
         eps = eps.reshape(
             (n_sne, self.l_knots.shape[0] - 2, self.tau_knots.shape[0]), order='F'
@@ -4426,53 +4422,44 @@ class SEDmodel(object):
         eps_full = jnp.zeros((n_sne, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full = eps_full.at[:, 1:-1, :].set(eps)
 
-        # RV: per-SN from posterior or global scalar
-        if 'RV' in samples:
-            RV = np.array(samples['RV'].mean(axis=(0, 1)))
-        else:
-            RV = self.RV
-
-        # --- 2. Rebuild J_t and hsiao_interp at posterior mean tmax ---
+        # --- 2. Rebuild J_t, hsiao_interp, band_weights ---
         obs_times = self.data.mjd
-        if self.photoz:  # evaluate the model at the fitted redshift (band weights + time dilation)
+        z_obs = np.asarray(self.data.z_hel)
+        if "z" in samples:
             z_mean = np.array(samples['z'].mean(axis=(0, 1)))
-            zhat = np.asarray(self.data.z_hel)
-            t = obs_times * (1 + zhat[None, :]) / (1 + z_mean[None, :]) - tmax_mean[None, :]
-            weights = self._calculate_band_weights(z_mean, self.data.MWEBV, lam_shift=0)
+            t = obs_times * (1 + z_obs[None, :]) / (1 + z_mean[None, :]) - means["tmax"][None, :]
         else:
-            t = obs_times - tmax_mean[None, :]
+            z_mean = z_obs
+            t = obs_times - means["tmax"][None, :]
+        if "z" in samples or "lam_shift" in samples:
+            weights = self._calculate_band_weights(z_mean, self.data.MWEBV, lam_shifts=lam_shift)
+        else:
             weights = self.band_weights
         hsiao_interp = self.get_hsiao_interp(t)
-        keep_shape = t.shape
         J_t = self.get_J_t(t)
+
         # --- 3. Inputs in (N_obs, n_sne) convention ---
         band_indices = self.data.band_indices.astype(int)
         mask = self.data.mask.astype(bool)
 
         # --- 4. Model flux — batched over SN axis to keep peak memory bounded ---
-        bs = batch_size if batch_size is not None else n_sne
-        rv_is_array = isinstance(RV, (np.ndarray, jnp.ndarray)) and getattr(RV, 'ndim', 0) > 0
+        bs = batch_size or n_sne
+        rv_is_array = isinstance(means["RV"], ArrayLike) and getattr(means["RV"], 'ndim', 0) > 0
         chunks = []
         for lo in range(0, n_sne, bs):
             hi = min(lo + bs, n_sne)
             chunk_spectra = self._get_spectra(
-                theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1, eps_full[lo:hi],
-                RV[lo:hi] if rv_is_array else RV, J_t[lo:hi], hsiao_interp[:, :, lo:hi]
+                means["theta"][lo:hi], means["AV"][lo:hi], self.W0, self.W1,
+                eps_full[lo:hi], means["RV"][lo:hi] if rv_is_array else means["RV"],
+                J_t[lo:hi], hsiao_interp[:, :, lo:hi]
             )
             chunk = self.get_flux_batch(
-                model_spectra=chunk_spectra, M0=self.M0, Ds=Ds_mean[lo:hi],
+                model_spectra=chunk_spectra, M0=self.M0, Ds=means["Ds"][lo:hi],
                 z=self.data.z_hel[lo:hi], ebv=self.data.MWEBV[lo:hi],
                 band_indices=band_indices[:, lo:hi], mask=mask[:, lo:hi],
-                weights=self.band_weights[lo:hi], lam_shift=0, mag_shift=0,
+                weights=weights[lo:hi], lam_shift=lam_shift, mag_shift=mag_shift,
                 num_batch=hi-lo,
             )
-            # chunk = self.get_flux_batch(
-            #     self.M0, theta_mean[lo:hi], AV_mean[lo:hi], self.W0, self.W1,
-            #     eps_full[lo:hi], Ds_mean[lo:hi],
-            #     RV[lo:hi] if rv_is_array else RV,
-            #     band_indices[:, lo:hi], mask[:, lo:hi],
-            #     J_t[lo:hi], hsiao_interp[:, :, lo:hi], self.band_weights[lo:hi],
-            # )
             chunks.append(np.asarray(chunk))
         model_flux = np.concatenate(chunks, axis=-1)
 
@@ -4484,15 +4471,15 @@ class SEDmodel(object):
         chi2_data = jnp.sum(chi2_per_obs, axis=0)
 
         # --- 6. chi2_epsilon: sum of squared whitened epsilon ---
-        N_knots_sig = (self.l_knots.shape[0] - 2) * self.tau_knots.shape[0]
-        chi2_epsilon = np.sum(eps_tform_mean ** 2, axis=0)
+        N_knots_sig = self.N_knots_sig
+        chi2_epsilon = np.sum(means["eps_tform"] ** 2, axis=0)
 
         # --- 7. Host photo-z prior term -2 ln p_host(z), added to the joint chi2 (matches SNANA) ---
         chi2_z = 0.0
-        if self.photoz:
+        if "z" in samples:
             if self.z_icdf_grid is None:  # Gaussian prior: pull^2 (drop the log-norm const, as SNANA does)
-                zhat_err = np.asarray(self.data.z_hel_err)
-                chi2_z = ((z_mean - zhat) / zhat_err) ** 2
+                z_obs_err = np.asarray(self.data.z_hel_err)
+                chi2_z = ((z_mean - z_obs) / z_obs_err) ** 2
             else:  # quantile prior: p_host is dCDF/dz, the finite-difference slope of the quantiles
                 zq, pl = np.asarray(self.z_icdf_grid), np.asarray(self.z_u_grid)
                 slopes = np.diff(pl) / np.diff(zq, axis=1)  # dP/dz per quantile bin
@@ -4503,16 +4490,24 @@ class SEDmodel(object):
         # --- 8. Joint statistic, NDOF, FITPROB ---
         T_joint = np.array(chi2_data) + chi2_epsilon + chi2_z
         # NDOF = N_obs + alpha*N_eps - N_params.
-        # Physical params (tmax, theta, AV, Ds, +RV) consume DOF from data.
+        # Physical params (tmax, theta, AV, Ds, +RV) consume DOF from data,
+        # but some may be fixed at specific values and not contribute to N_params.
+        N_params = sum([
+            1 if np.std(samples[key]) else 0
+            for key in ("tmax", "theta", "AV", "Ds", "RV")
+        ])
         # Epsilon knots are prior-constrained, so their effective DOF is
         # between 0 (fully free) and N_knots_sig (fully prior-determined).
         # alpha=0.75 calibrated on Foundation DR1 sample.
-        # Photo-z z is net-zero DOF: the host-z prior adds one prior point while the
-        # floated z consumes one parameter (as SNANA does), leaving ndof unchanged.
-        alpha = 0.75
-        n_params = 4 + (1 if 'RV' in samples else 0)
-        ndof = (np.sum(np.array(mask), axis=0) + alpha * N_knots_sig - n_params).astype(int)
-
+        # If eps was fixed to 0 everywhere, alpha goes to 0.
+        alpha = 0.75 if np.std(samples["eps_tform"]) else 0
+        # Sampled redshifts are net-zero DOF: the host-z prior adds one prior point
+        # while the sampled z consumes one parameter (as SNANA does), leaving ndof
+        # unchanged.
+        # lam_shift and mag_shift consume a DOF per bandpass.
+        N_bps = weights.shape[-1]
+        N_params -= weights.shape[-1] * (int("lam_shift" in samples) + int("mag_shift" in samples))
+        ndof = (np.sum(np.array(mask), axis=0) + alpha * N_knots_sig - N_params).astype(int)
         fitprob = np.where(
             (ndof > 0) & (T_joint > 0),
             chi2_dist.sf(T_joint, ndof),

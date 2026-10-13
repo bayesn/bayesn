@@ -878,24 +878,26 @@ class TestPhotometryChains:
         )
         assert f_from_file.shape == (1, 1, 1, len(t))
 
-    def test_get_fitprob(self, loaded_model_and_args):
+    def test_get_fitprob(self, loaded_model_and_args, RNG_seed: int = 0):
         model, args = loaded_model_and_args
         with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
             ref_data = pickle.load(f)
 
-        n_sn = model.dataset.N_sn
+        rng = np.random.default_rng(RNG_seed)
+        N_sn = model.dataset.N_sn
         samples = {
-            "theta": np.zeros((1, 1, n_sn)),
-            "AV": np.ones((1, 1, n_sn)) * 0.1,
-            "tmax": np.zeros((1, 1, n_sn)),
-            "Ds": np.ones((1, 1, n_sn)) * 34.0,
+            "theta": rng.normal(0, 1, (1, 1, N_sn)),
+            "AV": rng.exponential(0.1, (1, 1, N_sn)),
+            "tmax": rng.uniform(-10, 10, (1, 1, N_sn)),
+            "Ds": rng.normal(34.0, 0.1, (1, 1, N_sn)),
             "eps_tform": np.array(ref_data["params"]["eps_tform"])[None, None, ...],
+            "RV": rng.normal(3, 0.1, (1, 1, N_sn)),
         }
 
         fitprob, fitchi2, ndof = model.get_fitprob(samples)
-        assert fitprob.shape == (n_sn,)
-        assert fitchi2.shape == (n_sn,)
-        assert ndof.shape == (n_sn,)
+        assert fitprob.shape == (N_sn,)
+        assert fitchi2.shape == (N_sn,)
+        assert ndof.shape == (N_sn,)
         assert np.all(fitprob >= 0.0) and np.all(fitprob <= 1.0)
         assert np.all(fitchi2 >= 0.0)
 
@@ -906,11 +908,11 @@ class TestPostprocess:
         with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
             ref_data = pickle.load(f)
 
-        n_sn = model.dataset.N_sn
+        N_sn = model.dataset.N_sn
         samples = {}
         for k, v in ref_data["params"].items():
             samples[k] = v[None, None, ...]
-        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
+        samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
 
         run_args = copy.deepcopy(args)
         run_args["outputdir"] = tmp_path
@@ -927,12 +929,12 @@ class TestPostprocess:
         with open(PICKLE_DIR / "T21_log_probs_normal.pkl", "rb") as f:
             ref_data = pickle.load(f)
 
-        n_sn = model.dataset.N_sn
+        N_sn = model.dataset.N_sn
         samples = {}
         for k, v in ref_data["params"].items():
             samples[k] = v[None, None, ...]
-        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
-        samples["z"] = np.ones((1, 1, n_sn)) * 0.03
+        samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
+        samples["z"] = np.ones((1, 1, N_sn)) * 0.03
 
         run_args = copy.deepcopy(args)
         run_args["outputdir"] = tmp_path
@@ -948,11 +950,11 @@ class TestPostprocess:
         with open(PICKLE_DIR / "T21_log_probs_training.pkl", "rb") as f:
             ref_data = pickle.load(f)
 
-        n_sn = model.dataset.N_sn
+        N_sn = model.dataset.N_sn
         samples = {}
         for k, v in ref_data["params"].items():
             samples[k] = v[None, None, ...]
-        samples["Ds"] = np.ones((1, 1, n_sn)) * 34.0
+        samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
 
         run_args = copy.deepcopy(args)
         run_args["outputdir"] = tmp_path
