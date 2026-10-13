@@ -63,6 +63,7 @@ from matplotlib import rc
 import scipy
 from scipy.interpolate import interp1d
 from scipy.integrate import simpson
+from scipy.stats import truncnorm
 import sncosmo
 import timeit
 from ruamel.yaml import YAML
@@ -2619,7 +2620,6 @@ class SEDmodel(object):
             AV, RV = self._sample_split_SN_dust_params(
                 dust_pop=dust_pop,
                 redshift=z,
-                z_obs=obs.z_hel[sn_index],
                 shared_RV=shared_RV,
                 **kwargs,
             )
@@ -2982,15 +2982,11 @@ class SEDmodel(object):
     def _sample_split_SN_dust_params(
         self,
         dust_pop: DustPop,
-        shared_RV: bool = True,
-        redshift: ArrayLike = 0,
-        z_obs: ArrayLike | None = None,
+        shared_RV: bool,
+        redshift: ArrayLike,
         **kwargs: Any,
     ) -> tuple[Array, Array]:
         """Sample AV and RV for each SN given population dust parameters."""
-        if z_obs is None:
-            z_obs = redshift
-
         HM_flag = dust_pop.HM_flag
         AV, RV = self._sample_SN_dust_params(
             dust_params=dust_pop.HM,
@@ -3003,7 +2999,7 @@ class SEDmodel(object):
             AV_LM, RV_LM = self._sample_SN_dust_params(
                 dust_params=dust_pop.LM,
                 shared_RV=shared_RV,
-                redshift=z_obs,
+                redshift=redshift,
                 suffix="LM",
                 **kwargs,
             )
@@ -3150,6 +3146,111 @@ class SEDmodel(object):
         hsiao_interp = self.get_hsiao_interp(t_all_sn)
         return hsiao_interp, J_t, tmax
 
+    def initial_guess(
+        self,
+        args: dict,
+        reference_model: str | Path,
+        RNG_seed: int | None = None,
+        jitter: Number = 0.01,
+        single_sn: bool = False,
+    ):
+        """ Sets initialisation for training chains, using some global parameter values
+        from previous models. W0 and W1 matrices are interpolated to match wavelength
+        knots of new model, and set to zero beyond the time range that the reference
+        model is defined for. Note that unlike Stan, in numpyro we cannot set each
+        chain's initialisation separately.
+
+        Parameters
+        ----------
+        reference_model: str, optional
+            Previously-trained model to be used to set initialisation, defaults to T21.
+
+        Returns
+        -------
+        param_init: dict
+            Dictionary containing initial values to be used
+        """
+        # Set hyperparameter initialisations
+        built_in_models = [f.name for f in self.__root_dir__.glob("model_files/*_model")]
+        if isinstance(reference_model, str | Path) and Path(reference_model).exists():
+            print(f"Using custom model at {reference_model} to initialise chains.")
+            with open(reference_model, "r") as file:
+                params = yaml.load(file)
+        elif isinstance(reference_model, str) and reference_model in built_in_models:
+            print(f'Loading built-in model {reference_model} to initialise chains')
+            with open(self.__root_dir__ / f"model_files/{reference_model}/BAYESN.YAML", "r") as file:
+                params = yaml.load(file)
+        else:
+            raise ValueError(
+                "Invalid initialisation method, please choose either 'median' or "
+                "'sample', or choose either one of the built-in models or a custom "
+                "model to base the hyperparmeter initialisation on."
+            )
+        N_sn = 1 if single_sn else self.dataset.N_sn
+        N_eps = self.N_knots_sig
+        rng = np.random.default_rng(RNG_seed)  # different from main, no RNG_seed
+        W0_init, W1_init = params["W0"], params["W1"]
+        l_knots, tau_knots = params["L_KNOTS"], params["TAU_KNOTS"]
+        tauA_init  = params["TAUA"]
+        sigma0_init = params.get("SIGMA0", 0.1)  # different from main, was just 0.1
+        sigmaepsilon_init = np.abs(rng.standard_cauchy(N_eps))  # different from main
+        L_Omega_init = jnp.eye(N_eps)
+        param_init = {}
+
+        if args["train_new_model"]:  # parsing based on args is different from main
+            # Cannot assume l/tau_knots of reference_model match self.
+            # Interpolate to match new wavelength knots
+            W0_init = interp1d(l_knots, W0_init, kind="cubic", axis=0, fill_value=0, bounds_error=False)(self.l_knots)
+            W1_init = interp1d(l_knots, W1_init, kind="cubic", axis=0, fill_value=0, bounds_error=False)(self.l_knots)
+            # Interpolate to match new time knots
+            W0_init = interp1d(tau_knots, W0_init, kind="linear", axis=1, fill_value=0, bounds_error=False)(self.tau_knots)
+            W1_init = interp1d(tau_knots, W1_init, kind="linear", axis=1, fill_value=0, bounds_error=False)(self.tau_knots)
+            W0_init = W0_init.flatten(order="F")
+            W1_init = W1_init.flatten(order="F")
+            param_init["W0"] = jnp.array(rng.normal(W0_init, jitter))
+            param_init["W1"] = jnp.array(rng.normal(W1_init, jitter))
+
+            # param_init["sigmaepsilon_tform"] = jnp.arctan(
+            #     sigmaepsilon_init + rng.normal(0, jitter, sigmaepsilon_init.shape) / 1.)
+            param_init["sigmaepsilon"] = jnp.array(rng.normal(sigmaepsilon_init, jitter))
+
+            param_init["L_Omega"] = jnp.array(L_Omega_init)
+
+        if args["infer_dust_properties"]:
+            param_init["tauA"] = jnp.array(truncnorm.rvs(
+                -tauA_init/jitter, np.inf, loc=tauA_init,
+                scale=jitter, size=1, random_state=rng
+            )[0])
+            param_init["sigma0"] = jnp.array(truncnorm.rvs(
+                -sigma0_init/jitter, np.inf, loc=sigma0_init,
+                scale=jitter, size=1, random_state=rng
+            )[0])
+            if isinstance(args["RV"], str) and args["RV"] == "normal":
+                param_init["mu_R"] = jnp.array(params.get("MUR", params.get("RV", 3.)))
+                param_init["sigma_R"] = jnp.array(params.get("SIGMAR", 0.5))
+            elif isinstance(args["RV"], str) and args["RV"] == "uniform":
+                param_init["uniform_RV_min"] = jnp.array(params.get("uniform_RV_min", 1))
+                param_init["uniform_RV_max"] = jnp.array(params.get("uniform_RV_max", 6))
+            else:
+                param_init["RV"] = jnp.array(params.get("RV", params.get("MUR", 3.)))
+            # param_init["tauA_tform"] = jnp.arctan(tauA_ / 1.)
+            # param_init["sigma0_tform"] = jnp.arctan(sigma0_ / 0.1)
+
+        param_init["Ds_tform"] = jnp.array(rng.normal(0, 1, N_sn))
+        if args["fix_theta"] is None:
+            param_init["theta"] = jnp.array(rng.normal(0, 1, N_sn))
+        if args["fix_AV"] is None:
+            # different from main, used tauA_ = param_init["tauA"], jittered tauA_init
+            param_init["AV"] = jnp.array(rng.exponential(tauA_init, N_sn))
+
+        if not args["fix_eps"]:
+            # sigmaepsilon_init = 0.1 * np.ones(N_eps)
+            # param_init["eps"] = rng.normal(0, 1, (N_sn, N_eps))
+            L_Sigma = jnp.matmul(jnp.diag(sigmaepsilon_init), jnp.eye(N_eps))
+            # transposed to have N_sn be first axis for plate structure.
+            param_init["eps_tform"] = jnp.matmul(np.linalg.inv(L_Sigma), rng.normal(0, 1, (N_eps, N_sn))).T
+
+        return param_init
 
     def run(self, args: dict, cmd_args: Any) -> None:
         """
@@ -3167,22 +3268,30 @@ class SEDmodel(object):
         args = self.parse_args(args, cmd_args)
         self.process_dataset(args)
 
+        mode = args["mode"]
+        fitting_mode = (
+            mode.startswith("fit") or
+            (
+                mode == "custom"
+                and not args["train_new_model"]
+                and not args["infer_dust_properties"]
+            )
+        )
         # Set up initialisation for HMC chains
         # -------------------------
-        if args["initialisation"] == "T21":
-            init_strategy = init_to_value(
-                values=self.initial_guess(args, reference_model="T21")
-            )
-        elif args["initialisation"] == "median":
+        if args["initialisation"] == "median":
             init_strategy = init_to_median()
         elif args["initialisation"] == "sample":
             init_strategy = init_to_sample()
         else:
+            if not args["initialisation"].endswith("_model"):
+                init_model = args["initialisation"] + "_model"
             init_strategy = init_to_value(
-                values=self.initial_guess(args, reference_model=args["initialisation"])
+                values=self.initial_guess(
+                    args, reference_model=init_model,
+                    single_sn=fitting_mode  # need to init as if N_sn=1 for vmapping
+                )
             )
-        mode = args["mode"]
-        fitting_mode = mode.startswith("fit") or (mode == "custom" and not args["train_new_model"] and not args["infer_dust_properties"])
 
         regularize_mass_matrix = fitting_mode
         step_size = 0.1 + 0.9*fitting_mode
@@ -3243,7 +3352,7 @@ class SEDmodel(object):
                 num_warmup=args["num_warmup"],
                 num_chains=args["num_chains"],
                 chain_method=args["chain_method"],
-                progress_bar=True,
+                progress_bar=args["chain_method"] == "vectorized",
             )
             if args["photoz"] and self.z_icdf_grid is not None:
                 args["z_icdf"] = z_icdf
@@ -3273,22 +3382,22 @@ class SEDmodel(object):
         return samples
 
     def _run_fit_vi(self, args, init_strategy):
+        try:
+            RV = float(args["RV"])
+        except ValueError:
+            RV = self.RV or self.mu_R
+        noeps_kwargs, vi_kwargs = [copy.deepcopy(args) for _ in range(2)]
+        noeps_kwargs.update({"fix_eps": True, "rv_type": "global", "RV": RV})
+        vi_kwargs.update({
+            "fix_eps": False,
+            "AV_dist": zltn.My_Exponential,
+            "muhat_err": 5,
+            "prior_only": False,
+            "rv_type": "global",
+            "RV": RV,
+        })
         if args['laplace_method'] == 'lm':
             from numpyro.infer.util import initialize_model
-            noeps_kwargs, vi_kwargs = [copy.deepcopy(args) for _ in range(2)]
-            try:
-                RV = float(args["RV"])
-            except ValueError:
-                RV = self.RV or self.mu_R
-            noeps_kwargs.update({"fix_eps": True, "rv_type": "global", "RV": RV})
-            vi_kwargs.update({
-                "fix_eps": False,
-                "AV_dist": zltn.My_Exponential,
-                "muhat_err": 5,
-                "prior_only": False,
-                "rv_type": "global",
-                "RV": RV,
-            })
             self._lm_model_info = initialize_model(
                 PRNGKey(0), self._model,
                 init_strategy=init_strategy, dynamic_args=True,
@@ -3927,6 +4036,14 @@ class SEDmodel(object):
             defines model wavelength range and data set to load.
         """
         start = time.time()
+        if args["fix_tmax"]:
+            samples["tmax"] = np.zeros_like(samples["Ds"])
+        if args["fix_eps"]:
+            samples["eps"] = np.zeros((*samples["Ds"].shape[:2], self.N_knots_sig, samples["Ds"].shape[2]))
+        if args["fix_theta"] is not None:
+            samples["theta"] = np.full_like(samples["Ds"], args["fix_theta"])
+        if args["fix_AV"] is not None:
+            samples["AV"] = np.full_like(samples["Ds"], args["fix_AV"])
         if args["train_new_model"]:
             # Breaking the degeneracy will change the samples, so save a copy first.
             with open(args["outputdir"] / "initial_chains.pkl", "wb") as file:
