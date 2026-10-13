@@ -3563,7 +3563,7 @@ class SEDmodel(object):
             return {**samples}
 
         batched_map = jax.vmap(fit_vmap_vi, in_axes=(-1, 0, 0))
-        n_sne = self.data.z_hel.shape[0]
+        n_sne = self.data.z_hel.shape[0]  # not using dataset since fit method does not
         # per-SN host photo-z quantiles threaded through the vmap (dummy zeros otherwise)
         if args['photoz'] and self.z_icdf_grid is not None:
             z_icdf_all = np.asarray(self.z_icdf_grid)
@@ -3582,15 +3582,20 @@ class SEDmodel(object):
                 batch_zicdf = z_icdf_all[lo:hi]
             else:
                 # Pad final batch by replicating SN 0; padded outputs discarded.
-                batch_data = np.empty(
-                    (*self.data.z_hel.shape[0], batch_size), dtype=self.data.z_hel.dtype)
+                real_batch_data = self.get_sn_slice_of_data(slice(lo, hi))
+                dupe_batch_data = self.get_sn_slice_of_data(slice(0, 1))
+                n_dupe = batch_size - n_real
+                batch_data = ObsData(*[
+                    np.append(real, np.repeat(dupe, n_dupe, axis=1), axis=1)
+                    if len(dupe.shape) == 2 else np.append(real, np.repeat(dupe, n_dupe))
+                    for real, dupe in zip(real_batch_data, dupe_batch_data)
+                ])
                 batch_weights = np.empty(
-                    (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype)
-                batch_zicdf = np.empty((batch_size, z_icdf_all.shape[1]), dtype=z_icdf_all.dtype)
-                batch_data[..., :n_real] = self.get_sn_slice_of_data(slice(lo, hi))
-                batch_data[..., n_real:] = self.get_sn_slice_of_data(slice(0, 1))
+                    (batch_size, *self.band_weights.shape[1:]), dtype=self.band_weights.dtype
+                )
                 batch_weights[:n_real] = self.band_weights[lo:hi]
                 batch_weights[n_real:] = self.band_weights[0:1]
+                batch_zicdf = np.empty((batch_size, z_icdf_all.shape[1]), dtype=z_icdf_all.dtype)
                 batch_zicdf[:n_real] = z_icdf_all[lo:hi]
                 batch_zicdf[n_real:] = z_icdf_all[0:1]
             chunk = batched_map(batch_data, batch_weights, batch_zicdf)
@@ -4421,7 +4426,7 @@ class SEDmodel(object):
         eps_full = jnp.zeros((n_sne, self.l_knots.shape[0], self.tau_knots.shape[0]))
         eps_full = eps_full.at[:, 1:-1, :].set(eps)
 
-        # RV: per-SN from posterior (popRV) or global scalar (globalRV)
+        # RV: per-SN from posterior or global scalar
         if 'RV' in samples:
             RV = np.array(samples['RV'].mean(axis=(0, 1)))
         else:
