@@ -34,7 +34,11 @@ drop_bands: []
 outputdir: default
 # A string to prepend to all output
 outfile_prefix: output
+# If not False, then an integer job number which will selectively process a fraction of
+# the entire dataset. The whole dataset will take njobtot consecutive jobids.
 jobid: False
+# an integer factor reducing the number of SNe processed within a given jobid by
+# multiplying njobtot if the data are simulated.
 sim_prescale: 1
 sim_peakmjd: False
 # SNe with zhel >= zlim will not be loaded
