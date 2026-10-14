@@ -641,16 +641,19 @@ class SEDmodel(object):
         self.M0 = jnp.array(params["M0"])
         self.sigma0 = jnp.array(params["SIGMA0"])
         self.tauA = jnp.array(params["TAUA"])
+        for key in ("RV", "mu_R", "sigma_R", "uniform_RV_min", "uniform_RV_max"):
+            setattr(self, key, None)
         if "RV" in params:
             self.shared_RV = True
             self.RV = jnp.array(params["RV"])
-            self.mu_R = None
-            self.sigma_R = None
         elif "MUR" in params:
             self.shared_RV = False
-            self.RV = None
             self.mu_R = jnp.array(params["MUR"])
             self.sigma_R = jnp.array(params["SIGMAR"])
+        elif "UNIFORM_RV_MIN" in params:
+            self.shared_RV = False
+            self.uniform_RV_min = jnp.array(params["UNIFORM_RV_MIN"])
+            self.uniform_RV_max = jnp.array(params["UNIFORM_RV_MAX"])
         # Build the model wavelengths in log space
         self.min_wave = min(self.l_knots)
         self.max_wave = max(self.l_knots)
@@ -3749,8 +3752,10 @@ class SEDmodel(object):
         ebv_mw = meta["MWEBV"]
         zpt = meta.get("ZP_FLUXCAL", self.ZPT)  # header ZP overrides the configured default
         if zpt != self.ZPT:
-            print(f"Using ZP_FLUXCAL={zpt} from data header")
-        self.ZPT = zpt
+            warn(UserWarning(
+                f"Overwriting the current ZPT ({self.ZPT}) with zpt={zpt}."
+            ))
+            self.ZPT = zpt
         if z_prior_err is None:
             z_prior_err = meta.get("REDSHIFT_HELIO_ERR", 0.)
 
@@ -3865,8 +3870,13 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in
             memory when making plots
         """
+        if zpt is not None and self.ZPT != zpt:
+            warn(UserWarning(
+                f"Overwriting the current ZPT ({self.ZPT}) with zpt={zpt}."
+            ))
+            self.ZPT = zpt
         if ext_rel is not None and self.ext_rel.name != ext_rel:
-            self.ext_rel = DustExtRel(name=ext_rel)
+            self.load_ext_rel(ext_rel_name=ext_rel)
         if isinstance(drop_bands, str):
             drop_bands = [drop_bands]
         t, flux, flux_err, filters = (
@@ -3897,8 +3907,13 @@ class SEDmodel(object):
             # Loose cut: drop epochs pre-explosion across the +/-3 sigma prior z and tmax range
             if self.z_icdf_grid is not None:
                 z_lo, z_hi = float(self.z_icdf_grid[0, 0]), float(self.z_icdf_grid[0, -1])
-            else:
+            elif z_prior_err is not None:
                 z_lo, z_hi = z - 3 * z_prior_err, z + 3 * z_prior_err
+            else:
+                raise ValueError(
+                    "photoz is True but z_quantiles, z_pdf, and z_prior_err are all "
+                    "None, so it is not clear how redshift should be sampled."
+                )
             p1, p2 = t * (1 + z) / (1 + z_lo), t * (1 + z) / (1 + z_hi)
             keep = np.maximum(p1, p2) + 10 > float(self.hsiao_t[0])
         else:
@@ -3908,7 +3923,7 @@ class SEDmodel(object):
 
         if verbose and any(~keep):
             print(
-                f"Cutting {len(t) - sum(t_mask)} data due to rest-frame phases "
+                f"Cutting {len(t) - sum(keep)} data due to rest-frame phases "
                 "beyond model limits."
             )
 
@@ -3960,7 +3975,7 @@ class SEDmodel(object):
             )
         # Set up and populate data array
         self.data = ObsData(
-            host_logmass=jnp.full(1, -9),
+            host_logmass=jnp.full(1, host_logmass),
             z_hel=jnp.full(1, z),
             z_hel_err=jnp.full(1, z_prior_err),
             muhat=jnp.full(1, self.cosmo.distmod(z).value),
@@ -4046,7 +4061,6 @@ class SEDmodel(object):
                 pickle.dump(samples, file)
 
         sn_props = (z, ebv_mw)
-
         return samples, sn_props
 
     def postprocess(
@@ -4862,6 +4876,7 @@ class SEDmodel(object):
         l_r = l_r[l_r <= max(self.l_knots)]
         l_o = l_r[None, ...].repeat(N, axis=0) * (1 + z[:, None])
 
+        old_model_wave = self.model_wave
         self.model_wave = l_r
         KD_l = invKD(self.l_knots)
         self.J_l_T = device_put(spline_coeffs(self.model_wave, self.l_knots, KD_l))
@@ -4875,6 +4890,13 @@ class SEDmodel(object):
         spectra = self._get_spectra(
             theta, AV, self.W0, self.W1, eps, RV, J_t, hsiao_interp
         )
+
+        # cleaning
+        self.model_wave = old_model_wave
+        KD_l = invKD(self.l_knots)
+        self.J_l_T = device_put(spline_coeffs(self.model_wave, self.l_knots, KD_l))
+        self._load_hsiao_template()
+        self.load_ext_rel(self.ext_rel.name)
         return l_o, spectra, param_dict
 
     def simulate_light_curve(
