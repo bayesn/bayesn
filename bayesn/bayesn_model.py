@@ -2243,10 +2243,12 @@ class SEDmodel(object):
     def get_flux_from_chains(
         self,
         t: ArrayLike,
-        bands: ArrayLike,
-        chains: str | ArrayLike,
-        zs: ArrayLike | float,
-        ebv_mws: ArrayLike | float,
+        bands: list[str, ...] | list[list[str, ...], ...],
+        chains: str | Path | ArrayLike,
+        zs: ArrayLike | Number,
+        ebv_mws: ArrayLike | Number,
+        lam_shifts: ArrayLike | Number = 0,
+        mag_shifts: ArrayLike | Number = 0,
         mag: bool = True,
         num_samples: int | None = None,
         num_sne: int | None = None,
@@ -2258,91 +2260,140 @@ class SEDmodel(object):
 
         Parameters
         ----------
-        t :
+        t:
             Array of phases to evaluate model photometry at
-        bands :
-            List of bandpasses to evaluate model photometry in. Photometry will be
-        chains :
+        bands:
+            List of str bandpasses to evaluate model photometry in, or a list of num_sne
+            lists of str bandpasses, where the fluxes for the ith SNe will be in the
+            bandpasses of the ith list in bands.
+        chains:
             If a str, path to file containing BayeSN fitting posterior samples you
             wish to obtain photometry for. If not a str, then the posterior samples.
-        zs :
+            The chains should be a dictionary with the following keys: theta, AV, eps,
+            tmax, mu, and delM. All arrays should have shape (N_chains, N_samples, N_sn)
+            except eps which should be (N_chains, N_samples, self.N_knots_sig, N_sn).
+            N_samples is the number of iterations in the sampling run that produced
+            chains, not the num_samples optional argument in this method. The chains
+            can optionally include RV, which can have shape (N_chains, N_samples) for
+            shared RV values, or (N_chains, N_samples, N_sn) for SN-specific RV values.
+            If not included, photometry will use RVs of self.RV or self.mu_R.
+        zs:
             Array of heliocentric redshifts corresponding to the SNe you are obtaining
             model fit light curves for.
-        ebv_mws :
-            Array containing Milky Way extincion values corresponding to the SNe you
+        ebv_mws:
+            Array containing Milky Way extinction values corresponding to the SNe you
             are obtaining model fit light curves for.
-        mag :
+        lam_shifts:
+            Wavelength shifts (Angstroms, positive = redshift) in an ArrayLike
+            matching the order in unique_bands or a Number applied to all bandpasses.
+            if bands is a list of lists, unique bands is defined as
+            list(set(bp for sublist in band_list for bp in sublist)),
+            otherwise it is defined as np.unique(bands).
+        mag_shifts:
+            Zero-point offsets (mags) in the same conditional order as lam_shifts.
+        mag:
             Boolean to specify whether you want magnitude or flux data. If True,
             magnitudes will be returned. If False, flux densities (f_lambda) will be
             returned. Default to True i.e. mag data.
-        num_samples :
+        num_samples:
             An optional keyword argument to specify the number of posterior samples
             you wish to obtain photometry for. Might be useful in testing if you are
             looking at lots of SNe, as otherwise this function will take a while to
             generate e.g. photometry for 1000 posterior samples across 1000 SNe.
             Default to None, meaning that photometry will be calculated for all
             posterior samples in chains provided.
-        mean :
+        mean:
             If True, generate only one flux time-series for each SN using the mean
             values for SN parameters.
 
         Returns
         -------
-        flux_grid : Array shape (N_sn, num_samples, len(bands), len(t))
+        flux_grid: Array shape (N_sn, num_samples, len(bands), len(t))
             Array containing photometry for all SNe, posterior samples, bands and
             phases requested.
         """
-        if type(chains) == str:
+        if isinstance(chains, str | Path):
             with open(chains, "rb") as file:
                 chains = pickle.load(file)
 
+        chain_samples = chains["Ds"].shape[0] * chains["Ds"].shape[1]
         if num_sne is None:
-            num_sne = chains["theta"].shape[2]
-        if num_samples is None:
-            num_samples = chains["theta"].shape[0] * chains["theta"].shape[1]
-
-        if np.isscalar(zs):
-            zs = np.array([zs])
-        if np.isscalar(ebv_mws):
-            ebv_mws = np.array([ebv_mws])
-
+            num_sne = chains["Ds"].shape[2]
         if mean:
             num_samples = 1
+        elif num_samples is None:
+            num_samples = chain_samples
+        elif num_samples > chain_samples:
+            raise ValueError(
+                f"num_samples was specified as {num_samples}, but there are only "
+                f"{chain_samples} samples to draw from. Either pass longer chains or "
+                "decrease num_samples."
+            )
+
+        if isinstance(zs, Number | Array) and getattr(zs, "ndim", 0) == 0:
+            zs = np.full(num_sne, zs)
+        elif zs.shape != (num_sne,):
+            raise ValueError(f"zs must be a number or 1D array with length {num_sne}.")
+        if isinstance(ebv_mws, Number | Array) and getattr(ebv_mws, "ndim", 0) == 0:
+            ebv_mws = np.full(num_sne, ebv_mws)
 
         band_list = isinstance(bands[0], list)
         if band_list:
-            max_bands = np.max([len(b) for b in bands])
+            if len(bands) != num_sne:
+                raise ValueError(
+                    f"bands is a list of {len(bands)} lists, which cannot be mapped to "
+                    f"num_sne={num_sne} SNe."
+                )
+            max_bands = np.max([len(sublist) for sublist in bands])
+            unique_bands = list(set(b for sublist in bands for b in sublist))
         else:
             max_bands = len(bands)
-        if self.band_weights is None:
-            self.band_weights = self._calculate_band_weights(zs, ebv_mws)
+            unique_bands = list(np.unique(bands))
+        self._set_used_bands(unique_bands)
+        self.band_weights = self._calculate_band_weights(zs, ebv_mws, lam_shifts=lam_shifts)
+
+        if isinstance(lam_shifts, Number):
+            lam_shifts = np.full(max_bands+1, lam_shifts)
+        elif len(lam_shifts) == len(bands):
+            lam_shifts = np.append(0, lam_shifts)  # NULL band padding
+        elif len(lam_shifts) != len(bands)+1:
+            raise ValueError(
+                f"lam_shifts does not map to the unique bands {unique_bands}."
+            )
+        if isinstance(mag_shifts, Number):
+            mag_shifts = np.full(max_bands+1, mag_shifts)
+        elif len(mag_shifts) == len(bands):
+            mag_shifts = np.append(0, mag_shifts)  # NULL band padding
+        elif len(mag_shifts) != len(bands)+1:
+            raise ValueError(
+                f"mag_shifts does not map to the unique bands {unique_bands}."
+            )
 
         flux_grid = jnp.zeros((num_sne, num_samples, max_bands, len(t)))
         print("Getting best fit light curves from chains...")
         for i in tqdm(np.arange(num_sne)):
+            # Defining SN-specific terms
             if band_list:
-                fit_bands = bands[i]
+                sn_bands = bands[i]
             else:
-                fit_bands = bands
-            theta = chains["theta"][..., i].flatten(order="F")
-            AV = chains["AV"][..., i].flatten(order="F")
-            tmax = chains["tmax"][..., i].flatten(order="F")
+                sn_bands = bands
+            # Padding for NULL_BAND
+            sn_bp_inds = [0] + [self.band_dict[b] for b in sn_bands]
+            sn_weights = self.band_weights[i:i+1, :, sn_bp_inds]
+            sn_lam_shifts = np.array(lam_shifts)[sn_bp_inds]
+            sn_mag_shifts = np.array(mag_shifts)[sn_bp_inds]
+
+            params = {
+                key: chains[key][..., i].flatten(order="F") if key in chains
+                else None for key in ("theta", "AV", "tmax", "mu", "delM")
+            }
             if "RV" in chains:
-                RV = chains["RV"][..., i].flatten(order="F")
+                if chains["RV"].ndim == 2:  # global
+                    params["RV"] = chains["RV"].flatten(order="F")
+                elif chains["RV"].ndim == 3:  # SN-specific or duped because not sampled
+                    params["RV"] = chains["RV"][..., i].flatten(order="F")
             else:
-                RV = None
-            if "lam_shift" in chains:
-                lam_shift = chains["lam_shift"][..., i].flatten(order="F")
-            else:
-                # Not None because simulate_light_curve interprets constants as a value
-                # to use whereas None leads to sampling from priors.
-                lam_shift = 0
-            if "mag_shift" in chains:
-                mag_shift = chains["mag_shift"][..., i].flatten(order="F")
-            else:
-                # See above lam_shift comment.
-                mag_shift = 0
-            mu = chains["mu"][..., i].flatten(order="F")
+                params["RV"] = np.full(num_samples, float(self.RV or self.mu_R))
             eps = chains["eps"][..., i]
             eps = eps.reshape((eps.shape[0] * eps.shape[1], eps.shape[2]), order="F")
             eps = eps.reshape(
@@ -2352,62 +2403,51 @@ class SEDmodel(object):
             eps_full = jnp.zeros(
                 (eps.shape[0], self.l_knots.shape[0], self.tau_knots.shape[0])
             )
-            eps = eps_full.at[:, 1:-1, :].set(eps)
-            del_M = chains["delM"][..., i].flatten(order="F")
+            params["eps"] = eps_full.at[:, 1:-1, :].set(eps)
 
-            theta, AV, mu, eps, del_M, tmax = (
-                theta[:num_samples],
-                AV[:num_samples],
-                mu[:num_samples],
-                eps[:num_samples],
-                del_M[:num_samples],
-                tmax[:num_samples],
+            theta, AV, mu, eps, del_M, tmax, RV = (
+                params["theta"][:num_samples],
+                params["AV"][:num_samples],
+                params["mu"][:num_samples],
+                params["eps"][:num_samples],
+                params["delM"][:num_samples],
+                params["tmax"][:num_samples],
+                params["RV"][:num_samples],
             )
-            if "RV" in chains:
-                RV = RV[:num_samples]
-            if "lam_shift" in chains:
-                lam_shift = lam_shift[:num_samples]
-            if "mag_shift" in chains:
-                mag_shift = mag_shift[:num_samples]
             if mean:
-                theta, AV, mu, eps, del_M, tmax = (
+                theta, AV, mu, eps, del_M, tmax, RV = (
                     theta.mean()[None],
                     AV.mean()[None],
                     mu.mean()[None],
                     eps.mean(axis=0)[None],
                     del_M.mean()[None],
                     tmax.mean()[None],
+                    RV.mean()[None],
                 )
-                if "RV" in chains:
-                    RV = RV.mean()[None]
-                if "lam_shift" in chains:
-                    lam_shift = lam_shift.mean()[None]
-                if "mag_shift" in chains:
-                    mag_shift = mag_shift.mean()[None]
 
             lc, lc_err, params = self.simulate_light_curve(
                 t,
                 theta.shape[0],
-                fit_bands,
+                sn_bands,
                 theta=theta,
                 AV=AV,
                 mu=mu,
                 tmax=tmax,
                 del_M=del_M,
                 eps=eps,
-                lam_shift=lam_shift,
-                mag_shift=mag_shift,
+                lam_shift=sn_lam_shifts,
+                mag_shift=sn_mag_shifts,
                 RV=RV,
                 z=zs[i],
                 write_to_files=False,
                 ebv_mw=ebv_mws[i],
                 yerr=0,
                 mag=mag,
-                band_weights=self.band_weights[i : i + 1],
+                band_weights=sn_weights,
             )
             lc = lc.T
-            lc = lc.reshape(num_samples, len(fit_bands), len(t))
-            flux_grid = flux_grid.at[i, :, : len(fit_bands), :].set(lc)
+            lc = lc.reshape(num_samples, len(sn_bands), len(t))
+            flux_grid = flux_grid.at[i, :, : len(sn_bands), :].set(lc)
 
         return flux_grid
     #########################
@@ -3968,12 +4008,16 @@ class SEDmodel(object):
         if print_summary:
             mcmc.print_summary()
         samples = mcmc.get_samples(group_by_chain=True)
-        if kwargs.get("fix_tmax"):
+        if kwargs["fix_tmax"]:
             samples["tmax"] = jnp.zeros((num_chains, num_samples, 1))
-        if kwargs.get("fix_theta") is not None:
-            samples["theta"] = jnp.ones((num_chains, num_samples, 1)) * kwargs["fix_theta"]
-        if kwargs.get("fix_AV") is not None:
-            samples["AV"] = jnp.ones((num_chains, num_samples, 1)) * kwargs["fix_AV"]
+        if kwargs["fix_eps"]:
+            samples["eps_tform"] = jnp.zeros((num_chains, num_samples, self.N_knots_sig, 1))
+        if kwargs["fix_theta"] is not None:
+            samples["theta"] = jnp.full((num_chains, num_samples, 1), kwargs["fix_theta"])
+        if kwargs["fix_AV"] is not None:
+            samples["AV"] = jnp.full((num_chains, num_samples, 1), kwargs["fix_AV"])
+        if isinstance(kwargs["RV"], Number | Array) and getattr(kwargs["RV"], "ndim", 0) == 0:
+            samples["RV"] = jnp.full((num_chains, num_samples, 1), kwargs["RV"])
 
         if peak_mjd is not None:
             samples["peak_MJD"] = peak_mjd + samples["tmax"] * (1 + (samples["z"] if photoz else z))
@@ -4549,6 +4593,27 @@ class SEDmodel(object):
         AV = np.random.exponential(self.tauA, N)
         return AV
 
+    def sample_RV(self, N: int) -> Array:
+        """
+        Samples RV from model prior if a population model.
+        Otherwise, returns the SEDmodel.RV attribute N times.
+
+        Parameters
+        ----------
+        N :
+            Number of objects to sample for
+
+        Returns
+        -------
+        RV :
+            Sampled RV values
+        """
+        if self.mu_R is None:
+            return np.full(N, self.RV)
+        else:
+            return truncnorm.rvs(-self.trunc_val/self.sigma_R, np.inf, loc=self.mu_R, scale=self.sigma_R, size=N)
+        pass
+
     def sample_theta(self, N: int) -> Array:
         """
         Samples theta from model prior
@@ -4941,9 +5006,9 @@ class SEDmodel(object):
 
         Returns
         -------
-        data :
+        data : shape (len(t)*len(bands), N)
             Array containing simulated flux or mag values.
-        yerr :
+        yerr : shape (len(t)*len(bands), N)
             Aray containing corresponding errors for each data point.
         param_dict :
             Dictionary of corresponding parameter values for each simulated object
@@ -4971,20 +5036,27 @@ class SEDmodel(object):
                     and not len(var.shape)
                 ):
                     var = var.repeat(N)
-                elif var.shape[0] != N:
+                elif name not in ("lam_shift", "mag_shift") and var.shape[0] != N:
                     raise ValueError(
                         f"If not providing a scalar {name} value, array must be of "
                         f"same length as the number of objects to simulate, N={N}."
                     )
+                elif name in ("lam_shift", "mag_shift") and var.shape[0] != len(bands)+1:
+                    raise ValueError(
+                        f"If not providing a scalar {name} value, array must be of "
+                        f"same length as the number of bandpasses to simulate (and the "
+                        f"NULL band) len(bands)={len(bands)+1}."
+                    )
             return var
 
+        self._set_used_bands(bands)
         param_dict = {
             "del_M": (del_M, self.sample_del_M, N),
             "AV": (AV, self.sample_AV, N),
             "theta": (theta, self.sample_theta, N),
             "z": (z, None, N),
             "ebv_mw": (ebv_mw, None, N),
-            "RV": (RV, lambda x: self.RV, N),
+            "RV": (RV, self.sample_RV, N),
             "lam_shift": (lam_shift, self.sample_lam_shift, len(self.used_wave_sigmas)),
             "mag_shift": (mag_shift, self.sample_mag_shift, len(self.used_calib_cov)),
         }
@@ -5007,11 +5079,12 @@ class SEDmodel(object):
                 eps = np.zeros((N, self.l_knots.shape[0], self.tau_knots.shape[0]))
             else:
                 raise ValueError(
-                    "For epsilon, please pass an ArrayLike object of shape (N, N_l_knots, N_tau_knots). The only scalar "
-                    "value accepted is 0, which will effectively remove the effect of epsilon"
+                    "For epsilon, please pass an ArrayLike object of shape (N, "
+                    "N_l_knots, N_tau_knots). The only scalar value accepted is 0, "
+                    "which will effectively remove the effect of epsilon."
                 )
         elif (
-            len(eps.shape) != 3
+            eps.ndim != 3
             or eps.shape[0] != N
             or eps.shape[1] != self.l_knots.shape[0]
             or eps.shape[2] != self.tau_knots.shape[0]
@@ -5062,23 +5135,37 @@ class SEDmodel(object):
             fn = self.get_flux_batch
 
         if band_weights is None:
-            model_bw = getattr(self, "band_weights", None)
-            if model_bw is not None and model_bw.shape[0] == N:
-                weights = model_bw
-            else:
-                weights = self._calculate_band_weights(param_dict["z"], param_dict["ebv_mw"])
+            band_weights = self._calculate_band_weights(
+                param_dict["z"],
+                param_dict["ebv_mw"],
+                lam_shifts=param_dict["lam_shift"]
+            )
         else:
-            if band_weights.shape[0] == 1 and N > 1:
+            if band_weights.shape == (1, len(self.model_wave), len(bands)+1) and N > 1:
+                if np.std(param_dict["z"]):
+                    raise ValueError(
+                        "band_weights was provided as an array of shape "
+                        f"{band_weights.shape}, which would normally be interpreted "
+                        "as the weight array to repeat for all SNe, but the given z "
+                        f"values are not all the same, meaning band_weights should "
+                        "differ between targets. Please provide a band_weights array "
+                        f"of shape (N, N_model_wave, N_bands) = ({N}, "
+                        f"{len(self.model_wave)}, {len(bands)})."
+                    )
                 weights = jnp.repeat(band_weights, N, axis=0)
-            else:
-                weights = band_weights
+            elif band_weights.shape != (N, len(self.model_wave), len(bands)+1):
+                raise ValueError(
+                    "band_weights was provided as an array of shape "
+                    f"{band_weights.shape}, which does not match the expected shape "
+                    f"(N, N_wl, N_bp) = ({N}, {len(self.model_wave)}, {len(bands)+1}."
+                )
 
         data = fn(
             model_spectra=phot_epoch_spectra,
             M0=self.M0,
             band_indices=band_indices,
             mask=mask,
-            weights=weights,
+            weights=band_weights,
             num_batch=N,
             **param_dict
         )
