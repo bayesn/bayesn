@@ -1511,10 +1511,13 @@ class SNDataset:
                 "TRESTMAX": self.phase_max,
             })
         if self.sim:
-            arr_dict.update(dict(zip(
-                [get_SNANA_name(key) for key in meta_names["sim"]],
-                self.meta_sim
-            )))
+            special_keys = {
+                "SIM_REDSHIFT_CMB": "SIM_ZCMB",
+                "SIM_DLMU": "SIM_DLMAG",
+            }
+            snana_names = [get_SNANA_name(key) for key in meta_names["sim"]]
+            fitres_snana_names = [special_keys.get(key, key) for key in snana_names]
+            arr_dict.update(dict(zip(fitres_snana_names, self.meta_sim)))
         fitres_table = QTable(names=list(arr_dict.keys()), data=list(arr_dict.values()))
         fitres_table["TYPE"] = fitres_table["TYPE"].astype(int)
         fitres_table, all_table = self.cut_fitres_table(fitres_table, keep_dict, cut_dict)
