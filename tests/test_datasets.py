@@ -1037,11 +1037,16 @@ class TestDataProducts:
 
     def test_make_fitres_table_sim(self, dataset_sim):
         fitres_table, all_table = dataset_sim.make_fitres_table(version_photometry=False)
+        special_keys = {
+            "SIM_REDSHIFT_CMB": "SIM_ZCMB",
+            "SIM_DLMU": "SIM_DLMAG",
+        }
+        snana_names = [get_SNANA_name(key) for key in meta_names["sim"]]
+        fitres_snana_names = [special_keys.get(key, key) for key in snana_names]
         cols = [
             "VARNAMES:", "CID", "IDSURVEY", "TYPE", "FIELD", "zHEL", "zHELERR", "zHD",
             "zHDERR", "VPEC", "VPECERR", "MWEBV", "HOST_LOGMASS", "HOST_LOGMASS_ERR",
-            "SNRMAX1", "SNRMAX2", "SNRMAX3",
-            *[get_SNANA_name(key) for key in meta_names["sim"]]
+            "SNRMAX1", "SNRMAX2", "SNRMAX3", *fitres_snana_names,
         ]
         npt.assert_equal(list(fitres_table.columns), cols)
         npt.assert_equal(all_table["DROP"].values, "")

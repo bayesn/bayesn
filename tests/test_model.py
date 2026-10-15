@@ -706,52 +706,41 @@ class TestUtils:
 
 class TestSimulation:
     def test_simulate_spectrum(self, model: SEDmodel):
-        orig_wave = model.model_wave
-        orig_J_l_T = model.J_l_T
-        try:
-            t = np.array([0.0, 5.0])
-            N = 2
-            l_o, spec, pdict = model.simulate_spectrum(
-                t=t,
-                N=N,
-                dl=20,
-                z=0.03,
-                mu="z",
-                ebv_mw=0.02,
-                RV=3.1,
-                del_M=0.0,
-                AV=0.1,
-                theta=0.2,
-                eps=0,
-            )
-            assert l_o.shape == (N, len(model.model_wave))
-            assert spec.shape == (N, len(model.model_wave), len(t))
-            assert jnp.all(spec > 0)
-            assert "del_M" in pdict and "AV" in pdict and "theta" in pdict
-        finally:
-            model.model_wave = orig_wave
-            model.J_l_T = orig_J_l_T
-            model._load_hsiao_template()
-            model.load_ext_rel(model.ext_rel.name)
+        t = np.array([0.0, 5.0])
+        N = 2
+        dl = 20
+        z = 0.03
+        l_r = np.arange(min(model.l_knots), max(model.l_knots) + dl, dl, dtype=float)
+        l_r = l_r[l_r <= max(model.l_knots)]
+        wave_range = max(model.l_knots) - min(model.l_knots)
+        l_o, spec, pdict = model.simulate_spectrum(
+            t=t,
+            N=N,
+            dl=dl,
+            z=z,
+            mu="z",
+            ebv_mw=0.02,
+            RV=3.1,
+            del_M=0.0,
+            AV=0.1,
+            theta=0.2,
+            eps=0,
+        )
+        assert l_o.shape == (N, l_r.shape[0])
+        assert spec.shape == (N, l_r.shape[0], len(t))
+        assert jnp.all(spec > 0)
+        assert "del_M" in pdict and "AV" in pdict and "theta" in pdict
 
     def test_simulate_spectrum_2d_and_3d_eps(self, model: SEDmodel):
-        orig_wave = model.model_wave
-        orig_J_l_T = model.J_l_T
-        try:
-            t = np.array([0.0])
-            N = 2
-            eps_2d = np.zeros((model.l_knots.shape[0], model.tau_knots.shape[0]))
-            _, spec_2d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_2d, dl=50)
-            assert spec_2d.shape[0] == N
+        t = np.array([0.0])
+        N = 2
+        eps_2d = np.zeros((model.l_knots.shape[0], model.tau_knots.shape[0]))
+        _, spec_2d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_2d, dl=50)
+        assert spec_2d.shape[0] == N
 
-            eps_3d = np.zeros((N, model.l_knots.shape[0], model.tau_knots.shape[0]))
-            _, spec_3d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_3d, dl=50)
-            assert spec_3d.shape[0] == N
-        finally:
-            model.model_wave = orig_wave
-            model.J_l_T = orig_J_l_T
-            model._load_hsiao_template()
-            model.load_ext_rel(model.ext_rel.name)
+        eps_3d = np.zeros((N, model.l_knots.shape[0], model.tau_knots.shape[0]))
+        _, spec_3d, _ = model.simulate_spectrum(t=t, N=N, eps=eps_3d, dl=50)
+        assert spec_3d.shape[0] == N
 
     def test_simulate_spectrum_errors(self, model: SEDmodel):
         t = np.array([0.0])
@@ -774,34 +763,33 @@ class TestSimulation:
             model.simulate_spectrum(t=t, N=N, mu=np.array([30.0, 31.0, 32.0]))
 
     def test_simulate_light_curve_mag_and_flux(self, model: SEDmodel):
-        model._set_used_bands(bands=["g_PS1", "r_PS1"])
+        bands = ["g_PS1", "r_PS1"]
+        model._set_used_bands(bands)
         bw = model._calculate_band_weights(np.array([0.02, 0.03]), np.array([0.01, 0.02]))
         t = np.array([-5.0, 0.0, 10.0])
         N = 2
 
         mag_data, mag_err, pdict = model.simulate_light_curve(
-            t=t, N=N, bands=["g_PS1", "r_PS1"], band_weights=bw, mag=True, yerr=0.05, err_type="mag"
+            t=t, N=N, bands=bands, band_weights=bw, mag=True, yerr=0.05, err_type="mag"
         )
         assert mag_data.shape == (len(t) * 2, N)
         assert mag_err.shape == (len(t) * 2, N)
         assert jnp.all(jnp.isfinite(mag_data))
 
         flux_data, flux_err, _ = model.simulate_light_curve(
-            t=t, N=N, bands=["g_PS1", "r_PS1"], band_weights=bw, mag=False, yerr=0.05, err_type="flux"
+            t=t, N=N, bands=bands, band_weights=bw, mag=False, yerr=0.05, err_type="flux"
         )
         assert flux_data.shape == (len(t) * 2, N)
         assert flux_err.shape == (len(t) * 2, N)
         assert jnp.all(jnp.isfinite(flux_data))
 
     def test_simulate_light_curve_aligned_bands(self, model: SEDmodel):
-        model._set_used_bands(bands=["g_PS1", "r_PS1"])
         t = np.array([0.0, 5.0])
         bands = ["g_PS1", "r_PS1"]
         data, _, _ = model.simulate_light_curve(t=t, N=1, bands=bands, mag=True)
         assert data.shape == (len(t), 1)
 
     def test_simulate_light_curve_parameters(self, model: SEDmodel):
-        model._set_used_bands(bands=["g_PS1"])
         t = np.array([0.0])
         data, _, pdict = model.simulate_light_curve(
             t=t,
@@ -820,7 +808,6 @@ class TestSimulation:
         assert "tmax" in pdict and "mu" in pdict
 
     def test_simulate_light_curve_write_to_files(self, model: SEDmodel, tmp_path: Path):
-        model._set_used_bands(bands=["g_PS1", "r_PS1"])
         t = np.array([0.0, 5.0])
         model.simulate_light_curve(
             t=t,
@@ -840,14 +827,14 @@ class TestSimulation:
 
 class TestPhotometryChains:
     def test_get_flux_from_chains(self, model: SEDmodel, tmp_path: Path):
-        model._set_used_bands(bands=["g_PS1"])
         n_l = model.l_knots.shape[0] - 2
         n_tau = model.tau_knots.shape[0]
         chains = {
+            "Ds": np.full((1, 2, 1), 34),
             "theta": np.zeros((1, 2, 1)),
-            "AV": np.ones((1, 2, 1)) * 0.1,
+            "AV": np.full((1, 2, 1), 0.1),
             "tmax": np.zeros((1, 2, 1)),
-            "mu": np.ones((1, 2, 1)) * 34.0,
+            "mu": np.full((1, 2, 1), 34.0),
             "delM": np.zeros((1, 2, 1)),
             "eps": np.zeros((1, 2, n_l * n_tau, 1)),
         }
