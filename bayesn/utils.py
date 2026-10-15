@@ -65,6 +65,29 @@ def convert_z(
     converted_z_err = np.sqrt(pv_dz**2 + z_dpv**2)
     return converted_z, converted_z_err
 
+def convert_wavelengths(x: Number | ArrayLike, units_in: str, units_out: str = "angstroms"):
+    x_mult = [1, 1]
+    x = np.array(x)
+    x = 1/x if "inv" in units_in else x
+    for i, unit_str in enumerate((units_in, units_out)):
+        match unit_str.lower():
+            case units if "micron" in units or "um" in units:
+                x_mult[i] = 1e4
+            case units if "nanomet" in units or "nm" in units:
+                x_mult[i] = 10
+            case units if "angstrom" in units or "aa" in units:
+                x_mult[i] = 1
+            case _:
+                raise ValueError(
+                    f"Unit string {['units_in', 'units_out'][i]}={unit_str} not "
+                    "recognised as a wavelength unit because it does not contain one "
+                    "of the supported substrings 'micron', 'um', 'nanomet', 'nm', "
+                    "'angstrom', or 'aa'."
+                )
+    x *= x_mult[0]/x_mult[1]
+    x = 1/x if "inv" in units_out else x
+    return x
+
 def _predict(model, args, kwargs, z_unc):
     """Run ``model`` at unconstrained latents z_unc and return the obs-site
     distribution loc (predicted flux), scale, observed value, and a 0/1 mask (1 for
