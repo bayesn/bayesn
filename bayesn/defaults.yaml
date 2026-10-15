@@ -89,10 +89,6 @@ RV: default
 # Parameters for the sampled distribution if RV == "uniform"
 uniform_RV_min: 1
 uniform_RV_max: 6
-# If RV == "uniform" and infer_dust_properties is True, uniform_RV_min/max will be
-# sampled from a normal distribution centred on the value with scale factor
-# sigma_uniform_R.
-sigma_uniform_R: 0.5
 # If RV == "normal", the RVs will be sampled from N(mu_R, sigma_R). If those parameters
 # are "default", use the pre-trained model's values. If mu_R is not defined in the
 # model, fall back on the model's RV value. If sigma_R is not defined, use 0.5.
