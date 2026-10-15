@@ -127,7 +127,7 @@ class SEDmodel(object):
     -------
     get_flux_batch:
         Get integrated fluxes across a large number of SNe, phases, and bands.
-    def get_flux_from_chains:
+    get_flux_from_chains:
         Get model photometry for posterior samples from model fitting chains.
     get_mag_batch:
         Get magnitudes across a large number of SNe, phases, and bands.
@@ -538,7 +538,6 @@ class SEDmodel(object):
             "C00"
             "F04"
             "VCG04"
-            "FM07"
             "GCC09"
             "F19"
             "D22"
@@ -1857,23 +1856,13 @@ class SEDmodel(object):
     ###############################
     ### Astronomical Quantities ###
     ###############################
-    def _get_axav(self, RV: ArrayLike) -> Array:
-        """
-        Parameters
-        ----------
-        RV: ArrayLike shape (N_sn,) or (1, N_sn,)
-            R(V) values used for the calculation.
-
-        Returns
-        -------
-        ax_av: ArrayLike shape (N_sn, N_wl)
-            A set of A(x)/A(V) values calculated with the loaded dust extinction relation.
-        """
-        return self.ext_rel._get_axav(RV)
-
-    def get_axav(self, RV: ArrayLike) -> Array:
-        """ A wrapper for _get_axav that prints out a warning if the RV is out of the
-        specified RV_range.
+    @property
+    def get_axav(self, RV: ArrayLike) -> Callable:
+        """ A non-jit-compilable wrapper for the public get_axav method of the loaded
+        extinction relation. This public method prints out a warning if any RVs are out
+        of the specified RV_range and tries to coerce RVs to the 1D Arrays expected by
+        the private method. The intended use case is for manual axav calculation in a
+        notebook or ipython session. Performant code should use the private method.
 
         Parameters
         ----------
@@ -1885,7 +1874,7 @@ class SEDmodel(object):
         ax_av: ArrayLike shape (N_sn, N_wl)
             A set of A(x)/A(V) values calculated with the loaded extinction relation.
         """
-        return self.ext_rel.get_axav(RV)
+        return self.ext_rel.get_axav
 
     def _get_spectra(
         self,
@@ -1964,7 +1953,7 @@ class SEDmodel(object):
             ).transpose(2, 0, 1)
 
         model_spectra = H_grid * 10 ** (-0.4 * W_grid)
-        A = AV[..., None] * self._get_axav(RV=RV)
+        A = AV[..., None] * self.ext_rel._get_axav(RV=RV)
         f_A = 10 ** (-0.4 * A)
         model_spectra = model_spectra * f_A[..., None]
 
@@ -2381,7 +2370,7 @@ class SEDmodel(object):
             else:
                 sn_bands = bands
             # Padding for NULL_BAND
-            sn_bp_inds = [0] + [self.band_dict[b] for b in sn_bands]
+            sn_bp_inds = [0] + [self.used_band_dict[self.band_dict[b]] for b in sn_bands]
             sn_weights = self.band_weights[i:i+1, :, sn_bp_inds]
             sn_lam_shifts = np.array(lam_shifts)[sn_bp_inds]
             sn_mag_shifts = np.array(mag_shifts)[sn_bp_inds]
@@ -5179,7 +5168,7 @@ class SEDmodel(object):
                 raise ValueError(
                     "band_weights was provided as an array of shape "
                     f"{band_weights.shape}, which does not match the expected shape "
-                    f"(N, N_wl, N_bp) = ({N}, {len(self.model_wave)}, {len(bands)+1}."
+                    f"(N, N_wl, N_bp) = ({N}, {len(self.model_wave)}, {len(bands)+1})."
                 )
 
         data = fn(

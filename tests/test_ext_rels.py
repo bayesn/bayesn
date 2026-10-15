@@ -137,6 +137,10 @@ def test_set_x(F99: DustExtRel, x_units: str, factor: int | float):
     test_der.set_x(x_in="default", x_units=x_units)
     npt.assert_allclose(test_der.x, F99.x)
 
+def test_set_x_bad_x_in(F99: DustExtRel):
+    with pytest.raises(ValueError, match="x_in=standard not recognised"):
+        F99.set_x(x_in="standard")
+
 def test_set_x_bad_units(F99: DustExtRel):
     with pytest.raises(ValueError, match="Unit string"):
         F99.set_x(x_in="default", x_units="inches")
