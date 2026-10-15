@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--drop_bands', type=str, required=False, nargs='*')
     parser.add_argument('--num_warmup', type=int, required=False)
     parser.add_argument('--num_samples', type=int, required=False)
-    parser.add_argument('--snana', type=bool, required=False)
+    parser.add_argument('--snana', action="store_true", default=False, required=False)
     parser.add_argument('--jobsplit', type=int, nargs=2)
     parser.add_argument('--outfile_prefix', type=str, required=False)
     parser.add_argument('--private_data_path', type=str, required=False, nargs='*')

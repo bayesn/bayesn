@@ -225,7 +225,7 @@ def test_vs_de(name: str, atol: float, RV: float = 3.1):
     if name == "G23" and dust_extinction.__version__ < "1.7":
         renorm = 0.9854
     for i, RV in enumerate(RVs):
-        ref_axav[i] = ref_der(RV)(inv_microns[idx]/u.micron) / renorm
+        ref_axav[i] = ref_der(Rv=RV)(inv_microns[idx]/u.micron) / renorm
     npt.assert_allclose(test_axav[:,idx[0]], ref_axav, rtol=0, atol=atol)
 
 
