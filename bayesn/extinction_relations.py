@@ -9,6 +9,7 @@ from jax.typing import ArrayLike
 import numpy as np
 
 from .spline_utils import invKD, spline_coeffs
+from .utils import convert_wavelengths
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXT_REL_DIR = os.path.join(BASE_DIR, "ext_rel_files")
@@ -87,42 +88,19 @@ class DustExtRel:
             raise ValueError("\n    ".join(msg))
 
     def set_x(self, x_in: ArrayLike | str = "default", x_units: str = "angstroms") -> None:
-        x_exp = 1
-        x_mult = [1, 1]
-        error_name = ("extinction relation 'UNIT'", "x_units")
-        for i, unit_str in enumerate((self.units, x_units)):
-            if "inv" in unit_str:
-                x_exp *= -1
-            match unit_str.lower():
-                case units if "micron" in units or "um" in units:
-                    x_mult[i] = 1e4
-                case units if "nanomet" in units or "nm" in units:
-                    x_mult[i] = 10
-                case units if "angstrom" in units or "aa" in units:
-                    x_mult[i] = 1
-                case _:
-                    raise ValueError(
-                        f"Unit string {error_name[i]}={units} not recognised as a "
-                        "wavelength unit because it does not contain one of the "
-                        "supported substrings 'micron', 'um', 'nanomet', 'nm', "
-                        "'angstrom', or 'aa'."
-                    )
-        if isinstance(x_in, str) and x_in == "default":
+        if not isinstance(x_in, str):
+            self.x = convert_wavelengths(x_in, units_in=x_units, units_out=self.units)
+        elif isinstance(x_in, str) and x_in == "default":
             log_range = jnp.log10(jnp.array([self.default_min_wave, self.default_max_wave]))
             log_wave = jnp.power(10, jnp.linspace(*log_range, self.default_wave_bins))
-            self.x = jnp.power(x_mult[1]/x_mult[0] * log_wave, x_exp)
+            self.x = convert_wavelengths(log_wave, units_in=x_units, units_out=self.units)
         elif isinstance(x_in, str) and x_in == "full_range":
             self.x = np.linspace(*self.range, self.default_wave_bins)
         else:
-            self.x = (x_mult[1]/x_mult[0] * x_in) ** x_exp
-
-    def get_undefined_intervals(self, x):
-        undefined_intervals = []
-        if min(x) < min(self.range):
-            undefined_intervals.append(str((min(x), min(self.range))))
-        if max(x) > max(self.range):
-            undefined_intervals.append(str((max(self.range), max(x))))
-        return undefined_intervals
+            raise ValueError(
+                f"x_in={x_in} not recognised. It should be an ArrayLike, 'default', "
+                "or 'full_range'."
+            )
 
     def load(self, name: str, x_in: ArrayLike | str = "default", x_units: str = "angstroms", verbose: bool = True) -> None:
         """
@@ -139,8 +117,8 @@ class DustExtRel:
         sp(x) has knots at L_KNOTS[i] with values given by RV**RV_EXP*P(RV).
 
         RV can be varied during sampling, but everything that can be pre-calculated is
-        stored in the attributes aw_ax, bx, Jx, rv_coeffs,
-        RV_exps, and output_type, which are used by the _get_axav method.
+        stored in the attributes ax, bx, Jx, rv_coeffs, RV_exps, and output_type, which
+        are used by the _get_axav method.
 
         The recognized YAML keywords and their descriptions are described in the
         redlaws/README file.
@@ -178,13 +156,14 @@ class DustExtRel:
         x = np.asarray(self.x)
         zeros = np.zeros((self.n_subdomains, 1))
 
-        undefined_intervals = self.get_undefined_intervals(x)
-        if undefined_intervals != [] and verbose:
+        if verbose and (min(x) < min(self.range) or max(x) > max(self.range)):
+            range_aa = sorted(convert_wavelengths(self.range, units_in=self.units, units_out="angstroms"))
+            x_aa = sorted(convert_wavelengths([min(x), max(x)], units_in=self.units, units_out="angstroms"))
             warn(UserWarning(
-                f"WARNING: The {self.name} dust extinction relation is only valid "
-                f"from {min(self.range)} to {max(self.range)} {self.units}. There will "
-                f"be no extinction applied in {' and '.join(undefined_intervals)} "
-                f"{self.units}."
+                f"The {self.name} dust extinction relation is only valid from from "
+                f"{range_aa[0]} to {range_aa[1]} angstroms but was loaded from "
+                f"{x_aa[0]} to {x_aa[1]}. No extinction will be applied outside the "
+                "supported range."
             ))
 
         der_A = np.zeros_like(x)
@@ -233,11 +212,15 @@ class DustExtRel:
         self.ax = jnp.asarray(der_A)
         self.bx = jnp.asarray(der_B)
         self.Jx = jnp.asarray(der_J)
+
     def _get_axav(self, RV: ArrayLike) -> Array:
-        """
+        """ A jit-compilable method for calculating A(x)/A(V) using the loaded
+        attributes ax, bx, Jx, rv_coeffs, RV_exps, and output_type. See the load
+        docstring for details.
+
         Parameters
         ----------
-        RV: ArrayLike shape (N_sn,) or (1, N_sn,)
+        RV: ArrayLike shape (N_sn,)
             R(V) values used for the calculation.
 
         Returns
@@ -245,8 +228,6 @@ class DustExtRel:
         ax_av: ArrayLike shape (N_sn, N_wl)
             A set of A(x)/A(V) values calculated with the loaded dust extinction relation.
         """
-
-        RV = jnp.atleast_1d(jnp.squeeze(RV)).astype(float)
         max_len_coeffs = self.rv_coeffs.shape[2]
         RV_powers = jnp.linspace(self.rv_exp, self.rv_exp+max_len_coeffs-1, max_len_coeffs)[::-1].T
         RV_matrix = jnp.power(RV[None, None, :], RV_powers[:, :, None])
@@ -261,8 +242,11 @@ class DustExtRel:
         return cond(self.output_type == "exvebv", lambda v: v + 1, no_op, ret_val)
 
     def get_axav(self, RV: ArrayLike, verbose: bool = True) -> Array:
-        """ A wrapper for _get_axav that prints out a warning if the RV is out of the
-        specified RV_range.
+        """ A non-jit-compilable wrapper for the private _get_axav method. This method
+        prints out a warning if any RVs are out of the specified RV_range and tries to
+        coerce RVs to the 1D Arrays expected by the private method. The intended use
+        case is for manual axav calculation in a notebook or ipython session. Performant
+        code should use the private method.
 
         Parameters
         ----------
@@ -274,7 +258,7 @@ class DustExtRel:
         ax_av: ArrayLike shape (N_sn, N_wl)
             A set of A(x)/A(V) values calculated with the loaded extinction relation.
         """
-        shaped_RV = jnp.atleast_1d(jnp.squeeze(RV))
+        shaped_RV = jnp.atleast_1d(jnp.squeeze(RV)).astype(float)
         if verbose and len(shaped_RV.shape) > 1:
             raise ValueError(
                 f"RV should be a constant, 1D-array, or ArrayLike that can be "
@@ -282,11 +266,11 @@ class DustExtRel:
                 f"{shaped_RV.shape}, which is not supported."
             )
         if verbose and (
-            shaped_RV < self.rv_range[0]).any() or (shaped_RV > self.rv_range[1]
-        ).any():
+            (shaped_RV < self.rv_range[0]).any() or (shaped_RV > self.rv_range[1]).any()
+        ):
             warn(UserWarning(
                 f"WARNING: The {self.name} dust extinction relation is only valid with "
-                f"RV in the interval {self.rv_range}. RV={RV} will require "
+                f"RV in the interval {self.rv_range}. RV={shaped_RV} will require "
                 "extrapolation beyond the data used to define the model."
             ))
-        return self._get_axav(RV=RV)
+        return self._get_axav(RV=shaped_RV)
