@@ -642,7 +642,6 @@ class TestModelLogDensity:
         "RV4": {"infer_dust_properties": False, "shared_RV": True, "RV": 4.},
         "normal": {"infer_dust_properties": True, "shared_RV": False, "RV": "normal"},
         "normal_shared": {"infer_dust_properties": False, "shared_RV": True, "RV": "normal"},
-        "uniform": {"infer_dust_properties": True, "shared_RV": False, "RV": "uniform"},
         "uniform_shared": {"infer_dust_properties": False, "shared_RV": True, "RV": "uniform"},
         "mag": {"data_type": "mag"},
         "photoz": {"photoz": True},

@@ -640,7 +640,7 @@ class SEDmodel(object):
         self.M0 = jnp.array(params["M0"])
         self.sigma0 = jnp.array(params["SIGMA0"])
         self.tauA = jnp.array(params["TAUA"])
-        for key in ("RV", "mu_R", "sigma_R", "uniform_RV_min", "uniform_RV_max"):
+        for key in ("RV", "mu_R", "sigma_R"):
             setattr(self, key, None)
         if "RV" in params:
             self.shared_RV = True
@@ -649,10 +649,6 @@ class SEDmodel(object):
             self.shared_RV = False
             self.mu_R = jnp.array(params["MUR"])
             self.sigma_R = jnp.array(params["SIGMAR"])
-        elif "UNIFORM_RV_MIN" in params:
-            self.shared_RV = False
-            self.uniform_RV_min = jnp.array(params["UNIFORM_RV_MIN"])
-            self.uniform_RV_max = jnp.array(params["UNIFORM_RV_MAX"])
         # Build the model wavelengths in log space
         self.min_wave = min(self.l_knots)
         self.max_wave = max(self.l_knots)
@@ -1644,7 +1640,6 @@ class SEDmodel(object):
             relevant_kwargs_dict.update({
                 "RV": {
                     "normal": ("mu_R_min", "mu_R_max", "sigma_sigma_R"),
-                    "uniform": ("uniform_RV_min", "uniform_RV_max", "sigma_uniform_R",)
                 },
                 "vary_redshift": {
                     True: ("tau_z_min", "tau_z_max"),
@@ -1690,11 +1685,6 @@ class SEDmodel(object):
                 f"shared_RV is False but RV is {args['RV']}. The run will proceed but "
                 "you should know that all SNe will share that value for RV."
             ))
-        if args["shared_RV"] and args["infer_dust_properties"] and verbose:
-            warn(UserWarning(
-                "shared_RV is True and infer_dust_properties is True. The dust "
-                "properties will be poorly constrained with one shared draw of RV."
-            ))
 
         # Errors for configuraitons that will break things.
         if args["RV"] not in ("normal", "uniform") and not isinstance(args["RV"], Number):
@@ -1709,6 +1699,12 @@ class SEDmodel(object):
                 raise ValueError("mu_R_min must be less than mu_R_max.")
             if float(args["sigma_sigma_R"]) <= 0:
                 raise ValueError("sigma_sigma_R must be positive.")
+            if verbose and args["shared_RV"]:
+                warn(UserWarning(
+                    "RV is 'normal' and shared_RV and infer_dust_properties are both "
+                    "True. mu_R and sigma_R will be poorly constrained with one shared "
+                    "draw of RV."
+                ))
         elif args["RV"] == "normal" and not args["infer_dust_properties"]:
             for name in ("mu_R", "sigma_R"):
                 check_scalar(name)
@@ -1719,10 +1715,12 @@ class SEDmodel(object):
                 check_scalar(name)
             if float(args["uniform_RV_min"]) >= float(args["uniform_RV_max"]):
                 raise ValueError("uniform_RV_min must be less than uniform_RV_max. ")
-            if args["infer_dust_properties"]:
-                check_scalar("sigma_uniform_R")
-                if float(args["sigma_uniform_R"]) <= 0:
-                    raise ValueError("sigma_uniform_R must be positive.")
+            if args["infer_dust_properties"] and not args["shared_RV"]:
+                raise NotImplementedError(
+                    "Inferring the hyper-parameters of uniform RV distributions is "
+                    "not supported. Please change one of the following arguments: "
+                    "'RV', 'shared_RV', 'infer_dust_properties'."
+                )
 
         choice_dict = {
             "data_type": {"flux", "mag"},
@@ -2493,7 +2491,6 @@ class SEDmodel(object):
         infer_dust_properties:
             If True, samples sigma0, tauA.
                 If RV is "normal", also samples mu_R, sigma_R
-                If RV is "uniform", also samples uniform_RV_min/max
                 If vary_redshift is True, also samples mu_z_grad and tau_z_grad.
             If False, uses pre-computed model attributes.
         shared_RV:
@@ -2753,7 +2750,6 @@ class SEDmodel(object):
         tau_z_max: float = 0.5,
         uniform_RV_min: float = 1,
         uniform_RV_max: float = 6,
-        sigma_uniform_R: float = 0.5,
         **kwargs: Any,
     ) -> tuple[Array, Array, Array | None, Array | None, Array | None, Array | None, Array | None, Array | None]:
         """Draw SN population level parameters that may vary by sub-population
@@ -2763,16 +2759,7 @@ class SEDmodel(object):
         sigma0 = numpyro.sample(f"sigma0{suffix}", dist.HalfCauchy(0.1))
         tauA = numpyro.sample(f"tauA{suffix}", dist.HalfCauchy(1))
 
-        if RV == "uniform":
-            uniform_RV_min = numpyro.sample(
-                f"uniform_RV_min{suffix}",
-                dist.TruncatedNormal(uniform_RV_min, sigma_uniform_R, low=0)
-            )
-            uniform_RV_max = numpyro.sample(
-                f"uniform_RV_max{suffix}",
-                dist.TruncatedNormal(uniform_RV_max, sigma_uniform_R, low=uniform_RV_min)
-            )
-        elif RV == "normal":
+        if RV == "normal":
             mu_R = numpyro.sample(f"mu_R{suffix}", dist.Uniform(mu_R_min, mu_R_max))
             sigma_R = numpyro.sample(f"sigma_R{suffix}", dist.HalfNormal(sigma_sigma_R))
 
