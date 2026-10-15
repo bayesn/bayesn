@@ -103,6 +103,7 @@ def loaded_model_and_args(initial_args: dict, model: SEDmodel) -> tuple[SEDmodel
     # T21_mini_set.txt uses PS1 data.
     model._set_used_bands(bands=[f"{bp}_PS1" for bp in "griz"])
     args = model.parse_args(initial_args, cmd_args, verbose=False)
+    args["outputdir"].rmdir()
     model.process_dataset(args)
     return model, args
 
@@ -435,6 +436,15 @@ class TestYaml:
         # If regenerating the pickled results, remove your personal directory structure
         # before dumping with args["data_root"] = args["data_root"].lstrip(BASE_DIR)
         _, args = loaded_model_and_args
+        # Uncomment this block to make new pickles.
+        # Please only do this if you're sure you know what you're doing.
+        # --------------------------------------------------------------
+        # dump_args = copy.deepcopy(args)
+        # dump_args["data_root"] = dump_args["data_root"].lstrip(str(BASE_DIR))
+        # dump_args["outputdir"] = Path(str(dump_args["outputdir"]).lstrip(str(BASE_DIR)))
+        # with open(PICKLE_DIR / "full_args.pkl", "wb") as f:
+        #     pickle.dump(dump_args, f)
+        # --------------------------------------------------------------
         with open(PICKLE_DIR / "full_args.pkl", "rb") as f:
             ref_args = pickle.load(f)
         ref_args["data_root"] = str(BASE_DIR / ref_args["data_root"])
@@ -674,6 +684,7 @@ class TestModelLogDensity:
         #     ref_data["site_log_probs"][name] = model_trace[name]["fn"].log_prob(model_trace[name]["value"]).sum()
         # with open(PICKLE_DIR / f"T21_log_probs_{variant}.pkl", "wb") as f:
         #     pickle.dump(ref_data, f)
+        # --------------------------------------------------------------
 
         with open(PICKLE_DIR / f"T21_log_probs_{variant}.pkl", "rb") as f:
             ref_data = pickle.load(f)
