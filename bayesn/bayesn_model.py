@@ -90,7 +90,7 @@ np.seterr(divide="ignore", invalid="ignore")  # Disable divide by zero warnings
 # jax.config.update("jax_platform_name", "cpu")  # Forces CPU
 
 BASE_DIR: Path = Path(__file__).parent.absolute()
-with open(BASE_DIR.parent / "defaults.yaml", "r") as file:
+with open(BASE_DIR / "defaults.yaml", "r") as file:
     default_kwargs = yaml.load(file)
 default_kwargs["AV_dist"] = dist.Exponential
 
@@ -1778,6 +1778,7 @@ class SEDmodel(object):
             Combination of arguments from input yaml file and command line overrides,
             defines model wavelength range and data set to load.
         """
+        survey_dict = {}
         if args.get("version_photometry"):
             data_dir, survey_dict = find_data_dir_in_SNANA(
                 private_data_path=args["private_data_path"]
@@ -1793,12 +1794,6 @@ class SEDmodel(object):
                 njobtot=args["njobtot"],
                 sim_prescale=args["sim_prescale"],
             )
-            surveys = [s for s in ds.idsurvey if s is not None]
-            if len(surveys) == 1:
-                self.survey = surveys[0]
-            else:
-                self.survey = "NULL"
-            self.survey_id = survey_dict.get(self.survey, 0)
         else:
             table_path = Path(args["data_root"], args["data_table"])
             data_root = args["data_root"]
@@ -1811,6 +1806,18 @@ class SEDmodel(object):
                 njobtot=args["njobtot"],
                 sim_prescale=args["sim_prescale"],
             )
+        if survey_dict == {}:
+            survey_dict = {
+                s: i for i,s in enumerate(np.unique(ds.survey)) if s is not None
+            }
+        surveys = [s for s in ds.survey if s is not None]
+        if len(surveys) == 1:
+            self.survey = surveys[0]
+        elif len(surveys) and all([s == surveys[0] for s in surveys]):
+            self.survey = surveys[0]
+        else:
+            self.survey = "NULL"
+        self.survey_id = survey_dict.get(self.survey, 0)
 
         ds.apply_filter_map(args["map"])
         ds.drop_bands(args["drop_bands"])
@@ -3860,7 +3867,6 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in
             memory when making plots
         """
-        rng = np.random.default_rng(RNG_seed)
         if zpt is not None and self.ZPT != zpt:
             warn(UserWarning(
                 f"Overwriting the current ZPT ({self.ZPT}) with zpt={zpt}."
@@ -4032,7 +4038,7 @@ class SEDmodel(object):
             muhat = self.cosmo.distmod(z).value
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            samples["mu"] = rng.normal(
+            samples["mu"] = np.random.default_rng(RNG_seed).normal(
                 loc=(
                     samples["Ds"] * np.power(muhat_err, 2)
                     + muhat * np.power(self.sigma0, 2)
@@ -4283,8 +4289,10 @@ class SEDmodel(object):
         for key, val in dump_args.items():
             if isinstance(val, Path):
                 dump_args[key] = str(val)
-            elif isinstance(val, Array):
+            elif isinstance(val, Array) and getattr(val.ndim, 1) == 1:
                 dump_args[key] = float(val)
+            elif isinstance(val, Array | np.ndarray):
+                dump_args[key] = val.tolist()
             elif val == dist.Exponential:
                 dump_args[key] = "dist.Exponential"
             elif val == zltn.My_Exponential:

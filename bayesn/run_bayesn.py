@@ -40,18 +40,21 @@ def main():
     parser.add_argument('--file_format', type=int, required=False)
     parser.add_argument('--save_fit_errors', type=int, required=False)
     parser.add_argument('--peakmjd_key', type=str, required=False)
-    parser.add_argument('--keep_list', type=float, required=False)
+    parser.add_argument('--keep_list', type=str, required=False)
     parser.add_argument('--error_floor', type=float, required=False)
     parser.add_argument('--batch_size', type=int, required=False)
-    parser.add_argument('--num_lcplot', type=float, required=False)
+    parser.add_argument('--num_lcplot', type=int, required=False)
     parser.add_argument('--save_summary', type=float, required=False)
     cmd_args = parser.parse_args()
 
     init_sig = inspect.signature(SEDmodel.__init__)
 
     if not os.path.exists(cmd_args.input):
-        raise FileNotFoundError(f'Specified input file ({cmd_args.input}) was not found, please provide the path to an '
-                                f'input yaml file or create an input.yaml in your current directory')
+        raise FileNotFoundError(
+            f"Specified input file ({cmd_args.input}) was not found, please provide "
+            f"the path to an input yaml file or create an input.yaml in your current "
+            "directory."
+        )
     with open(cmd_args.input, 'r') as file:
         args = yaml.load(file)
 
@@ -60,8 +63,8 @@ def main():
         if args.get("load_model", cmd_args.load_model) != cmd_args.load_model:
             print(
                 f"Input yaml contains load_model={args['load_model']}, which differs "
-                "from the command line arg {cmd_args.load_model}. The latter will "
-                "override the former, so load_model will be {cmd_args.load_model}."
+                f"from the command line arg {cmd_args.load_model}. The latter will "
+                f"override the former, so load_model will be {cmd_args.load_model}."
             )
         args["load_model"] = cmd_args.load_model
     elif "load_model" not in args:
@@ -73,9 +76,10 @@ def main():
     if cmd_args.load_ext_rel is not None:
         if args.get("load_ext_rel", cmd_args.load_ext_rel) != cmd_args.load_ext_rel:
             print(
-                f"Input yaml contains load_ext_rel={args['load_ext_rel']}, which differs "
-                "from the command line arg {cmd_args.load_ext_rel}. The latter will "
-                "override the former, so load_ext_rel will be {cmd_args.load_ext_rel}."
+                f"Input yaml contains load_ext_rel={args['load_ext_rel']}, which "
+                f"differs from the command line arg {cmd_args.load_ext_rel}. The "
+                "latter will override the former, so load_ext_rel will be "
+                f"{cmd_args.load_ext_rel}."
             )
         args["load_ext_rel"] = cmd_args.load_ext_rel
     elif "load_ext_rel" not in args:
