@@ -109,7 +109,8 @@ with open("BAYESN.YAML", "w") as f:
         f"RV_RANGE: [2.0, 6.0]\n"
     )  # F99 range from dust_extinction. Sample in paper [2.22, 5.83]
     # only replicates F99 at RV=3.1
-    f.write(f"SUBDOMAIN_EXP: [{', '.join(str(x) for x in exps)}]\n")
+    f.write(f"A_EXP: [{', '.join(str(x) for x in exps)}]\n")
+    f.write(f"B_EXP: [{', '.join(str(x) for x in exps)}]\n")
     for arr, name in zip(
         (
             wns,

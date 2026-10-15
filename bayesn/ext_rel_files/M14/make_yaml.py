@@ -48,8 +48,9 @@ a_bcs, b_bcs = [[[1, 0], [1, 0]] for _ in range(2)]
 # first set of knots
 coeffs["sp"][idx][0]   = P([ 0.574*x1[0]**1.61])  # a1v
 coeffs["sp"][idx+1][0] = P([-0.527*x1[0]**1.61])  # b1v
-a_bcs[0][1] =  0.574*1.61*x1[0]**0.61
-b_bcs[0][1] = -0.527*1.61*x1[0]**0.61
+# float format to avoid np.float64(...) string representations in numpy >= 2
+a_bcs[0][1] = float( 0.574*1.61*x1[0]**0.61)
+b_bcs[0][1] = float(-0.527*1.61*x1[0]**0.61)
 # second set of knots is messy
 shift_2v = P([-1.82, 1])
 for i in range(len(x1), len(x1)+len(x2)):
@@ -63,8 +64,9 @@ b_dx3 = 4.62
 for i in range(len(x1)+len(x2), len(xk)):
     coeffs["sp"][idx][i]   = P([ 1.752 - 0.316*xk[i] - 0.104/((xk[i] - a_dx3)**2 + 0.341) + a_extra[i]])  # a3v
     coeffs["sp"][idx+1][i] = P([-3.090 + 1.825*xk[i] + 1.206/((xk[i] - b_dx3)**2 + 0.263) - b_extra[i]])  # b3v
-a_bcs[1][1] = -0.316 + 0.104*2*(x3[-1]-4.67)/((x3[-1] - a_dx3)**2 + 0.341)**2
-b_bcs[1][1] =  1.825 - 1.206*2*(x3[-1]-4.62)/((x3[-1] - b_dx3)**2 + 0.263)**2
+# float format to avoid np.float64(...) string representations in numpy >= 2
+a_bcs[1][1] = float(-0.316 + 0.104*2*(x3[-1]-4.67)/((x3[-1] - a_dx3)**2 + 0.341)**2)
+b_bcs[1][1] = float( 1.825 - 1.206*2*(x3[-1]-4.62)/((x3[-1] - b_dx3)**2 + 0.263)**2)
 idx += 2
 
 # The UV subdomain is actually split into two subdomains, NUV and UV, the latter having
