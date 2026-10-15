@@ -63,7 +63,7 @@ from matplotlib import rc
 import scipy
 from scipy.interpolate import interp1d
 from scipy.integrate import simpson
-from scipy.stats import truncnorm
+from scipy.stats import truncnorm, chi2
 import sncosmo
 import timeit
 from ruamel.yaml import YAML
@@ -3797,6 +3797,7 @@ class SEDmodel(object):
         num_chains: int = 4,
         chain_method: str = "parallel",
         zpt: None | Number = None,
+        RNG_seed: None | int = None,
         **kwargs: Any,
     ) -> tuple[dict, tuple]:
         """
@@ -3859,6 +3860,7 @@ class SEDmodel(object):
             Tuple containing SN redshift and MW E(B-V), which can be useful to have in
             memory when making plots
         """
+        rng = np.random.default_rng(RNG_seed)
         if zpt is not None and self.ZPT != zpt:
             warn(UserWarning(
                 f"Overwriting the current ZPT ({self.ZPT}) with zpt={zpt}."
@@ -4030,7 +4032,7 @@ class SEDmodel(object):
             muhat = self.cosmo.distmod(z).value
             muhat_err = 5
             Ds_err = jnp.sqrt(muhat_err * muhat_err + self.sigma0 * self.sigma0)
-            samples["mu"] = np.random.normal(
+            samples["mu"] = rng.normal(
                 loc=(
                     samples["Ds"] * np.power(muhat_err, 2)
                     + muhat * np.power(self.sigma0, 2)
@@ -4058,7 +4060,8 @@ class SEDmodel(object):
         args: dict,
         l_knot_1: Number = 6200.0,
         tau_knot_0: Number = 0.0,
-        tau_knot_1: Number = 10.0
+        tau_knot_1: Number = 10.0,
+        RNG_seed: None | int = None,
     ) -> None:
         """
         Function to postprocess BayeSN output. Applies transformations to some
@@ -4075,6 +4078,7 @@ class SEDmodel(object):
             Combination of arguments from input yaml file and command line overrides,
             defines model wavelength range and data set to load.
         """
+        rng = np.random.default_rng(RNG_seed)
         start = time.time()
         if args["fix_tmax"]:
             samples["tmax"] = np.zeros_like(samples["Ds"])
@@ -4110,7 +4114,7 @@ class SEDmodel(object):
                 samples["mu"] = samples["Ds"]
                 samples["delM"] = np.zeros_like(samples["Ds"])
             else:
-                samples["mu"] = np.random.normal(
+                samples["mu"] = rng.normal(
                     loc=(
                         samples["Ds"] * np.power(muhat_err, 2)
                         + self.data.muhat * np.power(self.sigma0, 2)
@@ -4443,8 +4447,6 @@ class SEDmodel(object):
         ndof : array (n_sne,)
             Effective degrees of freedom: N_obs + alpha*N_eps - N_params
         """
-        from scipy.stats import chi2 as chi2_dist
-
         n_sne = self.data.z_hel.shape[0]
 
         # --- 1. Posterior means ---
@@ -4557,7 +4559,7 @@ class SEDmodel(object):
         ndof = (np.sum(np.array(mask), axis=0) + alpha * N_knots_sig - N_params).astype(int)
         fitprob = np.where(
             (ndof > 0) & (T_joint > 0),
-            chi2_dist.sf(T_joint, ndof),
+            chi2.sf(T_joint, ndof),
             1.0
         )
         return fitprob, T_joint, ndof
@@ -5061,6 +5063,8 @@ class SEDmodel(object):
             return var
 
         self._set_used_bands(bands)
+        if self.ext_rel.name != ext_rel:
+            self.load_ext_rel(ext_rel)
         param_dict = {
             "del_M": (del_M, self.sample_del_M, N),
             "AV": (AV, self.sample_AV, N),

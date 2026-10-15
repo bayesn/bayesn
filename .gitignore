@@ -5,7 +5,10 @@ bayesn/data/dust_maps/
 model_files/T21_model/T21_free_tmax
 bayesn.egg-info/
 build/
+bayesn/data/dust_maps/
 *__pycache__*
 *.swp
+*.dat~
 .coverage
-bayesn/data/dust_maps/
+.ipynb_checkpoints/
+.pytest_cache/
