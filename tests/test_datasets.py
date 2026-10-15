@@ -43,7 +43,7 @@ def random_sn_dict(RNG_seed=0, N=1, sim=False) -> dict[str, str | Number]:
     sn_dict = {
             "snid":             np.array([f"test{i}" for i in range(N)]),
             "field":            np.full(N, "test_field"),
-            "idsurvey":         np.full(N, "test_survey"),
+            "survey":           np.full(N, "test_survey"),
             "cutflag_snana":    np.full(N, "test_cut"),
             "ra":               rng.uniform(size=N)*360,
             "dec":              rng.uniform(size=N)*180-90,
@@ -1009,7 +1009,7 @@ class TestFactoryMethods:
 class TestDataProducts:
     def test_make_fitres_table(self, dataset_two_sne):
         fitres_table, all_table = dataset_two_sne.make_fitres_table(
-            version_photometry=False, idsurvey_overwrite="test"
+            version_photometry=False, survey_overwrite="test", survey_dict={"test": 1},
         )
         cols = [
             "VARNAMES:", "CID", "IDSURVEY", "TYPE", "FIELD", "zHEL", "zHELERR", "zHD",
@@ -1017,7 +1017,7 @@ class TestDataProducts:
             "SNRMAX1", "SNRMAX2", "SNRMAX3",
         ]
         npt.assert_equal(list(fitres_table.columns), cols)
-        npt.assert_equal(all_table["IDSURVEY"].values, "test")
+        npt.assert_equal(all_table["IDSURVEY"].values, 1)
         npt.assert_equal(all_table["DROP"].values, "")
         pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
 

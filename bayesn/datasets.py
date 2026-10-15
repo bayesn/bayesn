@@ -34,7 +34,7 @@ from bayesn import utils, constants
 ### Global constants ###
 ########################
 meta_names: dict[str, list[str, ...]] = {
-    "str": ["snid", "field", "idsurvey", "cutflag_snana"],
+    "str": ["snid", "field", "survey", "cutflag_snana"],
     "num": [
         "ra", "dec", "peak_mjd", "sn_type",
         "z_helio", "z_helio_err",
@@ -55,7 +55,7 @@ all_meta_names: list[str, ...] = (
 # default_values are for making data products compatible with SNANA.
 default_values: dict[str, str | Number] = {
     "field": "VOID",
-    "idsurvey": "NULL",
+    "survey": "NULL",
     "cutflag_snana": "NULL",
     "sn_type": 0,
     "z_helio_err": 5e-4,
@@ -103,7 +103,6 @@ def get_standard_name(name: str) -> str:
         "hostgal_logmass":     "host_logmass",
         "hostgal_logmass_err": "host_logmass_err",
         "vpecerr":             "vpec_err",
-        "survey":              "idsurvey",
         "nepoch":              "N_obs",
         "nobs":                "N_obs",
         "n_obs":               "N_obs",
@@ -269,7 +268,7 @@ class SNDataset:
     snid:          np.ndarray = dataclasses_field(default_factory=default_arr_str)
     # For SNANA compatibility
     field:         np.ndarray = dataclasses_field(default_factory=default_arr_str)
-    idsurvey:      np.ndarray = dataclasses_field(default_factory=default_arr_str)
+    survey:      np.ndarray = dataclasses_field(default_factory=default_arr_str)
     cutflag_snana: np.ndarray = dataclasses_field(default_factory=default_arr_str)
 
     # numeric metadata arrays
@@ -672,7 +671,7 @@ class SNDataset:
         indices = self.get_idx(sn_dict["snid"])
         meta = self.get_metadata_subset(idx=indices)
         # some metadata should be allowed to vary.
-        for key in ("idsurvey", "N_obs"):
+        for key in ("survey", "N_obs"):
             meta.pop(key, None)
             sn_dict.pop(key, None)
         utils.assert_dicts_match(meta, sn_dict, flag_missing_data=False)
@@ -1446,9 +1445,10 @@ class SNDataset:
     def make_fitres_table(
         self,
         version_photometry: bool = False,
-        idsurvey_overwrite: None | str = None,
+        survey_overwrite: None | str = None,
         cut_dict: dict = {},
         keep_dict: dict = {},
+        survey_dict: dict = {},
     ) -> QTable:
         """ Create a fitres table which has something to do with SNANA and PIPPIN...
         Parameters
@@ -1456,9 +1456,9 @@ class SNDataset:
         version_photometry:
             There are some fitres table columns that are only included if working with
             the version_photometry arg. This boolean flag adds those extra keys if True.
-        idsurvey_overwrite:
-            If None, use the list of strings in the idsurvey attribute, else use the
-            idsurvey_overwrite string for each SN in the dataset.
+        survey_overwrite:
+            If None, use the list of strings in the survey attribute, else use the
+            survey_overwrite string for each SN in the dataset.
         keep_dict:
             Dictionary with keys matching fitres_table columns and values indicating
             what to keep, cutting all else.
@@ -1479,15 +1479,15 @@ class SNDataset:
         """
         meta = self.get_metadata_subset(use_defaults=True)
         varlist = ["SN:"] * self.N_sn
-        if idsurvey_overwrite is None:
-            idsurvey = meta["idsurvey"]
+        if survey_overwrite is None:
+            survey = meta["survey"]
         else:
-            idsurvey = [idsurvey_overwrite,] * self.N_sn
+            survey = [survey_overwrite,] * self.N_sn
         snrmaxes = np.array([self.calculate_snrmaxes(snid, N=3, default_value=-99) for snid in self.snid])
         arr_dict = {
             "VARNAMES:": varlist,
             "CID": meta["snid"],
-            "IDSURVEY": idsurvey,
+            "IDSURVEY": [survey_dict.get(s, 0) for s in survey],
             "TYPE": meta["sn_type"],
             "FIELD": meta["field"],
             "zHEL": meta["z_helio"],

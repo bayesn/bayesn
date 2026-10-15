@@ -2,6 +2,7 @@ import functools
 from numbers import Number
 import os
 from pathlib import Path
+import subprocess
 
 from astropy.coordinates import EarthLocation, SkyCoord
 import astropy.units as u
@@ -330,8 +331,8 @@ def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, flag_nans=Fa
                 raise AssertionError(
                     f"The dictionaries contain numeric data in key {key} that are not "
                     f"close when using rtol={rtol} and atol={atol}. The discrepant "
-                    f"indices are {list(idx) for idx in np.array(bad_idx).T}, with the "
-                    f"values in d1[{key}]={[val1[bad_idx]]} and in d2[{key}]="
+                    f"indices are {[list(idx) for idx in np.array(bad_idx).T]}, with "
+                    f"the values in d1[{key}]={[val1[bad_idx]]} and in d2[{key}]="
                     f"{[val2[bad_idx]]}"
                 )
         except ValueError:  # From trying to get a float array of non-numbers

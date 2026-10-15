@@ -448,7 +448,7 @@ class TestYaml:
         with open(PICKLE_DIR / "full_args.pkl", "rb") as f:
             ref_args = pickle.load(f)
         ref_args["data_root"] = str(BASE_DIR / ref_args["data_root"])
-        ref_args["outputdir"] = Path(ref_args["outputdir"])
+        ref_args["outputdir"] = Path(ref_args["outputdir"]).resolve()
         assert args == ref_args
 
 class TestSpectra:
