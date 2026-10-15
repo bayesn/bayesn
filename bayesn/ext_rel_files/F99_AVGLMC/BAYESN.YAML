@@ -6,7 +6,7 @@ UNITS: inverse microns
 WAVE_RANGE: [0.2857142857142857, 10.964912280701755]
 RV_RANGE: [2.0, 6.0]
 OUTPUT_TYPE: axebv
-SPLINE_BC_TYPE: [natural, None, None]
+SPLINE_BC_TYPE: [natural, natural, natural]
 RV_EXP: [-1, 0, 0]
 RV_COEFFS:
 - - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

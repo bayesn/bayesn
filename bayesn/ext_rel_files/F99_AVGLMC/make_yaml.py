@@ -118,7 +118,7 @@ with open("BAYESN.YAML", "w") as f:
         f"RV_RANGE: [2.0, 6.0]\n"
     )  # from dust_extinction. Sample in paper [2.22, 5.83]
     f.write("OUTPUT_TYPE: axebv\n")
-    f.write("SPLINE_BC_TYPE: [natural, None, None]\n")
+    f.write("SPLINE_BC_TYPE: [natural, natural, natural]\n")
     f.write(f"RV_EXP: [{', '.join(RV_exps.astype(str))}]\n")
     f.write("RV_COEFFS:\n")
     for subdomain_coeffs in coeffs["sp"]:
