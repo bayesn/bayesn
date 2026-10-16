@@ -9,8 +9,6 @@ from typing import Any
 from unittest.mock import patch
 from warnings import warn
 
-from bayesn.bayesn_model import SEDmodel, default_kwargs
-from bayesn import io
 import argparse
 import astropy.units as u
 import jax
@@ -21,16 +19,9 @@ from numpyro.handlers import trace, seed
 from numpyro.infer.util import log_density
 import pandas as pd
 import pytest
-try:
-    import extinction
-    ext_loaded = True
-except ModuleNotFoundError:
-    ext_loaded: bool = False
-try:
-    from dust_extinction import parameter_averages as de
-    de_loaded: bool = True
-except ModuleNotFoundError:
-    de_loaded: bool = False
+
+from bayesn.bayesn_model import SEDmodel, default_kwargs
+from bayesn import io
 
 BASE_DIR: Path = Path(__file__).parent.parent.absolute()
 TEST_DIR: Path = BASE_DIR / "tests/test_files"
