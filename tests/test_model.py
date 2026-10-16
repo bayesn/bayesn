@@ -1,5 +1,5 @@
 import os
-import copy
+from copy import deepcopy
 from pathlib import Path
 import pickle
 from ruamel.yaml import YAML
@@ -16,6 +16,7 @@ import astropy.units as u
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpy.testing as npt
 from numpyro.handlers import trace, seed
 from numpyro.infer.util import log_density
 import pandas as pd
@@ -38,7 +39,8 @@ NON_EXISTENT_PATH: Path = TEST_DIR / "non_existent"
 N_sn: int = 5
 N_epochs: int = 10
 rng_seed: int = 1
-rng_key: jax._src.prng.PRNGKeyArray = jax.random.key(rng_seed)
+rng: np.random.Generator = np.random.default_rng(rng_seed)
+jax_rng_key: jax._src.prng.PRNGKeyArray = jax.random.key(rng_seed)
 
 def non_existent_check():
     if NON_EXISTENT_PATH.exists():
@@ -82,20 +84,29 @@ def custom_model(initial_args: dict, model: SEDmodel) -> SEDmodel:
 
 @pytest.fixture(scope="module")
 def sample_model_parameters(model: SEDmodel) -> tuple[jax.Array, ...]:
+    """ Fixture parameters for N_sn SNe with <=N_epochs observations each.
+    Assumes observations are in PS1 griz, so with NULL_BAND, band_indices spans [0, 5].
+    First SN will have N_epochs observations.
+    """
     mu_R = 3.1
     sigma_R = 0.5
-    theta = jax.random.normal(rng_key, (N_sn,))
-    AV = jax.random.exponential(rng_key, (N_sn,))
-    RV = mu_R + sigma_R*jax.random.normal(rng_key, (N_sn,))
-    W0 = jax.random.normal(rng_key, (N_sn, *model.W0.shape))
-    W1 = jax.random.normal(rng_key, (N_sn, *model.W1.shape))
-    eps = jax.random.normal(rng_key, (N_sn, *model.W1.shape))
-    eps = eps.at[:,0].set(0).at[:,-1].set(0)
-    t = jax.random.uniform(rng_key, (N_epochs, N_sn))
+    min_epochs = 5
+    max_epochs = 10
+    theta = rng.normal(size=N_sn)
+    AV = rng.exponential(size=N_sn)
+    RV = mu_R + sigma_R*rng.normal(size=N_sn)
+    W0, W1, eps = [rng.normal(size=(N_sn, *model.W0.shape)) for _ in range(3)]
+    eps[:,0] = eps[:,-1] = 0
+    t = rng.uniform(size=(N_epochs, N_sn))
     J_t = model.get_J_t(t)
     hsiao_interp = model.get_hsiao_interp(t)
-    z = 0.1*jax.random.uniform(rng_key, (N_sn,))
-    return theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, z
+    z = rng.uniform(0, 0.1, size=N_sn)
+    band_indices = rng.choice(range(1, 5), size=(N_epochs, N_sn))
+    mask = np.ones_like(band_indices)
+    mask_start_idx = rng.choice(range(min_epochs, max_epochs+1), size=N_sn)
+    for i in range(1, N_sn):  # i=0 has all epochs
+        mask[mask_start_idx[i]:,i] = 0
+    return theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, z, band_indices, mask
 
 @pytest.fixture(scope="module")
 def loaded_model_and_args(initial_args: dict, model: SEDmodel) -> tuple[SEDmodel, dict]:
@@ -188,8 +199,7 @@ class TestInit:
     def test_model_array(self, model: SEDmodel, arr_name: str, shape: tuple[int,int], rtol: float=0, atol: float =1e-15):
         test_obj = getattr(model, arr_name)
         assert test_obj.shape == shape
-        with open(PICKLE_DIR / f"{arr_name}.pkl", "rb") as f:
-            ref = pickle.load(f)
+        ref = np.load(PICKLE_DIR / f"{arr_name}.npy")
         np.testing.assert_allclose(test_obj, ref, rtol=rtol, atol=atol)
 
     def test_init_band_dicts(self, model: SEDmodel):
@@ -215,8 +225,7 @@ class TestHsiao:
     def test_hsiao_array(self, model, arr_name, shape):
         test_obj = getattr(model, arr_name)
         assert test_obj.shape == shape
-        with open(PICKLE_DIR / f"{arr_name}.pkl", "rb") as f:
-            ref = pickle.load(f)
+        ref = np.load(PICKLE_DIR / f"{arr_name}.npy")
         np.testing.assert_allclose(test_obj, ref, rtol=1e-8, atol=1e-15)
 
 class TestBandWeights:
@@ -247,7 +256,7 @@ class TestBandWeights:
 
     @pytest.mark.parametrize("filter_yaml", ("test_filter_std_root.yaml", "test_filter_filt_root.yaml"))
     def test_custom_filter_dict(self, model: SEDmodel, filter_yaml: str):
-        model = copy.deepcopy(model)
+        model = deepcopy(model)
         model.filter_yaml = TEST_DIR / filter_yaml
         # filter.yaml file uses env variable
         old_env = os.environ.pop("BAYESN_TEST_VAR", None)
@@ -286,7 +295,7 @@ class TestBandWeights:
     def test_load_band_weights_shift_df(self, model: SEDmodel):
         shift_file = TEST_DIR / "test_shift_file_PS1.dat"
         shift_df = pd.read_csv(shift_file, comment="#")
-        shift_model = copy.deepcopy(model)
+        shift_model = deepcopy(model)
         model._load_band_weights(bands_to_load=[f"{bp}_PS1" for bp in "griz"], shift_df=None)
         shift_model._load_band_weights(
             bands_to_load=[f"{bp}_PS1" for bp in "griz"],
@@ -338,12 +347,11 @@ class TestBandWeights:
         ebv = AV / model.RV_MW
         bands = [f"{bp}_PS1" for bp in "griz"]
         model._set_used_bands(bands=bands)
-        band_weights = model._calculate_band_weights(redshifts, ebv, lam_shifts=0)
-        with open(PICKLE_DIR / "T21_band_weights.pkl", "rb") as f:
-            example_band_weights = pickle.load(f)
+        test_weights = model._calculate_band_weights(redshifts, ebv, lam_shifts=0)
+        ref_weights = np.load(PICKLE_DIR / "T21_band_weights.npy")
         # +1 for NULL_BAND
-        assert band_weights.shape == (N_sn, len(model.model_wave), len(bands)+1)
-        np.testing.assert_allclose(band_weights, example_band_weights, rtol=rtol, atol=atol)
+        assert test_weights.shape == (N_sn, len(model.model_wave), len(bands)+1)
+        np.testing.assert_allclose(test_weights, ref_weights, rtol=rtol, atol=atol)
 
 class TestYaml:
     expected_values: dict = {
@@ -358,14 +366,14 @@ class TestYaml:
     }
 
     def test_parse_mode_fitting(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fitting"
         mode_args = model._parse_mode(mode_args)
         for key, val in self.expected_values.items():
             assert mode_args[key] == val[0]
 
     def test_parse_mode_conflicting_args(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fitting"
         mode_args["train_new_model"] = True
         with pytest.raises(ValueError, match="mode is fitting but train_new_model"):
@@ -373,7 +381,7 @@ class TestYaml:
 
     @pytest.mark.parametrize("mode,shared_RV", (("training_pop_rv", False), ("training_globalRv", True)))
     def test_parse_mode_training(self, initial_args: dict, model: SEDmodel, mode: str, shared_RV: bool):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = mode
         mode_args.pop("shared_RV", None)
         with pytest.warns(UserWarning, match=f"shared_RV was inferred as {shared_RV}"):
@@ -389,7 +397,7 @@ class TestYaml:
             "dust_split_mag",
             "dust_split_sed",
         ):
-            mode_args = copy.deepcopy(initial_args)
+            mode_args = deepcopy(initial_args)
             mode_args["mode"] = mode
             mode_args.pop("shared_RV", None)
             mode_args = model._parse_mode(mode_args)
@@ -405,28 +413,28 @@ class TestYaml:
                 assert mode_args["split_variant"] == "split_sed"
 
     def test_parse_mode_dust_rv_shared_RV(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "dust"
         mode_args["shared_RV"] = True
         with pytest.raises(ValueError, match="mode is dust but shared_RV"):
             model._parse_mode(mode_args)
 
     def test_parse_mode_conflicting_rv_types(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "training_popRV"
         mode_args["shared_RV"] = True
         with pytest.raises(ValueError, match="shared_RV was provided as True"):
             model._parse_mode(mode_args)
 
     def test_parse_mode_warning(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fit global rv"
         mode_args.pop("shared_RV", None)
         with pytest.warns(UserWarning, match="shared_RV was inferred as True"):
             model._parse_mode(mode_args)
 
     def test_parse_mode_not_global_or_pop(self, initial_args: dict, model: SEDmodel):
-        mode_args = copy.deepcopy(initial_args)
+        mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fit_rv"
         mode_args["shared_RV"] = True
         with pytest.warns(UserWarning, match="The indicated mode fit_rv contains"):
@@ -439,7 +447,7 @@ class TestYaml:
         # Uncomment this block to make new pickles.
         # Please only do this if you're sure you know what you're doing.
         # --------------------------------------------------------------
-        # dump_args = copy.deepcopy(args)
+        # dump_args = deepcopy(args)
         # dump_args["data_root"] = dump_args["data_root"].lstrip(str(BASE_DIR))
         # dump_args["outputdir"] = Path(str(dump_args["outputdir"]).lstrip(str(BASE_DIR)))
         # with open(PICKLE_DIR / "full_args.pkl", "wb") as f:
@@ -452,118 +460,114 @@ class TestYaml:
         assert args == ref_args
 
 class TestSpectra:
-    def test_get_spectra(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...], rtol: float=1e-14):
-        theta, AV, W0, W1, eps, RV, _, J_t, hsiao_interp, _ = sample_model_parameters
-        spec = model._get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
-        with open(PICKLE_DIR / "T21_spectra.pkl", "rb") as f:
-            example_spec = pickle.load(f)
-        assert jnp.isclose(spec, example_spec, rtol=rtol).all()
+    def test_get_spectra(self, model: SEDmodel, sample_model_parameters: tuple[np.ndarray, ...], rtol: float=1e-14):
+        theta, AV, W0, W1, eps, RV, _, J_t, hsiao_interp, _, _, _ = sample_model_parameters
+        test_spec = model._get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
+        ref_spec = np.load(PICKLE_DIR / "T21_spectra.npy")
+        npt.assert_allclose(test_spec, ref_spec, rtol=rtol)
 
 
     class TestWrapper:
         def test_against_method(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             ref_spec = model._get_spectra(theta, AV, W0, W1, eps, RV, J_t, hsiao_interp)
             test_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
-            assert jnp.isclose(test_spec, ref_spec, atol=0).all()
+            npt.assert_allclose(test_spec, ref_spec, atol=0)
 
         def test_no_eps(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(TypeError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(TypeError, match="required positional argument: 'eps'"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=None, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
 
         def test_defaults(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             test_spec = model.get_spectra(theta=theta, AV=AV, W0=None, W1=None, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
             ref_spec = model.get_spectra(theta=theta, AV=AV, W0=model.W0, W1=model.W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
-            assert jnp.isclose(test_spec, ref_spec, atol=0).all()
+            npt.assert_allclose(test_spec, ref_spec, atol=0)
 
         def test_no_t_no_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(TypeError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(TypeError, match="Either 't' must be defined"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV)
 
         def test_too_many_dims_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             double_theta = jnp.stack([theta, theta])
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="Arguments have more dimensions than expected"):
                 model.get_spectra(theta=double_theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
 
         def test_too_many_dims_t(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             double_t = jnp.stack([t, t])
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="t has more dimensions than expected"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, t=double_t)
 
         def test_1d_mismatch_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(ValueError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(ValueError, match="1D arrays with inconsistent lengths"):
                 model.get_spectra(theta=theta[:-1], AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
 
         def test_1d_mismatch_t(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(ValueError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(ValueError, match="1D arrays with inconsistent lengths"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, t=t[:,:-1])
 
         def test_scalar_params_scalar_t(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             test_spec = model.get_spectra(theta=theta[0], AV=AV[0], W0=W0[0], W1=W1[0], eps=eps[0], RV=RV[0], t=t[0,0])
             ref_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
-            assert len(test_spec.shape) == 1
-            assert jnp.isclose(test_spec, ref_spec[0,:,0], atol=0).all()
+            assert test_spec.ndim == 1
+            npt.assert_allclose(test_spec, ref_spec[0,:,0], atol=0)
 
         def test_scalar_params_1d_t(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             test_spec = model.get_spectra(theta=theta[0], AV=AV[0], W0=W0[0], W1=W1[0], eps=eps[0], RV=RV[0], t=t[:,0])
             ref_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, t=t)
-            assert len(test_spec.shape) == 2
-            assert jnp.isclose(test_spec.transpose(1,0), ref_spec[0], atol=0).all()
+            assert test_spec.ndim == 2
+            npt.assert_allclose(test_spec.transpose(1,0), ref_spec[0], atol=0)
 
         def test_1d_params_scalar_t(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             test_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, t=t[0,0])
             ref_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, t=t)
-            assert jnp.isclose(test_spec, ref_spec[:,:,0], atol=0)[0].all()
-            assert not jnp.isclose(test_spec, ref_spec[:,:,0], atol=0)[1:].all()
+            npt.assert_allclose(test_spec[0], ref_spec[0,:,0], atol=0)
+            different_phases = np.where(t != t[0,0])
+            for epoch_idx, sn_idx in zip(*different_phases):
+                assert not np.isclose(test_spec[sn_idx], ref_spec[sn_idx:,:,epoch_idx], atol=0).all()
 
         def test_incompatible_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(ValueError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(ValueError, match="incompatible shapes"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t[:-1], hsiao_interp=hsiao_interp)
 
         def test_incompatible_params_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
-            with pytest.raises(ValueError):
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
+            with pytest.raises(ValueError, match="multiple 1D arrays with lengths"):
                 model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t[:-1], hsiao_interp=hsiao_interp[:,:,:-1])
 
         def test_scalars_and_Jt_hi(self, model:SEDmodel, sample_model_parameters: tuple[jax.Array, ...]):
-            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, _ = sample_model_parameters
+            theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp = sample_model_parameters[:9]
             sn0_spec = model.get_spectra(theta=theta[0], AV=AV[0], W0=W0[0], W1=W1[0], eps=eps[0], RV=RV[0], J_t=J_t[:1], hsiao_interp=hsiao_interp[:,:,:1])
             ref_spec = model.get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
             assert jnp.isclose(sn0_spec, ref_spec[:1], atol=0).all()
+
+
 class TestFlux:
     @pytest.fixture(scope="module")
     def flux_batch_args(self, model: SEDmodel, sample_model_parameters: tuple[jax.Array, ...]) -> tuple[jax.Array, ...]:
-        flux_model = copy.deepcopy(model)
+        flux_model = deepcopy(model)
         bands = [f"{bp}_PS1" for bp in "griz"]
         flux_model._set_used_bands(bands=bands)
-        theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, z = sample_model_parameters
+        theta, AV, W0, W1, eps, RV, t, J_t, hsiao_interp, z, band_indices, mask = sample_model_parameters
         spectra = flux_model._get_spectra(theta, AV, W0, W1, eps, RV, J_t, hsiao_interp)
         ebv = AV / flux_model.RV_MW
         band_weights = flux_model._calculate_band_weights(z, ebv, lam_shifts=0)
         Ds = np.array(flux_model.cosmo.distmod(np.array(z)))
-        # +1 to get past NULL_BAND
-        band_indices = jax.random.randint(rng_key, shape=(N_epochs, N_sn), minval=0, maxval=len(bands))+1
-        # Masking randomly
-        mask = jnp.ones_like(band_indices)
-        mask_start_idx = jax.random.randint(rng_key, shape=(N_sn,), minval=5, maxval=10)
-        for i in range(N_sn):
-            mask = mask.at[mask_start_idx[i]:,i].set(0)
         return flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights
 
     def test_get_flux_batch(self, flux_batch_args: tuple[Any, ...], rtol: float=1e-14):
         flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights = flux_batch_args
-        flux = flux_model.get_flux_batch(
+        test_flux = flux_model.get_flux_batch(
             model_spectra=spectra,
             M0=flux_model.M0,
             Ds=Ds,
@@ -576,15 +580,14 @@ class TestFlux:
             mag_shift=0,
             num_batch=N_sn
         )
-        with open(PICKLE_DIR / "T21_flux.pkl", "rb") as f:
-            example_flux = pickle.load(f)
-        assert flux.shape == (N_epochs, N_sn)
-        assert jnp.isclose(flux, example_flux, rtol=rtol).all()
+        ref_flux = np.load(PICKLE_DIR / "T21_flux.npy")
+        assert test_flux.shape == (N_epochs, N_sn)
+        npt.assert_allclose(test_flux, ref_flux, rtol=rtol)
 
     def test_get_flux_batch_w_lam_shift(self, flux_batch_args: tuple[Any, ...], rtol: float=1e-5):
         # Bigger rtol because there's a normalization via trapezoidal integration even with shifts of 0 A.
         flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights = flux_batch_args
-        flux = flux_model.get_flux_batch(
+        test_flux = flux_model.get_flux_batch(
             model_spectra=spectra,
             M0=flux_model.M0,
             Ds=Ds,
@@ -598,16 +601,15 @@ class TestFlux:
             mag_shift=jnp.zeros(5),
             num_batch=N_sn
         )
-        with open(PICKLE_DIR / "T21_flux.pkl", "rb") as f:
-            example_flux = pickle.load(f)
-        assert flux.shape == (N_epochs, N_sn)
-        assert jnp.isclose(flux, example_flux, rtol=rtol).all()
+        ref_flux = np.load(PICKLE_DIR / "T21_flux.npy")
+        assert test_flux.shape == (N_epochs, N_sn)
+        npt.assert_allclose(test_flux, ref_flux, rtol=rtol)
 
     def test_get_mag_batch(self, flux_batch_args: tuple[Any, ...], rtol: float=1e-14):
         flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights = flux_batch_args
-        data = {}
+        test_data = {}
         for key, fn in zip(("flux", "mag"), (flux_model.get_flux_batch, flux_model.get_mag_batch)):
-            data[key] = fn(
+            test_data[key] = fn(
                 model_spectra=spectra,
                 M0=flux_model.M0,
                 Ds=Ds,
@@ -620,9 +622,9 @@ class TestFlux:
                 mag_shift=0,
                 num_batch=N_sn
             )
-        converted_mag = flux_model.ZPT - 2.5*jnp.log10(data["flux"])
-        converted_mag = converted_mag.at[jnp.where(data["flux"] == 0)].set(0)
-        assert jnp.isclose(converted_mag, data["mag"], atol=0).all()
+        ref_mag = flux_model.ZPT - 2.5*jnp.log10(test_data["flux"])
+        ref_mag = ref_mag.at[jnp.where(test_data["flux"] == 0)].set(0)
+        npt.assert_allclose(test_data["mag"], ref_mag, atol=0)
 
 class TestModelLogDensity:
     # Instantiating a bunch of different model_kwarg dicts to compare traces under
@@ -659,7 +661,7 @@ class TestModelLogDensity:
         order of RNG calls changes.
         """
         model, args = loaded_model_and_args
-        kwargs = copy.deepcopy(args)
+        kwargs = deepcopy(args)
         kwargs.update(self.variants[variant])
 
         # Uncomment this block to make new pickles.
@@ -698,14 +700,18 @@ class TestModelLogDensity:
             ref_params,
         )
 
-        # 1. Total unnormalized log posterior density check
-        assert jnp.isclose(log_joint, ref_total_log_joint, rtol=1e-5), "total log joint mismatch"
-
-        # 2. Site-by-site log probability check (matched by name, invariant to call order)
         for name, expected_lp in ref_site_log_probs.items():
             assert name in model_trace, f"Missing expected sample site: {name}"
             site_lp = model_trace[name]["fn"].log_prob(model_trace[name]["value"]).sum()
-            assert jnp.isclose(site_lp, expected_lp, rtol=1e-5), f"Log prob mismatch at site '{name}'"
+            npt.assert_allclose(
+                site_lp, expected_lp, rtol=1e-5,
+                err_msg=f"Log prob mismatch at site '{name}'"
+            )
+        npt.assert_allclose(
+            log_joint, ref_total_log_joint, rtol=1e-5,
+            err_msg="total log joint mismatch"
+        )
+
 
 class TestUtils:
     def test_inv_band_dict(self, model: SEDmodel):
@@ -911,7 +917,7 @@ class TestPostprocess:
             samples[k] = v[None, None, ...]
         samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
 
-        run_args = copy.deepcopy(args)
+        run_args = deepcopy(args)
         run_args["outputdir"] = tmp_path
         run_args["save_summary"] = False
         run_args["num_lcplot"] = 0
@@ -933,7 +939,7 @@ class TestPostprocess:
         samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
         samples["z"] = np.ones((1, 1, N_sn)) * 0.03
 
-        run_args = copy.deepcopy(args)
+        run_args = deepcopy(args)
         run_args["outputdir"] = tmp_path
         run_args["photoz"] = True
         run_args["save_summary"] = False
@@ -953,7 +959,7 @@ class TestPostprocess:
             samples[k] = v[None, None, ...]
         samples["Ds"] = np.ones((1, 1, N_sn)) * 34.0
 
-        run_args = copy.deepcopy(args)
+        run_args = deepcopy(args)
         run_args["outputdir"] = tmp_path
         run_args["train_new_model"] = True
         run_args["save_summary"] = False
