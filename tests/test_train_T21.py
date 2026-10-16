@@ -44,7 +44,6 @@ def get_model_params_from_model(model: SEDmodel):
         model_params[k+1] = float(model.sigma_R)
     else:
         model_params[k] = float(model.RV)
-        model_params = model_params[:-1]
     return model_params
 
 def get_model_params_from_chains(chains: dict, N_knots_sig: int=24, N_W: int=36):
@@ -78,7 +77,6 @@ def get_model_params_from_chains(chains: dict, N_knots_sig: int=24, N_W: int=36)
         model_params[k+1] = chains["sigma_R"].flatten()
     else:
         model_params[k] = chains["RV"].flatten()
-        model_params = model_params[:-1]
     return model_params
 
 def get_model_m_dists(chains: dict, model: SEDmodel):
