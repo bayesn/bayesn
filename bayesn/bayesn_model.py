@@ -2031,7 +2031,7 @@ class SEDmodel(object):
         """
 
         if eps is None:
-            raise TypeError("SEDmodel.get_spectra() missing required positional arguments: 'eps'")
+            raise TypeError("Missing required positional argument: 'eps'")
         def set_vals_to_1d(params, max_length):
             for key, val in params.items():
                 if len(val.shape) == 0 or (len(val.shape) == 1 and len(val) == 1):
@@ -2053,7 +2053,7 @@ class SEDmodel(object):
             ndim.append(len(val.shape) - 2)
         max_ndim = max(ndim)
         if max_ndim > 1:
-            raise ValueError("Input arguments have more dimensions than expected.")
+            raise ValueError("Arguments have more dimensions than expected.")
         elif max_ndim == 1:
             lengths = np.array(
                 [jnp.atleast_1d(val).shape[0] for val in params.values()]
@@ -2061,7 +2061,9 @@ class SEDmodel(object):
             )
             max_length = int(max(lengths))
             if not all((lengths == 1) + (lengths == max_length)):
-                raise ValueError("Input arguments include multiple 1D arrays with inconsistent lengths")
+                raise ValueError(
+                    "Arguments include multiple 1D arrays with inconsistent lengths"
+                )
             params = set_vals_to_1d(params, max_length)
         else:
             params = set_vals_to_1d(params, 1)
@@ -2070,20 +2072,16 @@ class SEDmodel(object):
             N_sn, _, N_max_epochs = J_t.shape
             if hsiao_interp.shape != (3, N_max_epochs, N_sn):
                 raise ValueError(
-                    f"""
-                    Input J_t and hsiao_interp have incompatible shapes. They should be
-                    (N_sn, N_tau_knots, N_max_epochs) and (3, N_max_epochs, N_sn)
-                    respectively, but the input arguments have shapes {J_t.shape} and
-                    {hsiao_interp.shape}.
-                    """
+                    "J_t and hsiao_interp have incompatible shapes. They should be "
+                    "(N_sn, N_tau_knots, N_max_epochs) and (3, N_max_epochs, N_sn) "
+                    f"respectively, but the input arguments have shapes {J_t.shape} "
+                    f"and {hsiao_interp.shape}."
                 )
             if max_ndim == 1 and max_length != N_sn:
                 raise ValueError(
-                    f"""
-                    Input arguments include multiple 1D arrays with lengths {max_length}
-                    which is inconsistent with J_t and hsiao_interp which expect arrays
-                    of length {N_sn}.
-                    """
+                    "Input arguments include multiple 1D arrays with lengths "
+                    f"{max_length} which is inconsistent with J_t and hsiao_interp "
+                    f"which expect arrays of length {N_sn}."
                 )
             if max_ndim == 0:
                 max_length = N_sn
@@ -2105,11 +2103,10 @@ class SEDmodel(object):
             J_t = self.get_J_t(t)
             hsiao_interp = self.get_hsiao_interp(t)
         else:
-            raise TypeError("""
-                SEDmodel.get_spectra() requires either "t" to be defined (scalar or ArrayLike)
-                or "J_t" (jax.Array of shape (N_sn, N_tau_knots, N_max_epochs) and "hsiao_interp"
-                (jax.Array of shape (3, N_max_epochs, N_sn) to be defined.
-                """
+            raise TypeError(
+                "Either 't' must be defined (scalar or ArrayLike) or both 'J_t' "
+                "(ArrayLike (N_sn, N_tau_knots, N_max_epochs)) and 'hsiao_interp' "
+                "(ArrayLike (3, N_max_epochs, N_sn) must be defined."
             )
 
         model_spectra = self._get_spectra(
