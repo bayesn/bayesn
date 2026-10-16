@@ -1819,6 +1819,7 @@ class SEDmodel(object):
 
         ds.apply_filter_map(args["map"])
         ds.drop_bands(args["drop_bands"])
+        self._set_used_bands(ds.unique_bands)
         ds.drop_by_band_lims(self.band_lim_dict, wave_min=self.model_wave[0], wave_max=self.model_wave[-1])
         ds.cut_by_phot_numeric("phase", "<=", self.tau_knots[0])
         ds.cut_by_phot_numeric("phase", ">=", self.tau_knots[-1])
