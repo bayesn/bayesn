@@ -10,22 +10,33 @@ num_samples: 500
 fit_method: mcmc
 # parallel or sequential to indicate sampling order
 chain_method: parallel
+# the method used to find the laplace approximation solution, used to initialise ZLTN
+# VI fitting
 laplace_method: lm
+# Number of optimiser iterations in first optimisation step prior to ZLTN VI fitting
 lm_maxiter: 30
+# starting dampening parameter lambda for the Levenberg-Marquardt (LM) optimiser, for
+# the first optimisation stage prior to ZLTN VI
 lm_lam_init: 1.0
 lm_use_linesearch: True
+# Initial learning rate used for ZLTN VI fits, decays during optimisation.
 zltn_lr: 0.02
+# Final learning rate used for ZLTN VI fits, decays during optimisation.
 zltn_lr_final: 0.002
+# Number of samples used to evaluate ELBO during ZLTN fitting.
 zltn_particles: 10
+# Total number of steps during ZLTN VI optimisation.
 num_zltn_iter: 1500
 stage2_tmax_prior_std: 1.0
 lm_solver: gn
+# Set this to limit the amount of memory used when fitting light curves.
 batch_size: null
 # median, sample, or one of the built-in models (or a custom model) to initialise
 # hyper-parameters
 initialisation: median
-# dictionary with keys of bandpass names as they appear in the data files and values
-# of the corresponding names in BayeSN (see bayesn/bayesn-filters/filtes.yaml)
+# A dictionary with keys of bandpass names as they appear in the data files and values
+# of the corresponding names in BayeSN (see bayesn/bayesn-filters/filters.yaml), can
+# also be a path to a file with rows of space-separated keys-value pairs.
 map: {}
 # list of BayeSN bandpass names to ignore when ingesting data
 drop_bands: []
@@ -45,12 +56,16 @@ sim_peakmjd: False
 zlim: 99.
 # Key specifying peak MJD in SN files
 peakmjd_key: PEAKMJD
+# 2-tuple of (jobid, njobtot) for splitting an analysis over njobtot jobs.
 jobsplit: null
+# If True, use full chains to generate lcplot_data. Otherwise, use means.
 save_fit_errors: False
 # A dictionary with keys of metadata parameter names and values of 2-tuples indicating
 # the lower and upper limits beyond which data will be cut. The reason why SNe get cut
 # are stored in the SEDmodel.all_table["DROP"] during SEDmodel.process_dataset.
 lc_cuts: {}
+# If True, save an arviz summary to a .SUMMARY.TEXT file during postprocessing. Also
+# includes MEANRHAT and MAXRHAT keys in the fitres_table.
 save_summary: False
 # A list of SN names to be retained, with data for all others dropped. If null, retain
 # all SNe. Can also be a path to a file with a row per SN to be kept.
@@ -60,7 +75,6 @@ keep_list: null
 error_floor: 0.0
 # Numer of SNe for which lcplot data will be generated. If null, make all lcplot data.
 num_lcplot: null
-
 # flux or mag to indicate photometric units
 data_type: flux
 # If True, use the peak_mjd values from the data as tmax, otherwise infer tmax.
@@ -73,7 +87,6 @@ fix_theta: null
 # If null, infer AV during sampling, otherwise, fix AV to the indicated value.
 # False will be read as fix_AV=0, and True as fix_AV=1.
 fix_AV: null
-#
 # If shared_RV == True, all SNe will use the same value for RV. This value depends on
 # the RV kwarg, which can be a number or the strings "default", "uniform" or "normal".
 # If shared_RV == False, each SNe will have its own RV, sampled from a distribution
