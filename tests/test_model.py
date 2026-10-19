@@ -22,6 +22,7 @@ import pytest
 
 from bayesn.bayesn_model import SEDmodel, default_kwargs
 from bayesn import io
+from bayesn.utils import get_model_params_from_chains
 
 BASE_DIR: Path = Path(__file__).parent.parent.absolute()
 TEST_DIR: Path = BASE_DIR / "tests/test_files"
@@ -101,11 +102,10 @@ def sample_model_parameters(model: SEDmodel) -> tuple[jax.Array, ...]:
 
 @pytest.fixture(scope="module")
 def loaded_model_and_args(initial_args: dict, model: SEDmodel) -> tuple[SEDmodel, dict]:
-    cmd_args = {"input": str(TEST_DIR / "input.yaml")}
     # T21_mini_set.txt uses PS1 data.
     model._set_used_bands(bands=[f"{bp}_PS1" for bp in "griz"])
-    args = model.parse_args(initial_args, cmd_args, verbose=False)
-    args["outputdir"].rmdir()
+    args = model.parse_args(initial_args, verbose=False)
+    args["outputdir"].rmdir()  # created during parse_args
     model.process_dataset(args)
     return model, args
 
@@ -1081,3 +1081,4 @@ class TestFit:
         assert samples["theta"].shape == (2, 10, 1)
         assert np.all(np.isfinite(samples["theta"]))
         assert np.all(np.isfinite(samples["AV"]))
+

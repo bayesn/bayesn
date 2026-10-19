@@ -3,9 +3,10 @@
 import argparse
 import inspect
 from pathlib import Path
+from ruamel.yaml import YAML
 from warnings import warn
 
-from ruamel.yaml import YAML
+import numpy as np
 
 from bayesn import SEDmodel
 from bayesn.utils import get_yaml_comments
@@ -115,7 +116,7 @@ def get_init_args(input_args: dict) -> dict:
     for param in init_sig.parameters.values():
         if param.name == "self":
             continue
-        if param.name in ("load_model", "load_ext_rel"):  # These two matter most.
+        if param.name in ("load_model", "load_ext_rel") and param.name not in input_args:
             warn(UserWarning(
                 f"{param.name} not specified in input yaml or cmd line. Assuming "
                 f"default {param.name}={param.default}."
