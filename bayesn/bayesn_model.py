@@ -3945,7 +3945,7 @@ class SEDmodel(object):
 
         # Required for parse_args to not throw an error.
         kwargs.update({"data_root": ".", "data_table": None})
-        kwargs = self.parse_args(kwargs, {}, verbose=verbose)
+        kwargs = self.parse_args(kwargs, verbose=verbose)
         kwargs["muhat_err"] = 5
 
         nuts_kernel = NUTS(
@@ -5247,3 +5247,31 @@ class SEDmodel(object):
     @property
     def inv_band_dict(self) -> dict[int, str]:
         return {val: key for key, val in self.band_dict.items()}
+    def get_model_params(self) -> np.ndarray:
+        """ Return shape (N_params,) array of scalar model parameters in the order
+        L_Omega, W0, W1, sigma0, tauA, then (RV) or (mu_RV, sigma_RV) depending on RV_type
+        """
+        N_L = int(self.N_knots_sig*(self.N_knots_sig+1)/2)
+        N_W = self.l_knots.shape[0]*self.tau_knots.shape[0]
+        N_params = N_L + 2*N_W + 3 + int(self.sigma_R is not None)
+        model_params = np.zeros(N_params)
+        k = 0
+        for i in range(self.N_knots_sig):
+            for j in range(self.N_knots_sig):
+                if j > i:
+                    continue
+                model_params[k] = self.L_Sigma[i,j]
+                k += 1
+        for key in ("W0", "W1"):
+            for i in range(N_W):
+                model_params[k] = getattr(self, key)[i%self.l_knots.shape[0], i//self.l_knots.shape[0]]
+                k += 1
+        for param in ("sigma0", "tauA"):
+            model_params[k] = getattr(self, param)
+            k += 1
+        if self.mu_R is not None:
+            model_params[k] = float(self.mu_R)
+            model_params[k+1] = float(self.sigma_R)
+        else:
+            model_params[k] = float(self.RV)
+        return model_params

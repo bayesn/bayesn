@@ -432,3 +432,35 @@ def get_yaml_comments(yaml_path: Path) -> dict[str, str]:
                 comments[k] = cleaned
 
     return comments
+def get_model_params_from_chains(chains: dict, N_knots_sig: int=24, N_W: int=36):
+    """ Return shape (N_params, N_chains*N_samples) array of scalar model parameters in the order
+    L_Omega, W0, W1, sigma0, tauA, then (RV) or (mu_RV, sigma_RV) depending on RV_type
+    """
+    N_chains, N_samples = chains["Ds"].shape[:2]
+    N_L = int(N_knots_sig*(N_knots_sig+1)/2)
+    N_params = N_L + 2*N_W + 3 + int("sigma_R" in chains)
+    model_params = np.zeros((N_params, N_chains*N_samples))
+    sigeps_diag = np.zeros((N_chains, N_samples, N_knots_sig, N_knots_sig))
+    for i in range(N_knots_sig):
+        sigeps_diag[:,:,i,i] = chains["sigmaepsilon"][:,:,i]
+    L_Sigma = np.matmul(sigeps_diag, chains["L_Omega"])
+    k = 0
+    for i in range(N_knots_sig):
+        for j in range(N_knots_sig):
+            if j > i:
+                continue
+            model_params[k] = L_Sigma[:,:,i,j].flatten()
+            k += 1
+    for key in ("W0", "W1"):
+        for i in range(N_W):
+            model_params[k] = chains[key][:,:,i].flatten()
+            k += 1
+    for param in ("sigma0", "tauA"):
+        model_params[k] = chains[param].flatten()
+        k += 1
+    if "mu_R" in chains:
+        model_params[k] = chains["mu_R"].flatten()
+        model_params[k+1] = chains["sigma_R"].flatten()
+    else:
+        model_params[k] = chains["RV"].flatten()
+    return model_params
