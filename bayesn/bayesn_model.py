@@ -1295,10 +1295,10 @@ class SEDmodel(object):
     #####################
     ### Configuration ###
     #####################
-    def parse_args(self, args: dict, cmd_args: dict | argparse.Namespace, verbose: bool = True) -> dict:
-        """ Given an incomplete args dict and cmd_args overrides, return a complete
-        args dict by interpreting the mode, detecting RV and shared_RV, populate
-        missing args with defaults, and validate the total configuration.
+    def parse_args(self, args: dict, verbose: bool = True) -> dict:
+        """ Given an incomplete args dict, return a complete args dict by interpreting
+        the mode, detecting RV and shared_RV, and populating missing args with default
+        values, and validating the total configuration.
 
         THIS IS NOT IDEMPOTENT.
         If jobsplit is None, snana will become False and jobsplit will become [1, 1]
@@ -1309,10 +1309,7 @@ class SEDmodel(object):
         args:
             Arguments from input yaml file before command line overrides,
             defines model wavelength range and data set to load.
-        cmd_args:
-            dict-like of command line arguments, which overrides yaml file if specified
         """
-        args = self._cmd_arg_overrides(args, cmd_args)
         args.pop("CONFIG", None)
         args.pop("config", None)
         args = self._parse_mode(args, verbose=verbose)
@@ -1404,35 +1401,6 @@ class SEDmodel(object):
             self.N_knots = self.l_knots.shape[0] * self.tau_knots.shape[0]
             self.N_knots_sig_l = self.l_knots.shape[0] - 2
             self.N_knots_sig = (self.N_knots_sig_l) * self.tau_knots.shape[0]
-        return args
-
-    def _cmd_arg_overrides(self, args: dict, cmd_args: dict | argparse.Namespace) -> dict:
-        """
-        Parameters
-        ----------
-        args:
-            Arguments from input yaml file before command line overrides,
-            defines model wavelength range and data set to load.
-        cmd_args:
-            dict-like of command line arguments, which overrides yaml file if specified
-
-        Returns
-        -------
-        args: dict
-            Original args dict with cmd_arg overrides.
-        """
-        # Command line overrides, if present
-        if isinstance(cmd_args, dict):
-            dict_cmd_args = cmd_args
-        else:
-            dict_cmd_args = vars(cmd_args)
-        for arg, arg_val in dict_cmd_args.items():
-            if arg in ["input", "filters"] or arg_val is None:
-                continue
-            if arg == "map":
-                filt_map = np.loadtxt(dict_cmd_args["map"], dtype=str)
-                arg_val = {row[0]: row[1] for row in filt_map}
-            args[arg] = arg_val
         return args
 
     def _parse_mode(self, args: dict, verbose: bool = True) -> dict:
@@ -3276,7 +3244,7 @@ class SEDmodel(object):
 
         return param_init
 
-    def run(self, args: dict, cmd_args: Any) -> None:
+    def run(self, args: dict) -> None:
         """
         Main method to run BayeSN. The input yaml file allows for customisation of the
         sampling configuration and model via keyword arguments.
@@ -3286,10 +3254,8 @@ class SEDmodel(object):
         args:
             Arguments from input yaml file before command line overrides,
             defines model wavelength range and data set to load.
-        cmd_args:
-            dictionary of command line arguments, which overrides yaml file if specified
         """
-        args = self.parse_args(args, cmd_args)
+        args = self.parse_args(args)
         self.process_dataset(args)
 
         mode = args["mode"]

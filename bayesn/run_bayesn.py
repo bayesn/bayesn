@@ -2,105 +2,134 @@
 
 import argparse
 import inspect
-import os
+from pathlib import Path
+from warnings import warn
 
 from ruamel.yaml import YAML
 
 from bayesn import SEDmodel
+from bayesn.utils import get_yaml_comments
 
-def main():
-    yaml = YAML(typ='safe')
+def get_cmd_args() -> argparse.Namespace:
+    defaults_yaml = Path(__file__).parent / "defaults.yaml"
+    arg_help = get_yaml_comments(defaults_yaml)
+    arg_help.update({
+        "input": "Path to the input YAML configuration file.",
+        "load_model": "Path or name of pre-trained BayeSN model.",
+        "load_ext_rel": "Path or name of extinction relation.",
+        "filters": "Path to filters YAML specification.",
+        "private_data_path": "Comma separated paths to non-public directories.",
+        "data_root": "The base directory for relative file paths specified in a data_table.",
+        "data_table": "A space-separated file with at least a 'files' column full of paths to data files.",
+        "version_photometry": "A string specifying a directory with a similarly named .LIST file.",
+        "snana": "If True, look for the version_photometry directory assuming an SNANA-like file structure.",
+    })
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('input', type=str)
-    parser.add_argument('--filters', type=str, required=False)
-    parser.add_argument('--outputdir', type=str, required=False)
-    parser.add_argument('--load_model', type=str, required=False)
-    parser.add_argument('--load_ext_rel', type=str, required=False)
-    parser.add_argument('--mode', type=str, required=False)
-    parser.add_argument('--num_chains', type=int, required=False)
-    parser.add_argument('--fit_method', type=str, required=False)
-    parser.add_argument('--chain_method', type=str, required=False)
-    parser.add_argument('--initialisation', type=str, required=False)
-    parser.add_argument('--l_knots', type=float, required=False, nargs='*')
-    parser.add_argument('--tau_knots', type=float, required=False, nargs='*')
-    parser.add_argument('--map', type=str, required=False)
-    parser.add_argument('--data_root', type=str, required=False)
-    parser.add_argument('--data_table', type=str, required=False)
-    parser.add_argument('--version_photometry', type=str, required=False)
-    parser.add_argument('--drop_bands', type=str, required=False, nargs='*')
-    parser.add_argument('--num_warmup', type=int, required=False)
-    parser.add_argument('--num_samples', type=int, required=False)
-    parser.add_argument('--snana', action="store_true", default=False, required=False)
-    parser.add_argument('--jobsplit', type=int, nargs=2)
-    parser.add_argument('--outfile_prefix', type=str, required=False)
-    parser.add_argument('--private_data_path', type=str, required=False, nargs='*')
-    parser.add_argument('--sim_prescale', type=int, required=False)
-    parser.add_argument('--photoz', action='store_true', default=None, required=False)
-    parser.add_argument('--file_format', type=int, required=False)
-    parser.add_argument('--save_fit_errors', type=int, required=False)
-    parser.add_argument('--peakmjd_key', type=str, required=False)
-    parser.add_argument('--keep_list', type=str, required=False)
-    parser.add_argument('--error_floor', type=float, required=False)
-    parser.add_argument('--batch_size', type=int, required=False)
-    parser.add_argument('--num_lcplot', type=int, required=False)
-    parser.add_argument('--save_summary', type=float, required=False)
-    cmd_args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description=(
+            "A wrapper script that will instantiate a BayeSN SEDmodel, process a "
+            "specified dataset, and store the results in a specified output directory."
+        )
+    )
+    parser.add_argument('input', type=str, help=arg_help.get("input"))
+    # str args
+    for arg in [
+        "load_model", "load_ext_rel", "filters", "mode", "outputdir", "fit_method",
+        "chain_method", "initialisation", "map", "data_root", "data_table",
+        "version_photometry", "outfile_prefix", "keep_list", "peakmjd_key",
+        "laplace_method", "data_type", "split_variant",
+    ]:
+        parser.add_argument(f"--{arg}", type=str, required=False, help=arg_help.get(arg))
+    # int args
+    for arg in [
+        "num_chains", "num_warmup", "num_samples", "lm_maxiter", "zltn_particles",
+        "num_zltn_iter", "batch_size", "sim_prescale", "num_lcplot",
+        "file_format" # should these be here?
+    ]:
+        parser.add_argument(f"--{arg}", type=int, required=False, help=arg_help.get(arg))
+    # float args
+    for arg in [
+        "error_floor", "fix_theta", "fix_AV", "uniform_RV_min", "uniform_RV_max",
+        "mu_R_min", "mu_R_max", "sigma_sigma_R", "tau_z_min", "tau_z_max",
+        "fix_dist_limit", "fix_dist_Ds_err", "M_split", "muhat_err", "lm_lam_init",
+        "zltn_lr", "zltn_lr_final", "zlim",
+    ]:
+        parser.add_argument(f"--{arg}", type=float, required=False, help=arg_help.get(arg))
+    # default False bool args
+    for arg in [
+        "snana", "photoz", "fix_tmax", "fix_eps", "vary_redshift", "train_new_model",
+        "infer_dust_properties", "vary_filter_shifts", "vary_offsets",
+        "save_fit_errors", "save_summary",
+    ]:
+        parser.add_argument(
+            f"--{arg}", action="store_true", default=False, required=False, help=arg_help.get(arg)
+        )
+    # list of floats args
+    for arg in ["l_knots", "tau_knots"]:
+        parser.add_argument(
+            f"--{arg}", type=float, required=False, nargs='*', help=arg_help[arg]
+        )
+    # list of strs args
+    for arg in ["drop_bands", "private_data_path"]:
+        parser.add_argument(f"--{arg}", type=str, required=False, nargs='*', help=arg_help[arg])
 
-    init_sig = inspect.signature(SEDmodel.__init__)
+    parser.add_argument("--jobsplit", type=int, nargs=2, help=arg_help["jobsplit"])
 
-    if not os.path.exists(cmd_args.input):
+    return parser.parse_args()
+
+def get_input_args(input_yaml: str | Path) -> dict:
+    if not Path(input_yaml).exists():
         raise FileNotFoundError(
-            f"Specified input file ({cmd_args.input}) was not found, please provide "
-            f"the path to an input yaml file or create an input.yaml in your current "
-            "directory."
+            f"Input file {input_yaml} was not found, please provide the path to an "
+            f"input yaml file or create an input.yaml in your current directory. "
         )
-    with open(cmd_args.input, 'r') as file:
-        args = yaml.load(file)
+    yaml = YAML(typ="safe")
+    with open(input_yaml, "r") as file:
+        input_args = yaml.load(file)
+    return input_args
 
-    # If no default model to load is specified in input.yaml or via command line, assume default
-    if cmd_args.load_model is not None:
-        if args.get("load_model", cmd_args.load_model) != cmd_args.load_model:
-            print(
-                f"Input yaml contains load_model={args['load_model']}, which differs "
-                f"from the command line arg {cmd_args.load_model}. The latter will "
-                f"override the former, so load_model will be {cmd_args.load_model}."
-            )
-        args["load_model"] = cmd_args.load_model
-    elif "load_model" not in args:
-        print(
-            "load_model not specified in input yaml or cmd line. Assuming default "
-            f"load_model={init_sig.parameters['load_model'].default}."
-        )
-    # Set default/override reddening law
-    if cmd_args.load_ext_rel is not None:
-        if args.get("load_ext_rel", cmd_args.load_ext_rel) != cmd_args.load_ext_rel:
-            print(
-                f"Input yaml contains load_ext_rel={args['load_ext_rel']}, which "
-                f"differs from the command line arg {cmd_args.load_ext_rel}. The "
-                "latter will override the former, so load_ext_rel will be "
-                f"{cmd_args.load_ext_rel}."
-            )
-        args["load_ext_rel"] = cmd_args.load_ext_rel
-    elif "load_ext_rel" not in args:
-        print(
-            "load_ext_rel not specified in input yaml or cmd line. Assuming default "
-            f"load_ext_rel={init_sig.parameters['load_ext_rel'].default}."
-        )
+def override_input_args_w_cmd_args(input_args: dict, cmd_args: argparse.Namespace) -> dict:
+    for key, val in vars(cmd_args).items():
+        if key == "input" or val is None:
+            continue
+        if key == "map" and isinstance(val, str):
+            filt_map = np.loadtxt(cmd_args.map, dtype=str)
+            val = {row[0]: row[1] for row in filt_map}
+        if input_args.get(key, val) != val:
+            warn(UserWarning(
+                f"Input yaml contains {key}={input_args[key]}, which differs from the "
+                f"command line argument {val}. The latter will be override the former."
+            ))
+        input_args[key] = val
 
-    # If no default filters.yaml is specified in input.yaml, use argparse value (including default of None)
-    if "filters" not in args.keys():
-        args["filters"] = cmd_args.filters
-    args["filter_yaml"] = args.pop("filters")
+    # If no default filters.yaml is specified in the input.yaml, use the cmd_arg value
+    # (including default None)
+    if "filters" not in input_args:
+        input_args["filters"] = cmd_args.filters
+    input_args["filter_yaml"] = input_args.pop("filters")
+    return input_args
 
+def get_init_args(input_args: dict) -> dict:
+    init_sig = inspect.signature(SEDmodel.__init__)
     init_args = {}
     for param in init_sig.parameters.values():
         if param.name == "self":
             continue
-        init_args[param.name] = args.get(param.name, param.default)
+        if param.name in ("load_model", "load_ext_rel"):  # These two matter most.
+            warn(UserWarning(
+                f"{param.name} not specified in input yaml or cmd line. Assuming "
+                f"default {param.name}={param.default}."
+            ))
+        init_args[param.name] = input_args.get(param.name, param.default)
+    return init_args
 
+def main():
+    cmd_args = get_cmd_args()
+    input_args = get_input_args(cmd_args.input)
+    input_args = override_input_args_w_cmd_args(input_args, cmd_args)
+    init_args = get_init_args(input_args)
     model = SEDmodel(**init_args)
-    model.run(args, cmd_args)
+    model.run(input_args)
 
 if __name__ == "__main__":
     main()
