@@ -2,6 +2,7 @@ import functools
 from numbers import Number
 import os
 from pathlib import Path
+from ruamel.yaml import YAML
 import subprocess
 
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -389,3 +390,45 @@ def find_data_dir_in_SNANA(private_data_path) -> tuple[str, dict]:
                 split = line.split()
                 survey_dict[split[1]] = split[2]
     return data_dir, survey_dict
+
+def get_yaml_comments(yaml_path: Path) -> dict[str, str]:
+    """Extract comment descriptions preceding mapping keys in a YAML file."""
+    yaml = YAML()
+    with open(yaml_path, "r") as f:
+        data = yaml.load(f)
+
+    # 1. Collect all comment tokens from data.ca
+    tokens = []
+    if data.ca.comment and len(data.ca.comment) > 1 and data.ca.comment[1]:
+        tokens.extend(data.ca.comment[1])
+    for val in data.ca.items.values():
+        if not val:
+            continue
+        for item in val:
+            if item is None:
+                continue
+            if isinstance(item, list):
+                tokens.extend(item)
+            else:
+                tokens.append(item)
+
+    # 2. Get line numbers for all keys and sort them in file order
+    key_lines = {k: data.lc.key(k)[0] for k in data.keys()}
+    sorted_keys = sorted(data.keys(), key=lambda k: key_lines[k])
+
+    # 3. Associate tokens between the previous key line and the current key line
+    comments = {}
+    for i, k in enumerate(sorted_keys):
+        k_line = key_lines[k]
+        prev_line = key_lines[sorted_keys[i - 1]] if i > 0 else -1
+        matching_tokens = [
+            t for t in tokens if prev_line < t.start_mark.line < k_line
+        ]
+        if matching_tokens:
+            raw_text = "".join(t.value for t in matching_tokens)
+            lines = [line.strip().lstrip("#").strip() for line in raw_text.splitlines()]
+            cleaned = " ".join(line for line in lines if line)
+            if cleaned:
+                comments[k] = cleaned
+
+    return comments
