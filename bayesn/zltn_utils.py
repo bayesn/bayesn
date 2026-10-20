@@ -4,7 +4,7 @@ from numpyro.infer.autoguide import AutoContinuous
 from numpyro.distributions import constraints
 from numpyro.infer.initialization import init_to_median
 from numpyro.distributions.distribution import Distribution
-from numpyro.distributions.continuous import MultivariateNormal
+from numpyro.distributions.continuous import Normal, MultivariateNormal
 from numpyro.distributions.truncated import TruncatedNormal
 from numpyro.distributions.constraints import _SingletonConstraint
 from numpyro.distributions.transforms import biject_to, IdentityTransform, LowerCholeskyAffine
@@ -66,7 +66,7 @@ class MultiZLTN(Distribution):
             self.scale_tril = jnp.linalg.cholesky(self.covariance_matrix)
         elif precision_matrix is not None:
             loc, self.precision_matrix = promote_shapes(loc, precision_matrix)
-            self.scale_tril = cholesky_of_inverse(self.precision_matrix)
+            self.scale_tril = jnp.linalg.cholesky(jnp.linalg.inv(self.precision_matrix))
         elif scale_tril is not None:
             loc, self.scale_tril = promote_shapes(loc, scale_tril)
         else:
@@ -180,7 +180,7 @@ class AutoMultiZLTNGuide(AutoContinuous):
         return MultiZLTN(loc, scale_tril=scale_tril)
 
     def get_base_dist(self):
-        return dist.Normal(jnp.zeros(self.latent_dim), 1).to_event(1)
+        return Normal(jnp.zeros(self.latent_dim), 1).to_event(1)
 
     def get_transform(self, params):
         loc = params["{}_loc".format(self.prefix)]

@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import numpy.testing as npt
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -26,7 +27,7 @@ class TestFirstPositiveConstraint:
 
         prototype = jnp.ones((3,))
         feasible = c.feasible_like(prototype)
-        np.testing.assert_allclose(feasible, jnp.zeros((3,)))
+        npt.assert_allclose(feasible, jnp.zeros((3,)))
 
         transform = _transform_to_real(firstpositive)
         assert isinstance(transform, IdentityTransform)
@@ -71,7 +72,27 @@ class TestMultiZLTN:
 
         d = MultiZLTN(loc=loc, covariance_matrix=cov)
         expected_scale_tril = jnp.linalg.cholesky(cov)
-        np.testing.assert_allclose(d.scale_tril, expected_scale_tril, rtol=1e-5)
+        npt.assert_allclose(d.scale_tril, expected_scale_tril, rtol=1e-5)
+
+    def test_init_with_precision(self):
+        loc = jnp.array([0.5, 1.5, -0.5])
+        cov = jnp.array([
+            [2.0, 0.4, 0.1],
+            [0.4, 1.5, 0.2],
+            [0.1, 0.2, 1.0],
+        ])
+        precision = jnp.linalg.inv(cov)
+
+        d = MultiZLTN(loc=loc, precision_matrix=precision)
+        expected_scale_tril = jnp.linalg.cholesky(cov)
+        npt.assert_allclose(d.scale_tril, expected_scale_tril, rtol=1e-5)
+
+    def test_init_scalar_loc(self):
+        loc = jnp.array(0)
+        cov = jnp.array([[1]])
+        d = MultiZLTN(loc=loc, covariance_matrix=cov)
+        expected_scale_tril = jnp.linalg.cholesky(cov)
+        npt.assert_allclose(d.scale_tril, expected_scale_tril, rtol=1e-5)
 
     def test_init_missing_covariance(self):
         with pytest.raises(ValueError, match="One of `covariance_matrix`"):
@@ -105,12 +126,17 @@ class TestAutoMultiZLTNGuide:
         }
 
         transform = guide.get_transform(params)
-        np.testing.assert_allclose(transform.loc, params["auto_loc"])
-        np.testing.assert_allclose(transform.scale_tril, params["auto_scale_tril"])
+        npt.assert_allclose(transform.loc, params["auto_loc"])
+        npt.assert_allclose(transform.scale_tril, params["auto_scale_tril"])
 
         post = guide.get_posterior(params)
         assert isinstance(post, MultiZLTN)
-        np.testing.assert_allclose(post.scale_tril, params["auto_scale_tril"])
+        npt.assert_allclose(post.scale_tril, params["auto_scale_tril"])
+        base_dist = guide.get_base_dist()
+        assert isinstance(base_dist, dist.Distribution)
+        npt.assert_allclose(base_dist.mean, jnp.zeros(3))
+        npt.assert_allclose(base_dist.variance, jnp.ones(3))
+
 
     def test_guide_with_custom_scale_tril(self):
         def model():
@@ -127,8 +153,8 @@ class TestMyExponential:
         rate = 2.5
         d = My_Exponential(rate=rate)
 
-        np.testing.assert_allclose(float(d.mean), 1.0 / rate)
-        np.testing.assert_allclose(float(d.variance), 1.0 / (rate ** 2))
+        npt.assert_allclose(float(d.mean), 1.0 / rate)
+        npt.assert_allclose(float(d.variance), 1.0 / (rate ** 2))
 
         key = jr.PRNGKey(77)
         samples = d.sample(key, sample_shape=(100,))
@@ -139,7 +165,7 @@ class TestMyExponential:
         x = jnp.array([0.1, 0.5, 1.0])
         cdf_vals = d.cdf(x)
         x_rec = d.icdf(cdf_vals)
-        np.testing.assert_allclose(x, x_rec, rtol=1e-5)
+        npt.assert_allclose(x, x_rec, rtol=1e-5)
 
         # Log prob check
         lp_pos = d.log_prob(jnp.array([0.5]))
