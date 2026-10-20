@@ -81,7 +81,7 @@ def invKD(x, bc_type="natural"):
             D[i,0] = bc[1]
         else:
             raise ValueError(
-                f"bc_type {bc_type} not recognized. It should be either 'natural', "
+                f"bc_type {bc_type} not recognised. It should be either 'natural', "
                 "'not-a-knot', or a 2-tuple for the left and right boundaries. The "
                 "elements can either be the aforementioned strings or themselves "
                 "2-tuples with the first element indicating 1 or 2 for the first or "
@@ -115,6 +115,8 @@ def _clean_extrap_arg(extrap: None | int | str) -> tuple[str, Any]:
     comprising the string "to 0" and values for x0 and xN1, return ("to 0", x0, xN1).
     Given an argument of None, return ("no extrap", None).
     """
+    if extrap is None:
+        return "no extrap", None
     if isinstance(extrap, Number):
         order = int(extrap)
         num_warning = (
@@ -246,6 +248,11 @@ def spline_coeffs(x_int: ArrayLike, x: ArrayLike, invkd: ArrayLike, extrap: None
         up_fn = _poly_extrap_up
         down_fn = _poly_extrap_down
         up_arg, down_arg = [extrap_args for _ in range(2)]
+    if (up.any() or down.any()) and extrap_type == "no extrap":
+        raise ValueError(
+            "extrap was specified as None, but x does not span x_int so extrapolation "
+            "is required. Please specify an extrap type."
+        )
     if up.any():
         J = J.at[up].set(up_fn(x_int[up], x, invkd, up_arg))
     if down.any():
