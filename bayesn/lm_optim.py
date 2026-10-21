@@ -7,9 +7,12 @@ Gauss-Newton approximation H = J^T J + H_prior, with the Jacobian built one colu
 at a time to keep memory low.
 """
 
+from collections.abc import Callable
 import jax
+from jax import Array
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
+from jax.typing import ArrayLike
 
 
 def _jacfwd_lax_map(f, p):
@@ -144,41 +147,47 @@ def _lm_minimise(init_p, bounds_lo, bounds_hi, residuals_fn, prior_fn, maxiter,
     return p_final, diagnostics
 
 
-def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_template,
-                     maxiter=30, lam_init=1e-3, use_linesearch=True):
+def run_lm_laplace_gn(
+    predict_fn: Callable,
+    prior_potential_fn: Callable,
+    postprocess_fn_sn: Callable,
+    z_template: dict,
+    maxiter: int = 30,
+    lam_init: float = 1e-3,
+    use_linesearch: bool = True,
+) -> tuple[dict, Array, dict]:
     """
-    Find the MAP using Gauss-Newton Levenberg-Marquardt
+    Find the MAP using Gauss-Newton Levenberg-Marquardt.
 
     Parameters
     ----------
-    predict_fn: callable
+    predict_fn
         Maps a constrained parameter dict to (flux, scale, data, mask) by running
         the model, giving the predicted photometry, per-observation noise scale,
-        observed data and validity mask
-    prior_potential_fn: callable
+        observed data, and validity mask.
+    prior_potential_fn
         Maps an unconstrained parameter dict to the negative log prior in
-        unconstrained space, including bijector log-det
-    postprocess_fn_sn: callable
-        Maps the unconstrained MAP back to constrained space via the model bijectors
-    z_template: dict
+        unconstrained space, including bijector log-det.
+    postprocess_fn_sn
+        Maps the unconstrained MAP back to constrained space via the model bijectors.
+    z_template
         Unconstrained initial values keyed by sample-site name; shapes and dtypes
-        define the flat vector layout
-    maxiter: int
-        LM iteration budget
-    lam_init: float
-        Initial LM damping
-    use_linesearch: Boolean
-        If True, perform a line search along the Newton direction at every step
+        define the flat vector layout.
+    maxiter
+        LM iteration budget.
+    lam_init
+        Initial LM damping parameter.
+    use_linesearch
+        If True, perform a line search along the Newton direction at every step.
 
     Returns
     -------
-
-    median_dict: dict
-        Constrained MAP, same keys/shapes as AutoLaplaceApproximation.median
-    losses: array-like
-        Loss at each iteration, shape (maxiter,)
-    z_unc_dict: dict
-        Unconstrained MAP in the same layout as z_template
+    median_dict : dict
+        Constrained MAP, with the same keys/shapes as AutoLaplaceApproximation.median.
+    losses : (maxiter,)
+        Loss at each iteration.
+    z_unc_dict : dict
+        Unconstrained MAP in the same layout as z_template.
     """
     flat0, unflatten = ravel_pytree(z_template)
     bounds_hi = jnp.full_like(flat0, jnp.inf)
@@ -198,13 +207,31 @@ def run_lm_laplace_gn(predict_fn, prior_potential_fn, postprocess_fn_sn, z_templ
     return median_dict, diag['f_val'], z_unc_dict
 
 
-def compute_gn_scale_tril(predict_fn, prior_potential_fn, z_template):
+def compute_gn_scale_tril(
+    predict_fn: Callable,
+    prior_potential_fn: Callable,
+    z_template: dict,
+) -> Array:
     """
-    Cholesky factor of inv(J^T J + H_prior) at z_template
+    Cholesky factor of inv(J^T J + H_prior) at z_template.
 
     Gauss-Newton estimate of the Laplace posterior covariance in unconstrained
     latent space (returned as its lower-Cholesky factor), avoiding the full model
     Hessian.
+
+    Parameters
+    ----------
+    predict_fn
+        Function returning (flux, scale, data, mask) given unflattened parameters.
+    prior_potential_fn
+        Function returning negative log prior for unflattened parameters.
+    z_template
+        Template dictionary defining parameter shapes and layout.
+
+    Returns
+    -------
+    (D, D)
+        Lower-Cholesky factor of the Laplace covariance matrix.
     """
     flat0, unflatten = ravel_pytree(z_template)
 

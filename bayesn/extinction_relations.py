@@ -16,16 +16,44 @@ EXT_REL_DIR = os.path.join(BASE_DIR, "ext_rel_files")
 yaml = YAML(typ="safe")
 
 class DustExtRel:
+    """
+    Parametric dust extinction relation for optical and NIR wavelengths.
+
+    Implements analytic/spline models for dust extinction laws (e.g. CCM89, F99, G23)
+    allowing dynamic evaluation across wavelengths as a function of total-to-selective
+    extinction ratio R(V).
+    """
+
     def __init__(
         self,
         name: str = "G23",
         x_in: ArrayLike | str = "default",
         x_units: str = "angstroms",
-        default_min_wave: int | float = 3500.,
-        default_max_wave: int | float = 9500.,
+        default_min_wave: float | int = 3500.0,
+        default_max_wave: float | int = 9500.0,
         default_wave_bins: int = 300,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> None:
+        """
+        Initialise and load a dust extinction relation.
+
+        Parameters
+        ----------
+        name
+            Name of built-in relation (e.g. 'G23', 'F99', 'CCM89') or path to YAML definition.
+        x_in : (N_wl,) or str
+            Wavelength array or preset: 'default' (log-spaced over default range) or 'full_range'.
+        x_units
+            Units of input wavelengths ('angstroms', 'nm', or 'microns').
+        default_min_wave
+            Short-wavelength boundary for default grid (in `x_units`).
+        default_max_wave
+            Long-wavelength boundary for default grid (in `x_units`).
+        default_wave_bins
+            Number of wavelength bins for default grid.
+        verbose
+            Whether to print loading information.
+        """
         self.default_min_wave = default_min_wave
         self.default_max_wave = default_max_wave
         self.default_wave_bins = default_wave_bins
@@ -102,54 +130,38 @@ class DustExtRel:
                 "or 'full_range'."
             )
 
-    def load(self, name: str, x_in: ArrayLike | str = "default", x_units: str = "angstroms", verbose: bool = True) -> None:
+    def load(
+        self,
+        name: str,
+        x_in: ArrayLike | str = "default",
+        x_units: str = "angstroms",
+        verbose: bool = True,
+    ) -> None:
         """
-        Loads a dust extinction relation from a yaml file.
+        Load a dust extinction relation from a YAML definition.
 
-        The redlaws/README file has technical information, but to summarize: each
-        extinction relation is specified as a piecewise function a(x) + b(x)/RV + sp(x).
-        And returns either A(x)/A(V), A(x)/E(B-V), or E(x-V)/E(B-V) as indicated by the
-        OUTPUT_TYPE keyword axav, axebv, or exvebv (default axav).
+        The relation is defined as a piecewise function:
 
-        Within any given subdomain i,
-        {a,b}(x) = x**{A,B}_EXP * (P_{a,b}(x) + R_{a,b}(x)/D_{a,b}(x))
-        where P_{a,b}, R_{a,b}, and D_{a,b} are all standard polynomials.
-        sp(x) has knots at L_KNOTS[i] with values given by RV**RV_EXP*P(RV).
+        .. math::
 
-        RV can be varied during sampling, but everything that can be pre-calculated is
-        stored in the attributes ax, bx, Jx, rv_coeffs, RV_exps, and output_type, which
-        are used by the _get_axav method.
+            a(x) + b(x)/R_V + {\\rm sp}(x)
 
-        The recognized YAML keywords and their descriptions are described in the
-        redlaws/README file.
+        parametrised in terms of A(x)/A(V), A(x)/E(B-V), or E(x-V)/E(B-V)
+        depending on the OUTPUT_TYPE specified in the YAML model file.
+        Downstream evaluation via :meth:`_get_axav` coerces this to A(x)/A(V).
 
         Parameters
         ----------
-        name:
-            Name of dust extinction relation to load. Options are
-            ``CCM89``:
-            ``C94``:
-            ``O94``:
-            ``F99``:
-            ``F99_AVGLMC``:
-            ``F99_LMC2``:
-            ``F99_SNANA``:
-            ``C00``:
-            ``F04``:
-            ``VCG04``:
-            ``GCC09``:
-            ``F19``:
-            ``D22``:
-            ``G23``:
-        x:
-            Wavelengths used to calculate reddening in _get_axav.
-            To use SEDmodel.model_wave as the wavelength grid, use x="default".
-            To use linearly-spaced wavelengths in inverse microns spanning the range
-            permitted by the extinction relation (i.e. for testing), use x="full_range".
-        verbose:
-
-        Attributes
-        ----------
+        name
+            Name of dust extinction relation to load. Built-in options include:
+            'CCM89', 'C94', 'O94', 'F99', 'F99_AVGLMC', 'F99_LMC2', 'F99_SNANA',
+            'C00', 'F04', 'VCG04', 'GCC09', 'F19', 'D22', 'G23'.
+        x_in : (N_wl,) or str
+            Wavelength array or preset: 'default' or 'full_range'.
+        x_units
+            Units of `x_in` ('angstroms', 'nm', or 'microns').
+        verbose
+            Whether to print loading details and warnings.
         """
         params = self.load_params(name=name, verbose=verbose)
         self.set_x(x_in=x_in, x_units=x_units)
@@ -214,19 +226,23 @@ class DustExtRel:
         self.Jx = jnp.asarray(der_J)
 
     def _get_axav(self, RV: ArrayLike) -> Array:
-        """ A jit-compilable method for calculating A(x)/A(V) using the loaded
-        attributes ax, bx, Jx, rv_coeffs, RV_exps, and output_type. See the load
-        docstring for details.
+        """
+        Calculate A(x)/A(V) using loaded dust extinction relation parameters.
+
+        JIT-compilable method evaluating the extinction relation:
+        :math:`a(x) + b(x)/R_V + {\\rm sp}(x)`.
+        If the relation was defined in terms of A(x)/E(B-V) or E(x-V)/E(B-V),
+        it is coerced to A(x)/A(V) so that the output is always A(x)/A(V).
 
         Parameters
         ----------
-        RV: ArrayLike shape (N_sn,)
+        RV : (N_sn,)
             R(V) values used for the calculation.
 
         Returns
         -------
-        ax_av: ArrayLike shape (N_sn, N_wl)
-            A set of A(x)/A(V) values calculated with the loaded dust extinction relation.
+        ax_av : (N_sn, N_wl)
+            Extinction law values A(x)/A(V).
         """
         max_len_coeffs = self.rv_coeffs.shape[2]
         RV_powers = jnp.linspace(self.rv_exp, self.rv_exp+max_len_coeffs-1, max_len_coeffs)[::-1].T
@@ -242,21 +258,23 @@ class DustExtRel:
         return cond(self.output_type == "exvebv", lambda v: v + 1, no_op, ret_val)
 
     def get_axav(self, RV: ArrayLike, verbose: bool = True) -> Array:
-        """ A non-jit-compilable wrapper for the private _get_axav method. This method
-        prints out a warning if any RVs are out of the specified RV_range and tries to
-        coerce RVs to the 1D Arrays expected by the private method. The intended use
-        case is for manual axav calculation in a notebook or ipython session. Performant
-        code should use the private method.
+        """
+        Calculate A(x)/A(V) with validation and shape coercion.
+
+        Non-JIT wrapper for :meth:`_get_axav`. Prints a warning if any R(V) values are
+        outside the valid range and coerces inputs to 1D arrays. Intended for interactive use.
 
         Parameters
         ----------
-        RV: ArrayLike shape (N_sn,) or (1, N_sn,)
+        RV : (N_sn,) or (1, N_sn) or scalar
             R(V) values used for the calculation.
+        verbose : bool, default=True
+            Whether to print warnings for out-of-range R(V) or shape issues.
 
         Returns
         -------
-        ax_av: ArrayLike shape (N_sn, N_wl)
-            A set of A(x)/A(V) values calculated with the loaded extinction relation.
+        ax_av : (N_sn, N_wl)
+            Extinction law values A(x)/A(V) evaluated across wavelength grid.
         """
         shaped_RV = jnp.atleast_1d(jnp.squeeze(RV)).astype(float)
         if verbose and len(shaped_RV.shape) > 1:

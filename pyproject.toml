@@ -11,7 +11,7 @@ include = ["bayesn*"]
 
 [project]
 name = "bayesn"
-version = "0.5.0"
+version = "1.0.0"
 requires-python = ">= 3.10"
 dependencies = [
     "arviz >= 0.0.1",
@@ -19,6 +19,7 @@ dependencies = [
     "h5py >= 3.6.0",
     "jax >= 0.4.27, <=0.6.0",
     "jaxlib >= 0.4.27, <=0.6.0",
+    "matplotlib >= 3.5",
     "numpy >= 1.23.5",
     "numpyro >= 0.14.0",
     "pandas >= 1.4.0",
@@ -32,7 +33,7 @@ authors = [
     {name = "Matthew Grayling", email = "mg2102@cam.ac.uk"},
     {name = "Stephen Thorp"},
     {name = "Kaisey Mandel"},
-    {name = "Aaron Do"},
+    {name = "Aaron Do", email = "ajmd6@cam.ac.uk"},
     {name = "Madeleine Ginolin"},
 ]
 description = "Hierarchical Bayesian modelling of type Ia SNe"

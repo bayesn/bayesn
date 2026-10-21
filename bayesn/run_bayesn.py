@@ -1,8 +1,12 @@
 #!/usr/bin/env python
+"""Command-line interface for running BayeSN inference jobs."""
+
+from __future__ import annotations
 
 import argparse
 import inspect
 from pathlib import Path
+from typing import Any
 from ruamel.yaml import YAML
 from warnings import warn
 
@@ -12,6 +16,14 @@ from bayesn import SEDmodel
 from bayesn.utils import get_yaml_comments
 
 def get_cmd_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for running BayeSN.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed command-line arguments.
+    """
     defaults_yaml = Path(__file__).parent / "defaults.yaml"
     arg_help = get_yaml_comments(defaults_yaml)
     arg_help.update({
@@ -78,7 +90,20 @@ def get_cmd_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
-def get_input_args(input_yaml: str | Path) -> dict:
+def get_input_args(input_yaml: str | Path) -> dict[str, Any]:
+    """
+    Load configuration arguments from an input YAML file.
+
+    Parameters
+    ----------
+    input_yaml
+        Path to the input YAML configuration file.
+
+    Returns
+    -------
+    dict
+        Configuration dictionary parsed from YAML.
+    """
     if not Path(input_yaml).exists():
         raise FileNotFoundError(
             f"Input file {input_yaml} was not found, please provide the path to an "
@@ -89,7 +114,22 @@ def get_input_args(input_yaml: str | Path) -> dict:
         input_args = yaml.load(file)
     return input_args
 
-def override_input_args_w_cmd_args(input_args: dict, cmd_args: argparse.Namespace) -> dict:
+def override_input_args_w_cmd_args(input_args: dict[str, Any], cmd_args: argparse.Namespace) -> dict[str, Any]:
+    """
+    Override configuration arguments with explicitly provided command-line arguments.
+
+    Parameters
+    ----------
+    input_args
+        Base configuration dictionary from YAML.
+    cmd_args
+        Parsed command-line arguments.
+
+    Returns
+    -------
+    dict
+        Updated configuration dictionary with command-line overrides applied.
+    """
     for key, val in vars(cmd_args).items():
         if key == "input" or val is None:
             continue
@@ -110,7 +150,20 @@ def override_input_args_w_cmd_args(input_args: dict, cmd_args: argparse.Namespac
     input_args["filter_yaml"] = input_args.pop("filters")
     return input_args
 
-def get_init_args(input_args: dict) -> dict:
+def get_init_args(input_args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Extract initialization arguments for ``SEDmodel.__init__`` from configuration.
+
+    Parameters
+    ----------
+    input_args
+        Configuration dictionary.
+
+    Returns
+    -------
+    dict
+        Keyword arguments to pass to ``SEDmodel.__init__``.
+    """
     init_sig = inspect.signature(SEDmodel.__init__)
     init_args = {}
     for param in init_sig.parameters.values():
@@ -124,7 +177,8 @@ def get_init_args(input_args: dict) -> dict:
         init_args[param.name] = input_args.get(param.name, param.default)
     return init_args
 
-def main():
+def main() -> None:
+    """CLI entry point for running BayeSN inference jobs."""
     cmd_args = get_cmd_args()
     input_args = get_input_args(cmd_args.input)
     input_args = override_input_args_w_cmd_args(input_args, cmd_args)
