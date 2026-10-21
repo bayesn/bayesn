@@ -9,8 +9,10 @@ the corresponding PDFs.
 """
 
 import numpy as np
+from jax import Array
 import jax.random as jr
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 from numpyro.util import is_prng_key
 
 class ChebyshevICDF():
@@ -28,20 +30,25 @@ class ChebyshevICDF():
 
     Parameters
     ----------
-    probs: array-like, optional
-        Array of values in [0,1] where the inverse CDF (quantile function)
+    probs : (N,)
+        Array of values in [0, 1] where the inverse CDF (quantile function)
         is known (if `method="quantiles"`) or to be computed (if `method="samples"`).
         Must be provided if `method="quantiles"`.
-    vals: array-like, optional
+    vals : (N,)
         Array of parameter values corresponding to the inverse CDF evaluated at `probs`.
         Must be provided if `method="quantiles"`.
-    samples: array-like, optional
+    samples : (M,)
         Array of samples whose inverse CDF is to be approximated.
         Must be provided if `method="samples"`.
-    K: int, optional
+    K
         Order of polynomial if `method="samples"`.
-    method: "quantiles" or "samples"
-        Specifies the kind of input the ICDF is constructed from. Default is "quantiles".
+    method
+        Construction method for the ICDF. Supported options:
+
+        * 'quantiles' (default) : construct from user-provided precomputed
+          quantiles (``probs`` and ``vals``).
+        * 'samples' : construct by evaluating empirical quantiles from ``samples``
+          at Chebyshev nodes.
 
     Methods
     -------
@@ -54,12 +61,19 @@ class ChebyshevICDF():
 
     Attributes
     ----------
-    K: int
+    K : int
         Degree of Chebyshev polynomial
-    c: array
+    c : Array
         Coefficients in Chebyshev series
     """
-    def __init__(self, probs=None, vals=None, samples=None, K=None, method="quantiles"):
+    def __init__(
+        self,
+        probs: ArrayLike | None = None,
+        vals: ArrayLike | None = None,
+        samples: ArrayLike | None = None,
+        K: int | None = None,
+        method: str = "quantiles",
+    ) -> None:
         # check probs are within [0,1]
         if probs is not None and (np.any(probs < 0) or np.any(probs > 1)):
                 raise ValueError("All probs must be in [0,1]!")
@@ -93,7 +107,7 @@ class ChebyshevICDF():
         # find coefficients of Chebyshev polynomials
         self.c = jnp.array(np.polynomial.chebyshev.chebfit(x, vals, self.K))
 
-    def clenshaw(self, x):
+    def clenshaw(self, x: ArrayLike) -> Array:
         """
         Evaluate the Chebyshev series at a given x.
 
@@ -102,12 +116,12 @@ class ChebyshevICDF():
 
         Parameters
         ----------
-        x: array-like
+        x : (...)
             Locations in [-1, 1] to compute the Chebyshev series at.
 
         Returns
         -------
-        z: array-like
+        (...)
             Chebyshev series evaluated at `x`.
         """
         b = jnp.zeros((self.K+3, *x.shape))
@@ -115,35 +129,37 @@ class ChebyshevICDF():
             b = b.at[-3-k,:].add(self.c[-1-k] + 2*x*b[-2-k] - b[-1-k])
         return 0.5*(self.c[0] + b[0] - b[2])
 
-    def icdf(self, p):
+    def icdf(self, p: ArrayLike) -> Array:
         """
         Compute the inverse CDF at a given p.
 
         Parameters
         ----------
-        p: array-like
-            Values in [0,1] to evaluate the inverse CDF at.
+        p : (...)
+            Values in [0, 1] to evaluate the inverse CDF at.
 
         Returns
         -------
-        z: array-like
+        (...)
             Inverse CDF evaluated at `p`.
         """
         return self.clenshaw(2.0*p - 1.0)
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
         """
         Sample from the approximated distribution.
 
         Parameters
         ----------
-        p: array-like
-            Values in [0,1] to evaluate the inverse CDF at.
+        key
+            JAX PRNG key.
+        sample_shape
+            Batch shape of samples to draw.
 
         Returns
         -------
-        z: array-like
-            Inverse CDF evaluated at `p`.
+        (\\*sample_shape,)
+            Samples drawn from the approximated distribution.
         """
         assert is_prng_key(key)
         p = jr.uniform(key, shape=sample_shape)
@@ -160,11 +176,15 @@ class MonoEICDF():
 
     Parameters
     ----------
-    samples: array-like, optional
+    samples : (N,)
         Array of samples whose inverse CDF is to be approximated.
-    kind: "linear" or "cubic"
-        Selects linear or cubic interpolation of the empirical ICDF.
-        Default is "linear".
+    kind
+        Interpolation method. Supported options:
+
+        * 'linear' (default) : piecewise linear interpolation
+          (via ``jax.numpy.interp``).
+        * 'cubic' : monotonic cubic Hermite spline interpolation
+          (via ``interpax.PchipInterpolator``).
 
     Methods
     -------
@@ -175,17 +195,17 @@ class MonoEICDF():
 
     Attributes
     ----------
-    pp: array
+    pp : Array
         Cumulative probabilities associated with `zp`.
-    zp: array
+    zp : Array
         Sorted array of parameter values
-    interpolator: callable
+    interpolator : Callable
         Callable function that interpolates the empirical ICDF
         defined by `pp` and `zp`.
         If `kind="linear"` this is an alias for `jax.numpy.interp`.
         If `kind="cubic"` this is an `interpax.PchipInterpolator`
     """
-    def __init__(self, samples, kind="linear"):
+    def __init__(self, samples: ArrayLike, kind: str = "linear") -> None:
         # sort the samples to get the empirical ICDF
         self.pp = (1+jnp.arange(len(samples)))/(len(samples)+1)
         self.zp = jnp.sort(samples)
@@ -201,35 +221,37 @@ class MonoEICDF():
         else:
             raise ValueError('kind must be either "linear or "cubic"!')
 
-    def icdf(self, p):
+    def icdf(self, p: ArrayLike) -> Array:
         """
         Compute the inverse CDF at a given p.
 
         Parameters
         ----------
-        p: array-like
-            Values in [0,1] to evaluate the inverse CDF at.
+        p : (...)
+            Values in [0, 1] to evaluate the inverse CDF at.
 
         Returns
         -------
-        z: array-like
+        (...)
             Inverse CDF evaluated at `p`.
         """
         return self.interpolator(p)
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
         """
         Sample from the approximated distribution.
 
         Parameters
         ----------
-        p: array-like
-            Values in [0,1] to evaluate the inverse CDF at.
+        key
+            JAX PRNG key.
+        sample_shape
+            Batch shape of samples to draw.
 
         Returns
         -------
-        z: array-like
-            Inverse CDF evaluated at `p`.
+        (\\*sample_shape,)
+            Samples drawn from the approximated distribution.
         """
         assert is_prng_key(key)
         p = jr.uniform(key, shape=sample_shape)

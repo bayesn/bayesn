@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import numpyro
 from numpyro.util import is_prng_key
 from numpyro.infer.autoguide import AutoContinuous
@@ -8,10 +9,11 @@ from numpyro.distributions.continuous import Normal, MultivariateNormal
 from numpyro.distributions.truncated import TruncatedNormal
 from numpyro.distributions.constraints import _SingletonConstraint
 from numpyro.distributions.transforms import biject_to, IdentityTransform, LowerCholeskyAffine
+from jax import Array, lax
 import jax.numpy as jnp
-from numpyro.distributions.util import promote_shapes, validate_sample
-from jax import lax
 from jax.random import normal, exponential
+from jax.typing import ArrayLike
+from numpyro.distributions.util import promote_shapes, validate_sample
 
 
 class _FirstPositive(_SingletonConstraint):
@@ -33,6 +35,12 @@ def _transform_to_real(constraint):
 
 
 class MultiZLTN(Distribution):
+    """
+    Multivariate Zero-Lower-Truncated Normal (MultiZLTN) distribution.
+
+    A multivariate normal distribution truncated such that its first element is
+    constrained to be strictly non-negative (x[0] >= 0).
+    """
     arg_constraints = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
@@ -51,13 +59,29 @@ class MultiZLTN(Distribution):
         return firstpositive
 
     def __init__(
-            self,
-            loc=0.0,
-            covariance_matrix=None,
-            precision_matrix=None,
-            scale_tril=None,
-            validate_args=None,
-    ):
+        self,
+        loc: ArrayLike = 0.0,
+        covariance_matrix: ArrayLike | None = None,
+        precision_matrix: ArrayLike | None = None,
+        scale_tril: ArrayLike | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
+        """
+        Initialise a MultiZLTN distribution.
+
+        Parameters
+        ----------
+        loc : (D,) or scalar
+            Mean location of the unconstrained multivariate normal.
+        covariance_matrix : (D, D)
+            Positive-definite covariance matrix.
+        precision_matrix : (D, D)
+            Positive-definite precision matrix.
+        scale_tril : (D, D)
+            Lower-cholesky factor of the covariance matrix.
+        validate_args
+            Whether to validate distribution arguments.
+        """
         if jnp.ndim(loc) == 0:
             (loc,) = promote_shapes(loc, shape=(1,))
         loc = loc[..., jnp.newaxis]
@@ -103,7 +127,22 @@ class MultiZLTN(Distribution):
             validate_args=validate_args,
         )
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
+        """
+        Generate random samples from the MultiZLTN distribution.
+
+        Parameters
+        ----------
+        key
+            JAX PRNG key.
+        sample_shape
+            Shape of the sample batch to draw.
+
+        Returns
+        -------
+        (\\*sample_shape, D)
+            D-dimensional samples with the first coordinate >= 0.
+        """
         assert is_prng_key(key)
         first_samples = self.zltn_dist.sample(key, sample_shape)
         if sample_shape == ():
@@ -124,7 +163,20 @@ class MultiZLTN(Distribution):
         )
         return jnp.concatenate((first_samples, second_samples), axis=concat_axis)
 
-    def log_prob(self, value):
+    def log_prob(self, value: ArrayLike) -> Array:
+        """
+        Evaluate log probability density under the MultiZLTN distribution.
+
+        Parameters
+        ----------
+        value : (..., D)
+            Points at which to evaluate log probability.
+
+        Returns
+        -------
+        (...)
+            Log probability densities.
+        """
         log_prob_x = self.zltn_dist.log_prob(value[..., 0])
         mu_hat = self.mu_2[..., None] + jnp.matmul(
             self.sigma_21,
@@ -148,25 +200,43 @@ class MultiZLTN(Distribution):
 
 
 class AutoMultiZLTNGuide(AutoContinuous):
-    # scale_tril_constraint = constraints.scaled_unit_lower_cholesky
+    """
+    AutoContinuous variational guide using a MultiZLTN posterior approximation.
+    """
     scale_tril_constraint = constraints.lower_cholesky
 
     def __init__(
-            self,
-            model,
-            *,
-            prefix="auto",
-            init_loc_fn=init_to_median,
-            init_scale=0.1,
-            init_scale_tril=None,
-    ):
+        self,
+        model: Callable,
+        *,
+        prefix: str = "auto",
+        init_loc_fn: Callable = init_to_median,
+        init_scale: float = 0.1,
+        init_scale_tril: ArrayLike | None = None,
+    ) -> None:
+        """
+        Initialise the AutoMultiZLTN guide.
+
+        Parameters
+        ----------
+        model
+            Python callable containing NumPyro primitives.
+        prefix
+            Prefix for guide parameter names.
+        init_loc_fn
+            Initialization strategy for latent means.
+        init_scale
+            Initial scale factor for diagonal covariance.
+        init_scale_tril : (D, D)
+            Optional initial lower-Cholesky factor for covariance.
+        """
         if init_scale <= 0:
             raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
         self._init_scale = init_scale
         self._init_scale_tril = init_scale_tril
         super().__init__(model, prefix=prefix, init_loc_fn=init_loc_fn)
 
-    def _get_posterior(self):
+    def _get_posterior(self) -> MultiZLTN:
         loc = numpyro.param("{}_loc".format(self.prefix), self._init_latent)
         if self._init_scale_tril is None:
             init_scale_tril = jnp.identity(self.latent_dim) * self._init_scale
@@ -179,56 +249,149 @@ class AutoMultiZLTNGuide(AutoContinuous):
         )
         return MultiZLTN(loc, scale_tril=scale_tril)
 
-    def get_base_dist(self):
+    def get_base_dist(self) -> Distribution:
+        """
+        Return the base standard normal distribution.
+        """
         return Normal(jnp.zeros(self.latent_dim), 1).to_event(1)
 
-    def get_transform(self, params):
+    def get_transform(self, params: dict) -> LowerCholeskyAffine:
+        """
+        Construct the affine transformation for the variational guide.
+
+        Parameters
+        ----------
+        params
+            Dictionary of variational parameters.
+
+        Returns
+        -------
+        LowerCholeskyAffine
+            Cholesky affine transformation mapping standard normal to target.
+        """
         loc = params["{}_loc".format(self.prefix)]
         scale_tril = params["{}_scale_tril".format(self.prefix)]
         return LowerCholeskyAffine(loc, scale_tril)
 
-    def get_posterior(self, params):
+    def get_posterior(self, params: dict) -> MultiZLTN:
         """
-        Returns a Multi ZLTN posterior distribution.
+        Return a MultiZLTN posterior distribution given variational parameters.
+
+        Parameters
+        ----------
+        params
+            Dictionary containing variational parameters '{prefix}_loc' and
+            '{prefix}_scale_tril'.
+
+        Returns
+        -------
+        MultiZLTN
+            Fitted MultiZLTN posterior distribution.
         """
         transform = self.get_transform(params)
         return MultiZLTN(transform.loc, scale_tril=transform.scale_tril)
 
 
 class My_Exponential(Distribution):
+    """
+    Exponential distribution with a soft quadratic barrier for negative values.
+    """
     reparametrized_params = ["rate"]
     arg_constraints = {"rate": constraints.positive}
     support = constraints.real
 
-    def __init__(self, rate=1.0, *, validate_args=None):
+    def __init__(self, rate: ArrayLike = 1.0, *, validate_args: bool | None = None) -> None:
+        """
+        Initialise the My_Exponential distribution.
+
+        Parameters
+        ----------
+        rate : (...) or scalar
+            Rate parameter lambda of the exponential distribution.
+        validate_args
+            Whether to validate distribution arguments.
+        """
         self.rate = rate
         super(My_Exponential, self).__init__(
             batch_shape=jnp.shape(rate), validate_args=validate_args
         )
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
+        """
+        Draw samples from the exponential distribution.
+
+        Parameters
+        ----------
+        key
+            JAX PRNG key.
+        sample_shape
+            Batch shape of samples to draw.
+
+        Returns
+        -------
+        (\\*sample_shape, ...)
+            Drawn samples.
+        """
         assert is_prng_key(key)
         return (
-                exponential(key, shape=sample_shape + self.batch_shape) / self.rate
+            exponential(key, shape=sample_shape + self.batch_shape) / self.rate
         )
 
     @validate_sample
-    def log_prob(self, value):
-        # One-sided quadratic barrier: zero (and zero gradient) on the support.
+    def log_prob(self, value: ArrayLike) -> Array:
+        """
+        Evaluate log probability density with quadratic penalty for negative values.
+
+        Parameters
+        ----------
+        value : (...)
+            Points at which to evaluate log probability.
+
+        Returns
+        -------
+        (...)
+            Log probability density values.
+        """
         base = jnp.log(self.rate) - self.rate * value
         neg = jnp.where(value < 0, value, 0.0)
         return base - 1.0e2 * neg * neg
 
     @property
-    def mean(self):
+    def mean(self) -> Array:
         return jnp.reciprocal(self.rate)
 
     @property
-    def variance(self):
+    def variance(self) -> Array:
         return jnp.reciprocal(self.rate ** 2)
 
-    def cdf(self, value):
+    def cdf(self, value: ArrayLike) -> Array:
+        """
+        Cumulative distribution function.
+
+        Parameters
+        ----------
+        value : (...)
+            Values at which to evaluate CDF.
+
+        Returns
+        -------
+        (...)
+            CDF values.
+        """
         return -jnp.expm1(-self.rate * value)
 
-    def icdf(self, q):
+    def icdf(self, q: ArrayLike) -> Array:
+        """
+        Inverse cumulative distribution function (quantile function).
+
+        Parameters
+        ----------
+        q : (...)
+            Quantile values in [0, 1].
+
+        Returns
+        -------
+        (...)
+            Quantile values.
+        """
         return -jnp.log1p(-q) / self.rate

@@ -117,18 +117,18 @@ def test_get_init_args():
         assert init_args[param.name] == init_sig.parameters[param.name].default
 
 @pytest.mark.slow
-def test_main(tmp_dir: Path):
+def test_main(tmpdir: Path):
     old_argv = sys.argv
     sys.argv = [
         sys.argv[0],
         str(BASE_DIR / "tests/test_files/input.yaml"),
         "--num_warmup=5",
         "--num_samples=5",
-        "--outputdir", str(tmp_dir)
+        "--outputdir", str(tmpdir)
     ]
     with pytest.warns(UserWarning):
         run_bayesn.main()
     for fname in ("chains.pkl", "fit_summary.csv", "input.yaml", "output.FITRES.TEXT", "output.LCPLOT", "output.LCSUMMARY.TEXT"):
-        assert (tmp_dir / fname).exists()
+        assert (tmpdir / fname).exists()
     sys.argv = old_argv
 

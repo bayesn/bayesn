@@ -1,9 +1,12 @@
 """
-Low-level file-handling I/O
+Low-level file-handling I/O.
+
 Methods in this module should either:
-    read_*: convert data in various formats to data in the standardised format of
-            sn_dict and obs_df expected by datasets.py's SNDataset factory methods
-    write_*: write data in those formats to various formats.
+
+- read_*: convert data in various formats to data in the standardised format of
+  sn_dict and obs_df expected by datasets.py's SNDataset factory methods
+- write_*: write data in those formats to various formats.
+
 This module is not for performing astronomical data transformations.
 """
 
@@ -33,52 +36,51 @@ obs_df_columns = ["MJD", "FLT", "flux", "flux_err", "mag", "mag_err"]  # list fo
 ###############
 ### Reading ###
 ###############
-def read_snana_spectra(file_path: str | Path | StringIO):
+def read_snana_spectra(file_path: str | Path | StringIO) -> dict:
     """
-    Read spectroscopy from the SNANA lightcurve file
+    Read spectroscopy from an SNANA light curve file.
+
     Forked and lightly modified from David Jones' SALTShaker repo
     https://github.com/djones1040/SALTShaker/blob/main/saltshaker/util/snana.py
 
     Parameters
     ----------
-    file_path : str
-        path to the light curve file.
+    file_path
+        Path to the light curve file or text stream.
 
     Returns
     -------
-    spectrum : dict
-        dictionary with keys for each SPECTRUM_ID and values of 2-tuples.
-        The first element in the 2-tuple is a float for the observation MJD.
-        The second elment is a 4xN np.ndarray spanning:
-            wavelength_min, wavelength_max, flux, flux_error.
+    dict
+        Dictionary mapping each SPECTRUM_ID to a 2-tuple:
+        (observation_mjd, data_matrix), where data_matrix has shape (4, N)
+        spanning (wavelength_min, wavelength_max, flux, flux_error).
 
     Notes
     -----
-    Expected format is something like
-    ```
-    ...
-    NSPECTRA: 21
+    Expected format is something like::
+
+        ...
+        NSPECTRA: 21
 
 
-    NVAR_SPEC: 5
-    VARNAMES_SPEC: LAMMIN LAMMAX  FLAM  FLAMERR SPECFLAG
+        NVAR_SPEC: 5
+        VARNAMES_SPEC: LAMMIN LAMMAX  FLAM  FLAMERR SPECFLAG
 
-    SPECTRUM_ID: 1
-    SPECTRUM_MJD:  48639.50
-    SPECTRUM_NLAM:     1520
-    SPEC:   3540.52   3542.84 6.48624e-14 2.81711e-15 1
-    SPEC:   3542.84   3545.14 6.48624e-14 2.81711e-15 1
-    ...
-    SPEC:   7054.62   7056.93 3.98786e-15 2.76859e-15 1
-    SPECTRUM_END:
+        SPECTRUM_ID: 1
+        SPECTRUM_MJD:  48639.50
+        SPECTRUM_NLAM:     1520
+        SPEC:   3540.52   3542.84 6.48624e-14 2.81711e-15 1
+        SPEC:   3542.84   3545.14 6.48624e-14 2.81711e-15 1
+        ...
+        SPEC:   7054.62   7056.93 3.98786e-15 2.76859e-15 1
+        SPECTRUM_END:
 
-    SPECTRUM_ID: 2
-    SPECTRUM_MJD:  48635.50
-    SPECTRUM_NLAM:     1520
-    SPEC:   3520.64   3522.97 5.53949e-14 1.38963e-15 1
-    SPEC:   3527.62   3529.95 5.35848e-14 1.38963e-15 1
-    ...
-    ```
+        SPECTRUM_ID: 2
+        SPECTRUM_MJD:  48635.50
+        SPECTRUM_NLAM:     1520
+        SPEC:   3520.64   3522.97 5.53949e-14 1.38963e-15 1
+        SPEC:   3527.62   3529.95 5.35848e-14 1.38963e-15 1
+        ...
     """
 
     if isinstance(file_path, str | Path) and str(file_path).endswith('.gz'):
@@ -232,69 +234,44 @@ def read_snana_ascii_meta(
 
 def read_snana_ascii(
     fname: str | Path | StringIO,
-    fluxcal_zpt: None | Number = None,
+    fluxcal_zpt: Number | None = None,
     tablename: str = "OBS",
     comment: str = "#",
-    **kwargs
+    **kwargs,
 ) -> tuple[odict[str, str | Number], pd.DataFrame]:
-    """ Given a path to an ascii file in the SNANA format, read it, extract relevant
-    data, and return the data in two standard formats. SN-level data are returned as a
-    dictionary, while observation-level data are returned in a DataFrame.
+    """
+    Read an SNANA-format ASCII file into metadata and an observation DataFrame.
+
+    Given a path to an ASCII file in the SNANA format, extract relevant data and
+    return it in two standard formats: SN-level data as a dictionary, and
+    observation-level data as a DataFrame.
+
+    The SNANA format encodes metadata as header lines in the form ``KEY: VALUE``.
+    The observation-level data is stored in tables where each row begins with the
+    table name followed by a colon (e.g. ``OBS: ``), with columns matching ``VARLIST``.
+    The file must include the columns MJD, FLT, FLUXCAL, and FLUXCALERR. Any MAG and
+    MAGERR columns are ignored.
 
     Parameters
     ----------
-    fname:
-        The path of the file to be read (string or Path object), or a file-like text
-        stream. The SNANA format has a number of metadata keys, indicated with a line
-        "KEY: VALUE". The observation-level data is stored in tables where each row in
-        the table starts with the table name and a ":" (e.g. "OBS: "), then columns as
-        indicated by VARLIST. The file must have the columns MJD, FLT, FLUXCAL, and
-        FLUXCALERR. MAG and MAGERR columns are ignored.
-    fluxcal_zpt:
-        The common zeropoint used for converting between magnitudes and fluxes. Like
-        peak_mjd, if this arg is None, it will be inferred from sn_dict, or if that is
-        also None, set to a default of 27.5.
-    tablename:
-        Lines for observations in SNANA files begin with a string for the table name.
-        The lines do not contain metadata so will be ignored. If the tablename is
-        inaccurate, the returned metadata will either raise a ValueError when it tries
-        to interpret more than 2 or 3 data columns as a header term, or will include a
-        key-value pair (and maybe one for error) in the metadata where the key is the
-        actual table name.
-    comment:
-        Lines starting with the comment string will not be read in for metadata.
+    fname
+        Path to the SNANA file (string or Path object), or a file-like text stream.
+    fluxcal_zpt
+        Common zeropoint used for converting between magnitudes and fluxes. If None,
+        inferred from `sn_dict` or defaults to 27.5.
+    tablename
+        Prefix string indicating observation rows in the file (defaults to "OBS").
+    comment
+        Character indicating comments to ignore (defaults to "#").
+
     Returns
     -------
-    sn_dict:
-        Contains data specific to the SN, but not to each observation.
-        See SNANA_keys variable for sn_dict keys consistent with SNANA
-            RA: right ascension [deg]
-            DECL: declination [deg]
-            MWEBV: Host-galaxy E(B-V) [mag]
-            HOSTGAL_LOGMASS: log_{10}(host-galaxy stellar mass/1 Msun)
-            REDSHIFT_HELIO: Heliocentric redshift
-            REDSHIFT_CMB: CMB rest-frame redshift
-            REDSHIFT_FINAL: Redshift to use on a Hubble Diagram, generally z_CMB
-                with peculiar velocities subracted out.
-            VPEC: Peculiar velocity [km / s]
-            VPEC_ERR: Uncertainty in peculiar velocity [km / s]
-            SEARCH_PEAKMJD: A guess of the B-band time of maximum light, which is
-                used to define rest-frame phase [MJD]
-        Added Keys
-            MWEBVERR:           Uncertainty on MWEBV [mag]
-            HOSTGAL_LOGMASSERR: Uncertainty on HOSTGAL_LOGMASS
-            REDSHIFT_HELIOERR:  Uncertainty on REDSHIFT_HELIO
-            REDSHIFT_CMBERR:    Uncertainty on REDSHIFT_CMB
-            REDSHIFT_FINALERR:  Uncertainty on REDSHIFT_FINAL
-    obs_df:
-        Contains a row for each observation with the following columns:
-            MJD: Phase of observation (rest-frame) with respect to peak_mjd [days]
-            FLT: BayeSN name of the photometric filter used in the observation.
-            flux: Unitless flux with fiducial zeropoint of either 27.5 or another key
-                  specified in the file.
-            flux_err: Uncertainty on the flux.
-            mag: Apparent magnitude.
-            mag_err: Uncertainty on those magnitudes.
+    sn_dict : odict
+        Metadata specific to the supernova (e.g. RA, DECL, MWEBV, REDSHIFT_HELIO,
+        REDSHIFT_CMB, VPEC, SEARCH_PEAKMJD, etc.).
+    obs_df : pd.DataFrame
+        DataFrame with a row per observation and columns:
+        ['MJD', 'FLT', 'flux', 'flux_err', 'mag', 'mag_err', 'snid'].
     """
     # --- get sn_dict from file ---
     sn_dict = read_snana_ascii_meta(fname=copy.deepcopy(fname), tablename=tablename, comment=comment)
@@ -328,91 +305,48 @@ def read_snana_ascii(
 
 def read_snana_fits(
     fname: str | Path,
-    keep_list: list[str, ...] = [],
+    keep_list: list[str] = [],
     fluxcal_zpt: Number = 27.5,
     jobid: int = 1,
     njobtot: int = 1,
     sim_prescale: int = 1,
 ) -> tuple[dict, pd.DataFrame]:
-    """ Given a path to an SNANA format fits (or fits.gz) HEAD file, read it and the
-    corresponding PHOT file, extract relevant data, and return the data in two standard
-    formats. SN-level data are returned as a dictionary, while observation-level data
-    are returned in a DataFrame.
+    """
+    Read SNANA-format FITS files into metadata and observation DataFrames.
 
-    Unlike the read ascii methods, SNANA-format fits files usually contain data for
-    multiple SNe, so this method's intended use case is not to iterate over many files
-    pertaining to one SN, but to parse large fits files efficiently. To that end, it
-    be advantageous to split the data processing over multiple jobs using the jobid and
-    njobtot arguments (see below).
+    Given a path to an SNANA format FITS (or .fits.gz) HEAD file, read it and the
+    corresponding PHOT file, extract relevant data, and return the data in standard
+    formats: SN-level data as a dictionary of arrays, and observation-level data in a
+    DataFrame.
 
-    The sn_dict and obs_df arguments in the read ascii methods are not accepted as
-    arguments here, since one should not have to update the data structures with
-    multiple method calls.
+    SNANA FITS files come in pairs: a HEAD file with one row of data per SN, and a
+    PHOT file with one row of data per observation. The ``PTROBS_MIN`` and
+    ``PTROBS_MAX`` values in the HEAD file provide pointers to the start and end
+    indices of that SN's observations in the PHOT file.
 
     Parameters
     ----------
-    fname:
-        The path of the HEAD file to be read (string or Path object). The SNANA fits
-        files come in pairs, a HEAD file with one row of data per SN, and a PHOT file
-        with one row of data per observation. The PTROBS_MIN and PTROBS_MAX values in
-        the head file provide pointers to the start and end indices of that SN's data
-        in the PHOT file.
-    map_dict:
-        Dictionary mapping non-standard filter names to their corresponding names in
-        bayesn/bayesn-filters/filters.yaml. This does not need to include filters whose
-        names in the data file are already aligned with their names in BayeSN.
-    peak_mjd_key:
-        The HEAD file should contain guesses for the value of tmax in modified Julian
-        Date for each SN. This argument provides the name of the column with that data.
-    fluxcal_zpt:
-        The common zeropoint used for converting between magnitudes and fluxes. Like
-        peak_mjd, if this arg is None, it will be inferred from sn_dict, or if that is
-        also None, set to a default of 27.5.
-    error_floor:
-        Error floor in magnitudes. FLUXCALERR values less than this value will be
-        replaced with the error floor converted to flux space via
-        error_floor * (np.log(10)/2.5) * file_data["flux"].
-    drop_bands:
-        List of bands to be ignored during fitting. Defaults to empty list
-        From the input yaml, any bandpasses that should be excluded from the data.
-    jobid:
-        The jobid and njobtot arguments can be used to parallelize the workflow of this
-        method. Each method call will ingest ~1/njobtot of the entire dataset. The
-        subset ingested is based on (SN_idx - jobid) % njobtot == 0, such that njobtot
-        consecutive jobids will ensure every SN index is processed once and only once.
-    njobtot:
-        See jobid above.
+    fname
+        Path to the HEAD file to be read (string or Path object).
+    keep_list
+        List of SNIDs to keep. If empty (default), all SNe are loaded.
+    fluxcal_zpt
+        Common zeropoint used for converting between magnitudes and fluxes.
+        Defaults to 27.5.
+    jobid
+        Worker ID (1-based index) for parallel execution. Each method call will
+        ingest ~1/njobtot of the entire dataset.
+    njobtot
+        Total number of parallel jobs. Defaults to 1.
+    sim_prescale
+        Downsampling prescale factor applied to simulation datasets. Defaults to 1.
 
     Returns
     -------
-    sn_dict:
-        Contains data specific to the SN, but not to each observation.
-        See SNANA_keys variable for sn_dict keys consistent with SNANA
-            RA: right ascension [deg]
-            DECL: declination [deg]
-            MWEBV: Host-galaxy E(B-V) [mag]
-            HOSTGAL_LOGMASS: log_{10}(host-galaxy stellar mass/1 Msun)
-            REDSHIFT_HELIO: Heliocentric redshift
-            REDSHIFT_CMB: CMB rest-frame redshift
-            REDSHIFT_FINAL: Redshift to use on a Hubble Diagram, generally z_CMB
-                with peculiar velocities subracted out.
-            VPEC: Peculiar velocity [km / s]
-            VPEC_ERR: Uncertainty in peculiar velocity [km / s]
-            SEARCH_PEAKMJD: A guess of the B-band time of maximum light, which is
-                used to define rest-frame phase [MJD]
-        Added Keys
-            MWEBVERR:           Uncertainty on MWEBV [mag]
-            HOSTGAL_LOGMASSERR: Uncertainty on HOSTGAL_LOGMASS
-            REDSHIFT_HELIOERR:  Uncertainty on REDSHIFT_HELIO
-            REDSHIFT_CMBERR:    Uncertainty on REDSHIFT_CMB
-            REDSHIFT_FINALERR:  Uncertainty on REDSHIFT_FINAL
-    obs_df:
-        Contains a row for each observation with the following columns:
-            t: Phase of observation (rest-frame) with respect to peak_mjd [days]
-            flux: Unitless flux with fiducial zeropoint of either 27.5 or another key
-                  specified in the file.
-            flux_err: Uncertainty on the flux.
-            FLT: BayeSN name of the photometric filter used in the observation.
+    sn_dict : dict
+        Dictionary of arrays containing per-SN metadata across all loaded supernovae.
+    phot_df : pd.DataFrame
+        DataFrame containing all photometric observations.
     """
     head_file = Path(fname)
     if not head_file.exists():
@@ -489,59 +423,35 @@ def read_snpy(
     comment: str = "#",
     **kwargs,
 ) -> tuple[odict[str, str | Number], pd.DataFrame]:
-    """ Given an ascii file in the SNooPy format, read it, extract relevant data, and
-    return the data in two standard formats. SN-level data are returned as a dictionary
-    while observation-level data are returned in a DataFrame.
+    """
+    Read an ASCII file in SNooPy format into metadata and observation DataFrame.
+
+    Given an ASCII file in the SNooPy format, extract relevant data and
+    return it in two standard formats: SN-level metadata as a dictionary,
+    and observation-level data as a DataFrame.
+
+    The file should be in the SNooPy format, meaning the first non-comment line
+    includes the SN name, heliocentric redshift, RA, and Dec. The file then contains
+    filter blocks, where the block for a filter begins with a line specifying the
+    filter name (e.g. ``filter B``), followed by rows listing observer-frame epoch,
+    observed magnitude, and magnitude uncertainty.
 
     Parameters
     ----------
-    fname:
-        The path of the file to be read (string or Path object), or a file-like text
-        stream. The file should be in the SNooPy format, meaning the first
-        (non-comment) line includes the SN name, heliocentric redshift, ra, and dec.
-        The file must then contain filter blocks, where the block for "filter X" begins
-        with that line, then any number of rows of listing observer-frame epoch, observed
-        magnitude, and the uncertainty of that magnitude, separated with whitespace.
-    fluxcal_zpt:
-        The common zeropoint used for converting between magnitudes and fluxes. Like
-        peak_mjd, if this arg is None, it will be inferred from sn_dict, or if that is
-        also None, set to a default of 27.5.
-    comment:
-        Lines starting with the comment string will not be read in, and text after the
-        comment string will be ignored.
+    fname
+        Path to the file (string or Path object), or a file-like text stream.
+    fluxcal_zpt
+        Common zeropoint for converting between magnitudes and fluxes. Defaults to 27.5.
+    comment
+        Character for skipping comments (defaults to "#").
 
     Returns
     -------
-    sn_dict:
-        Contains data specific to the SN, but not to each observation.
-        See SNANA_keys variable for sn_dict keys consistent with SNANA
-            RA: right ascension [deg]
-            DECL: declination [deg]
-            MWEBV: Host-galaxy E(B-V) [mag]
-            HOSTGAL_LOGMASS: log_{10}(host-galaxy stellar mass/1 Msun)
-            REDSHIFT_HELIO: Heliocentric redshift
-            REDSHIFT_CMB: CMB rest-frame redshift
-            REDSHIFT_FINAL: Redshift to use on a Hubble Diagram, generally z_CMB
-                with peculiar velocities subracted out.
-            VPEC: Peculiar velocity [km / s]
-            VPEC_ERR: Uncertainty in peculiar velocity [km / s]
-            SEARCH_PEAKMJD: A guess of the B-band time of maximum light, which is
-                used to define rest-frame phase [MJD]
-        Added Keys
-            MWEBVERR:           Uncertainty on MWEBV [mag]
-            HOSTGAL_LOGMASSERR: Uncertainty on HOSTGAL_LOGMASS
-            REDSHIFT_HELIOERR:  Uncertainty on REDSHIFT_HELIO
-            REDSHIFT_CMBERR:    Uncertainty on REDSHIFT_CMB
-            REDSHIFT_FINALERR:  Uncertainty on REDSHIFT_FINAL
-    obs_df:
-        Contains a row for each observation with the following columns:
-            MJD: Phase of observation (rest-frame) with respect to peak_mjd [days]
-            FLT: BayeSN name of the photometric filter used in the observation.
-            flux: Unitless flux with fiducial zeropoint of either 27.5 or another key
-                  specified in the file.
-            flux_err: Uncertainty on the flux.
-            mag: Apparent magnitudes
-            mag_err: Uncertainty on those magnitudes
+    sn_dict : odict
+        Metadata dictionary containing SNID, RA, DECL, REDSHIFT_HELIO, REDSHIFT_FINAL,
+        MWEBV, and ZP_FLUXCAL.
+    obs_df : pd.DataFrame
+        DataFrame of observations with columns ['MJD', 'FLT', 'flux', 'flux_err', 'mag', 'mag_err', 'snid'].
     """
     fh = open(fname, "r") if isinstance(fname, str | Path) else fname
     lines = fh.readlines()
@@ -672,71 +582,64 @@ def _write_snana_lcfile(
 def write_snana_lcfile(
     output_dir: str | Path,
     snname: str,
-    sn_dict: None | odict[str, str|Number] = None,
-    obs_df: None | pd.DataFrame = None,
-    mjd: None | ArrayLike = None,
-    flt: None | ArrayLike = None,
-    flux: None | ArrayLike = None,
-    flux_err: None | ArrayLike = None,
-    mag: None | ArrayLike = None,
-    mag_err: None | ArrayLike = None,
+    sn_dict: odict[str, str | Number] | None = None,
+    obs_df: pd.DataFrame | None = None,
+    mjd: ArrayLike | None = None,
+    flt: ArrayLike | None = None,
+    flux: ArrayLike | None = None,
+    flux_err: ArrayLike | None = None,
+    mag: ArrayLike | None = None,
+    mag_err: ArrayLike | None = None,
     fluxcal_zpt: Number = 27.5,
-    author: None | str ="anonymous",
-    survey: None | str = None,
-    paper: None | str = None,
-    filename: None | str = None,
-    **kwargs
-):
+    author: str | None = "anonymous",
+    survey: str | None = None,
+    paper: str | None = None,
+    filename: str | None = None,
+    **kwargs,
+) -> str:
     """
-    Write user data to an SNANA-like ascii light curve file
+    Write user data to an SNANA-like ASCII light curve file.
 
     Parameters
     ----------
-    output_dir:
-        Path to a directory where the file will be written. A default filename
-        will be used, but you can specify your own with the `filename` argument.
-        Default name format is `snname[_survey][_paper].snana.dat`, with the
-        survey and/or paper being appended to the name if provided.
-    snname:
-        Name of the supernova
-    sn_dict:
-        Dictionary containing metadata for the supernova
-    obs_df:
+    output_dir
+        Path to a directory where the file will be written. Default name
+        format is `snname[_survey][_paper].snana.dat`.
+    snname
+        Name of the supernova.
+    sn_dict
+        Dictionary containing metadata for the supernova.
+    obs_df
         Pandas DataFrame containing data for each observation of the supernova.
-    mjd:
-        Modified Julian Dates of observations
-    flt:
-        Filter idenitifiers of observations
-    flux:
-        Flux of observations
-    flux_err:
-        Flux errors of observations
-    mag:
-        Magnitudes of observations
-    mag_err:
-        Magnitude errors of observations
-    author : str, optional
-        Who is creating this file? Will be printed into the header's
-        preamble, if desired
-    survey : str, optional
-        Optional argumanet specifying the survey the data came from. Will be
-        written into the header and filename if provided.
-    paper : str, optional
-        Optional argument specifying the paper the data came from. Will be
-        written into the filename if provided.
-    filename : str, optional
-        Custom filename to save as within `output_dir`. If not provided,
-        a default format will be used. Do not provide an extension, as
-        this will be added automatically.
-    kwargs:
-        These kwargs are for providing metadata. Only the following keys are supported
-        ra, dec, tmax, z_helio, z_helio_err, z_cmb, z_cmb_err, ebv_mw,
-        ebv_mew_err, vpec, vpec_err, host_logmass, host_logmass_err.
+    mjd : (N_obs,)
+        Modified Julian Dates of observations.
+    flt : (N_obs,)
+        Filter identifiers of observations.
+    flux : (N_obs,)
+        Flux of observations.
+    flux_err : (N_obs,)
+        Flux errors of observations.
+    mag : (N_obs,)
+        Magnitudes of observations.
+    mag_err : (N_obs,)
+        Magnitude errors of observations.
+    fluxcal_zpt
+        Flux conversion zeropoint. Defaults to 27.5.
+    author
+        Who is creating this file. Printed in the header's preamble.
+    survey
+        Optional argument specifying the survey the data came from.
+    paper
+        Optional argument specifying the paper citation the data came from.
+    filename
+        Custom filename to save within `output_dir`. Do not include an extension.
+    **kwargs
+        Additional metadata keys (e.g. ra, dec, tmax, z_helio, z_helio_err, etc.).
 
     Returns
     -------
-    path : str
-        Full path to the generated light curve file.
+    str
+        Filename of the generated light curve file in `output_dir`.
 
     Notes
     -----

@@ -9,6 +9,7 @@ from warnings import warn
 
 import numpy as np
 import jax.numpy as jnp
+from jax import Array
 from jax.lax import cond
 from jax.typing import ArrayLike
 
@@ -28,7 +29,7 @@ def _parse_bc_type(bc_type: ArrayLike | str):
         )
     return bcs
 
-def invKD(x, bc_type="natural"):
+def invKD(x: ArrayLike, bc_type: ArrayLike | str = "natural") -> np.ndarray:
     """
     Compute K^{-1}D for a set of spline knots.
 
@@ -39,13 +40,16 @@ def invKD(x, bc_type="natural"):
 
     Parameters
     ----------
-    x : :py:class:`numpy.array`
-        Numpy array containing the locations of the cubic spline knots.
+    x : (N,)
+        Locations of the cubic spline knots.
+    bc_type
+        Boundary condition specification. Either 'natural', 'not-a-knot',
+        or a 2-element sequence for the left and right boundaries.
 
     Returns
     -------
-    KD : :py:class:`numpy.array`
-        y independent matrix whose product can be taken with y to
+    (N, N + 1)
+        Precomputed matrix whose product can be taken with y to
         obtain a vector of second derivatives of y.
     """
     bc_type = _parse_bc_type(bc_type)
@@ -88,25 +92,26 @@ def invKD(x, bc_type="natural"):
                 "second derivative and the second element indicating its value."
             )
     return np.linalg.solve(K, D)
-def cartesian_prod(x, y):
-	"""
-	Compute cartesian product of two vectors.
 
-	Parameters
-	----------
-	x : :py:class:`numpy.array`
-		First vector.
-	x : :py:class:`numpy.array`
-		Second vector.
+def cartesian_prod(x: ArrayLike, y: ArrayLike) -> np.ndarray:
+    """
+    Compute cartesian product of two vectors.
 
-	Returns
-	-------
-	z : :py:class:`numpy.array`
-		Cartesian product of x and y.
-	"""
-	n_x = len(x)
-	n_y = len(y)
-	return np.array([np.repeat(x,n_y),np.tile(y,n_x)]).T
+    Parameters
+    ----------
+    x : (N,)
+        First vector.
+    y : (M,)
+        Second vector.
+
+    Returns
+    -------
+    (N * M, 2)
+        Cartesian product of x and y.
+    """
+    n_x = len(x)
+    n_y = len(y)
+    return np.array([np.repeat(x,n_y),np.tile(y,n_x)]).T
 
 def _clean_extrap_arg(extrap: None | int | str) -> tuple[str, Any]:
     """ Given a string type argument containing substrings "lin", "quad", or "cub" or
@@ -177,41 +182,52 @@ def _clean_extrap_arg(extrap: None | int | str) -> tuple[str, Any]:
         or tuple/list/ArrayLike with length 3 where the first element is "to 0" or
             "to_0" and the second and third elements are the knot locations.""")
 
-def spline_coeffs(x_int: ArrayLike, x: ArrayLike, invkd: ArrayLike, extrap: None | int | str = 3):
-    """
+def spline_coeffs(
+    x_int: ArrayLike,
+    x: ArrayLike,
+    invkd: ArrayLike,
+    extrap: int | str | None = 3,
+) -> Array:
+    r"""
     Compute a matrix of spline coefficients.
 
     Given a set of knots at x, with values y, compute a matrix, J, which
-    can be multiplied into a [1, *y] to evaluate the cubic spline at points x_int.
-    Numerical recipes in C (https://numerical.recipes; Press et al. 1992) gives
-    y(x[j] < x_int < x[j+1]) = A*y[j] + B*y[j+1] + C*y''[j] + D*y''[j+1]
+    can be multiplied into [1, \*y] to evaluate the cubic spline at points x_int.
+    Numerical recipes in C (https://numerical.recipes; Press et al. 1992) gives:
+
+        y(x[j] < x_int < x[j+1]) = A * y[j] + B * y[j+1] + C * y''[j] + D * y''[j+1]
+
     where
-    A = 1 - B = (x[j+1] - x_int)/(x[j+1] - x[j])
-    C = 1/6 * (A**3 - A) * (x[j+1] - x_j)**2
-    D = 1/6 * (B**3 - B) * (x[j+1] - x_j)**2
-    Given that y''(x) = K^{-1}D y = invkd y, the eqn can be rewritten as
-    y(x[j] < x_int < x[j+1]) = A*y[j] + B*y[j+1] + C*(invkd y)[j] + D*(invkd y)[j+1]
-    By iterating over knot indices, and we can get matrix J such that y(x_int) = Jy.
+
+        A = 1 - B = (x[j+1] - x_int) / (x[j+1] - x[j])
+        C = 1/6 * (A**3 - A) * (x[j+1] - x[j])**2
+        D = 1/6 * (B**3 - B) * (x[j+1] - x[j])**2
+
+    Given that y''(x) = K^{-1}D y = invkd y, the eqn can be rewritten as:
+
+        y(x[j] < x_int < x[j+1]) = A * y[j] + B * y[j+1] + C * (invkd y)[j] + D * (invkd y)[j+1]
+
+    By iterating over knot indices, we obtain matrix J such that y(x_int) = Jy.
 
     Parameters
     ----------
-    x_int: shape (N_x)
-    	2D array containing the locations which the output matrix will
-    	interpolate the spline to.
-    x: shape (N_xk)
-    	2D array containing the locations of the spline knots.
-    invkd: shape (N_xk, N_xk+1)
-    	Precomputed matrix for generating second derivatives. Can be obtained
-    	from the output of ``invKD``.
-    extrap: None or str in "linear", "quad", or "cubic" (default)
-    	Extrapolation type. If None, there will be an error raised when x_int is not
-        spanned by the knot locations at x.
-        If "linear", "quad", or "cubic", extrapolation will follow the corresponding
+    x_int : (N_x,)
+        Locations to which the output matrix will interpolate the spline.
+    x : (N_xk,)
+        Locations of the spline knots.
+    invkd : (N_xk, N_xk + 1)
+        Precomputed matrix for generating second derivatives. From ``invKD``.
+    extrap
+        Extrapolation type. If None, an error is raised when x_int is not
+        spanned by knot locations x. Options include integer polynomial orders
+        (1, 2, or 3), strings containing 'lin', 'quad', or 'cub', or
+        'to_0_x0_xN1'.
+
     Returns
     -------
-    J: shape (N_x, N_xk+1)
-    	y independent matrix whose product can be taken with [1, *y] to evaluate
-    	the spline at x_int.
+    (N_x, N_xk + 1)
+        Matrix whose product can be taken with [1, \*y] to evaluate the
+        spline at x_int.
     """
     x_int = np.asarray(x_int)
     x = np.asarray(x)
@@ -328,10 +344,35 @@ def _extrap_to_0_down(x_int: ArrayLike, x: ArrayLike, invkd: ArrayLike, x0: floa
     J_down = J_down.at[idx].add(f[:, None]*(2*invkd[0][None, :] + invkd[1][None, :])/6)
     return J_down
 
-def spline_coeffs_step(x_now, x, invkd, extrap=1):
-    """ JAX friendly version of spline_coeffs.
-    To be used with vmapping e.g.
-    J_t_map = jax.jit(jax.vmap(spline_coeffs_stest_step, in_axes=(0, None, None)))
+def spline_coeffs_step(
+    x_now: ArrayLike,
+    x: ArrayLike,
+    invkd: ArrayLike,
+    extrap: int | str | None = 1,
+) -> Array:
+    """
+    JAX-friendly version of spline_coeffs for a single point.
+
+    Designed for use with ``jax.vmap``, e.g.::
+
+        J_t_map = jax.jit(jax.vmap(spline_coeffs_step, in_axes=(0, None, None)))
+
+    Parameters
+    ----------
+    x_now : () or scalar
+        Point at which the spline is evaluated.
+    x : (N_xk,)
+        Locations of the spline knots.
+    invkd : (N_xk, N_xk + 1)
+        Precomputed matrix for generating second derivatives. From ``invKD``.
+    extrap
+        Extrapolation type. Options include integer polynomial orders (1, 2, or 3),
+        strings containing 'lin', 'quad', or 'cub', or 'to_0_x0_xN1'.
+
+    Returns
+    -------
+    (N_xk + 1,)
+        Row vector whose dot product with [1, \\*y] evaluates the spline at x_now.
     """
     shape = list(x.shape)
     shape[0] += 1

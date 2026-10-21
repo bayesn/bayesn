@@ -6,6 +6,7 @@ model_files/T21_model/T21_free_tmax
 bayesn.egg-info/
 build/
 bayesn/data/dust_maps/
+docs/_build/
 *__pycache__*
 *.swp
 *.dat~

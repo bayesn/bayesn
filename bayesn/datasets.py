@@ -9,6 +9,8 @@ The class's factory methods use the read_* methods from io.py, which convert dat
 various formats to a standard intermediate representation.
 The modules are separated to avoid bloat and improve unit testing.
 """
+from __future__ import annotations
+
 import copy
 from dataclasses import dataclass
 from dataclasses import field as dataclasses_field
@@ -33,7 +35,7 @@ from bayesn import utils, constants
 ########################
 ### Global constants ###
 ########################
-meta_names: dict[str, list[str, ...]] = {
+meta_names: dict[str, list[str]] = {
     "str": ["snid", "field", "survey", "cutflag_snana"],
     "num": [
         "ra", "dec", "peak_mjd", "sn_type",
@@ -47,7 +49,7 @@ meta_names: dict[str, list[str, ...]] = {
         ("gentype", "template_id", "libid", "redshift_cmb", "vpec", "dlmag",
         "peakmjd", "theta", "AV", "RV")]
 }
-all_meta_names: list[str, ...] = (
+all_meta_names: list[str] = (
     meta_names["str"] + meta_names["num"] + meta_names["sim"]
 )
 # These defaults should not be used to instantiate SNDataset attributes, missing data
@@ -72,12 +74,34 @@ default_values: dict[str, str | Number] = {
 # needs to be list for pandas column indexing.
 req_phot_cols = ("snid", "flt", "mjd")
 
-default_arr_str = lambda: np.zeros(shape=(0,), dtype=float)
-default_arr_float = lambda: np.zeros(shape=(0,), dtype=float)
+
+def default_arr_str() -> np.ndarray:
+    return np.zeros(shape=(0,), dtype=float)
+
+
+def default_arr_float() -> np.ndarray:
+    return np.zeros(shape=(0,), dtype=float)
+
+
 ######################
 ### Global methods ###
 ######################
 def get_standard_name(name: str) -> str:
+    """
+    Standarise a metadata or photometry column name.
+
+    Maps SNANA, SNooPy, and legacy BayeSN column and metadata keys to canonical
+    BayeSN names.
+
+    Parameters
+    ----------
+    name
+        Input key or column name to standarise.
+
+    Returns
+    -------
+    Canonical BayeSN name.
+    """
     if name in all_meta_names:
         return name
     # SNANA names are largely the same but capitalised though there are a few
@@ -128,7 +152,20 @@ def get_standard_name(name: str) -> str:
         return name+"s"
     return name
 
+
 def get_SNANA_name(name: str) -> str:
+    """
+    Map a canonical BayeSN name to the corresponding SNANA format name.
+
+    Parameters
+    ----------
+    name
+        Canonical BayeSN key or column name.
+
+    Returns
+    -------
+    SNANA uppercase name.
+    """
     name = name.upper()
     misc = {
         # metadata names
@@ -155,15 +192,28 @@ def get_SNANA_name(name: str) -> str:
         warn(UserWarning(f"Not sure what SNANA key {name} refers to, returning input."))
     return name
 
+
 def clean_peakmjd_key(
     sn_dict: dict[str, str | Number | ArrayLike],
-    peakmjd_key: str | list[str, ...] | None = None
+    peakmjd_key: str | list[str] | None = None,
 ) -> dict:
-    """ peak_mjd can be specified in multiple ways. The default clean_sn_dict method
-    will use `get_standard_name` to interpret 'search_peakmjd', 'peakmjd', 'pkmjd', and
-    'tmax', but it may be useful to support other keys as well.
-    Keys specified with peakmjd_key will be sought in sn_dict (case-insensitive) and
-    peak_mjd will be replaced.
+    """
+    Standarise the peak MJD key in a metadata dictionary.
+
+    The default method searches for standard keys ('search_peakmjd', 'peakmjd',
+    'pkmjd', 'tmax'). Additional custom keys can be specified via `peakmjd_key`.
+    The matched key is replaced with ``'peak_mjd'``.
+
+    Parameters
+    ----------
+    sn_dict
+        Metadata dictionary.
+    peakmjd_key
+        Custom key(s) to check for peak MJD in addition to defaults.
+
+    Returns
+    -------
+    Dictionary with peak MJD standarised to key ``'peak_mjd'``.
     """
     if isinstance(peakmjd_key, str):
         peakmjd_key = [peakmjd_key]
@@ -181,14 +231,19 @@ def clean_peakmjd_key(
         sn_dict["peak_mjd"] = sn_dict.pop(found_keys[0])
     return sn_dict
 
-def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike], ) -> dict:
-    """ Standardise the keys in an sn_dict to the keys expected in this class and
-    ensure values are lists or np.arrays as appropriate.
+
+def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike]) -> dict:
+    """
+    Standardise metadata dictionary keys and coerce scalar values to 1D arrays.
 
     Parameters
     ----------
-    sn_dict:
-        A metadata dictionary such as those produced by bayesn.io.read_* methods.
+    sn_dict
+        Metadata dictionary such as those produced by :mod:`bayesn.io` read functions.
+
+    Returns
+    -------
+    Cleaned metadata dictionary with canonical keys and 1D numpy array values.
     """
     # REDSHIFT_CMB and REDSHIFT_FINAL (and errs) both map to z_cmb.
     # This can create a race condition. Instead, prioritise FINAL.
@@ -213,13 +268,30 @@ def clean_sn_dict(sn_dict: dict[str, str | Number | ArrayLike], ) -> dict:
         sn_dict[key] = np.full(len(sn_dict["snid"]), None)
     return sn_dict
 
+
 def clean_obs_df(
     obs_df: pd.DataFrame,
-    snids: str | ArrayLike = None,
-    phot_idx: None | ArrayLike = None,
+    snids: str | ArrayLike | None = None,
+    phot_idx: ArrayLike | None = None,
 ) -> pd.DataFrame:
-    """ Standardise the column names in obs_df, adding a 'snid' column if needed and
-    phot_idx is provided.
+    """
+    Standardise column names and order in a photometry DataFrame.
+
+    Ensures standard columns ('snid', 'flt', 'mjd', etc.) are present and properly typed.
+    If the 'snid' column is missing, it is constructed using `snids` and `phot_idx`.
+
+    Parameters
+    ----------
+    obs_df
+        Input photometry DataFrame.
+    snids : (N_sn,) or str, optional
+        Supernova identifier(s).
+    phot_idx : (N_sn + 1,), optional
+        Photometry partition indices separating individual SNe.
+
+    Returns
+    -------
+    Cleaned and sorted photometry DataFrame.
     """
     snids = np.atleast_1d(snids)
     if len(snids) == 0 or len(obs_df) == 0:
@@ -254,8 +326,66 @@ def clean_obs_df(
     obs_df = obs_df.sort_values(list(req_phot_cols)).reset_index(drop=True)
     return obs_df[[*req_phot_cols, *data_cols, *other_cols]]
 
+
+class ObsData(NamedTuple):
+    """
+    Lightweight container for supernova observation data used by BayeSN.
+
+    Parameters
+    ----------
+    host_logmass : (N_sn,)
+        Host galaxy stellar mass in :math:`\\log_{10}(M_*/M_\\odot)`.
+    z_hel : (N_sn,)
+        Heliocentric redshift.
+    z_hel_err : (N_sn,)
+        Uncertainty in heliocentric redshift.
+    muhat : (N_sn,)
+        Apparent distance modulus from cosmology prior.
+    MWEBV : (N_sn,)
+        Milky Way E(B-V) color excess.
+    mjd : (N_obs_max, N_sn)
+        Modified Julian Dates (or rest-frame phases) of observations.
+    flux : (N_obs_max, N_sn)
+        Observed fluxes (or magnitudes).
+    flux_err : (N_obs_max, N_sn)
+        Flux (or magnitude) uncertainties.
+    band_indices : (N_obs_max, N_sn)
+        Integer bandpass index corresponding to each observation.
+    mask : (N_obs_max, N_sn)
+        Boolean mask where 1 indicates valid observed data and 0 indicates padding.
+    """
+    host_logmass: ArrayLike
+    z_hel: ArrayLike
+    z_hel_err: ArrayLike
+    muhat: ArrayLike
+    MWEBV: ArrayLike
+    mjd: ArrayLike
+    flux: ArrayLike
+    flux_err: ArrayLike
+    band_indices: ArrayLike
+    mask: ArrayLike
+
 @dataclass(eq=False)
 class SNDataset:
+    """
+    Container for supernova light curve photometry and metadata.
+
+    Supports reading, manipulating, filtering, and exporting datasets of one or more
+    supernovae across multiple filters. Handles conversions between heliocentric and
+    CMB frame redshifts, peculiar velocities, and rest-frame phases.
+
+    Attributes
+    ----------
+    N_sn : int
+        Number of supernovae in the dataset.
+    fluxcal_zpt : float
+        Standard photometric zeropoint (default 27.5).
+    sim : bool
+        Whether the dataset contains simulated supernova metadata.
+    photometry : pd.DataFrame
+        Table of photometric observations containing columns such as 'snid', 'flt',
+        'mjd', 'flux', 'flux_err', 'mag', 'mag_err', and 'phase'.
+    """
     #################################
     ### Attributes and Properties ###
     #################################
@@ -317,19 +447,19 @@ class SNDataset:
             return False
 
     @property
-    def meta_str(self) -> list[np.ndarray, ...]:
+    def meta_str(self) -> list[np.ndarray]:
         return [getattr(self, attr) for attr in meta_names["str"]]
 
     @property
-    def meta_num(self) -> list[np.ndarray, ...]:
+    def meta_num(self) -> list[np.ndarray]:
         return [getattr(self, attr) for attr in meta_names["num"]]
 
     @property
-    def meta_sim(self) -> list[np.ndarray, ...]:
+    def meta_sim(self) -> list[np.ndarray | None]:
         return [getattr(self, attr) for attr in meta_names["sim"]]
 
     @property
-    def metadata(self) -> dict[str, str | Number | list | np.ndarray]:
+    def metadata(self) -> dict[str, np.ndarray]:
         meta_dict = dict(zip(
             meta_names["str"] + meta_names["num"], self.meta_str + self.meta_num
         ))
@@ -339,30 +469,30 @@ class SNDataset:
         return meta_dict
 
     @property
-    def unique_bands(self) -> np.ndarray[str, ...]:
+    def unique_bands(self) -> np.ndarray:
         return self.photometry["flt"].unique()
 
     @property
-    def N_obs(self) -> np.ndarray[int, ...]:
+    def N_obs(self) -> np.ndarray:
         if not len(self.photometry):
             return np.array([])
         counts = self.photometry["snid"].value_counts()
         return np.array([counts.get(s, 0) for s in self.snid], dtype=int)
 
     @property
-    def phot_idx(self) -> np.ndarray[int, ...]:
+    def phot_idx(self) -> np.ndarray:
         if not len(self.photometry):
             return np.array([0])
         return np.append(0, np.cumsum(self.N_obs))
 
     @property
-    def phase_min(self) -> np.ndarray[float | None, ...]:
+    def phase_min(self) -> np.ndarray:
         if "phase" not in self.photometry.columns:
             return np.full(self.N_sn, None)
         return self.photometry.groupby("snid", observed=True)["phase"].transform("min").unique()
 
     @property
-    def phase_max(self) -> np.ndarray[float | None, ...]:
+    def phase_max(self) -> np.ndarray:
         if "phase" not in self.photometry.columns:
             return np.full(self.N_sn, None)
         return self.photometry.groupby("snid", observed=True)["phase"].transform("max").unique()
@@ -437,19 +567,18 @@ class SNDataset:
     ######################
     ### Getter methods ###
     ######################
-    def get_idx(self, snid: str | ArrayLike) -> int | list:
-        """ Given a string-like snid argument, return the integer index of its SN.
-        ArrayLike arguments return a list of integer indices for all SNe in snid.
+    def get_idx(self, snid: str | ArrayLike) -> int | np.ndarray:
+        """
+        Get the integer index or indices corresponding to one or more supernova IDs.
 
         Parameters
         ----------
-        snid:
-            The snid (or snids) of SN(e) whose indices are being sought.
+        snid : (N_query,) or str
+            Supernova identifier(s) to locate in the dataset.
 
         Returns
         -------
-        idx:
-            The index (or indices) of the SN(e).
+        Integer index for a single SNID, or numpy array of indices for multiple SNIDs.
         """
         if isinstance(snid, str):
             idx = np.where(self.snid == snid)[0]
@@ -467,24 +596,22 @@ class SNDataset:
 
     def _parse_snid_idx_args(
         self,
-        snid: None | str | ArrayLike = None,
-        idx: None | int | ArrayLike = None,
-    ) -> int | ArrayLike:
-        """ Several methods will accept either snid or idx arguments to indicate the
-        relevant SN(e). This private method sanitises the inputs and returns indices
-        so methods only have to work a single kind of argument.
+        snid: str | ArrayLike | None = None,
+        idx: int | ArrayLike | None = None,
+    ) -> int | np.ndarray:
+        """
+        Sanitise and unify SNID or integer index arguments.
 
         Parameters
         ----------
-        snid:
-            The snid (or snids) passed to a method.
-        idx:
-            The index (or indices) passed to a method.
+        snid : (N_query,) or str, optional
+            Supernova identifier(s).
+        idx : (N_query,) or int, optional
+            Integer supernova index or indices.
 
         Returns
         -------
-        idx:
-            The index (or indices) passed to a method.
+        Sanitised supernova index or array of indices.
         """
         if snid is None and idx is None:
             raise ValueError("Either snid or idx should be specified.")
@@ -499,28 +626,25 @@ class SNDataset:
 
     def get_metadata_subset(
         self,
-        snid: None | str | ArrayLike = None,
-        idx: None | int | ArrayLike = None,
+        snid: str | ArrayLike | None = None,
+        idx: int | ArrayLike | None = None,
         use_defaults: bool = False,
-    ) -> dict[str, list | ArrayLike]:
-        """ Get a subset of the metadata. If snid and idx are both None, return all
-        metadata, which may be preferred over self.metadata due to use_defaults.
+    ) -> dict[str, np.ndarray]:
+        """
+        Get metadata for a subset of supernovae.
 
         Parameters
         ----------
-        snid:
-            The snid (or snids) of SN(e) whose metadata are being requested.
-        idx:
-            The index (or indices) of SN(e) whose metadata are being requested.
-        use_defaults:
-            If True, replace metadata stored as None with the default values in
-            default_values.
+        snid : (N_query,) or str, optional
+            Supernova identifier(s).
+        idx : (N_query,) or int, optional
+            Integer supernova index or indices.
+        use_defaults
+            If True, replace metadata stored as None with standard defaults.
 
         Returns
         -------
-        metadata_subset:
-            Dictionary of metadata keys where the values only include the metadata for
-            SN(e) specified by snid or idx.
+        Dictionary of metadata arrays filtered to the selected supernovae.
         """
         if snid is None and idx is None:
             idx = np.arange(self.N_sn)
@@ -536,22 +660,22 @@ class SNDataset:
 
     def get_phot_subset(
         self,
-        snid: None | str | ArrayLike = None,
-        idx: None | int | ArrayLike = None,
+        snid: str | ArrayLike | None = None,
+        idx: int | ArrayLike | None = None,
     ) -> pd.DataFrame:
-        """ Get a subset of the photometry DataFrame.
+        """
+        Get photometry for a subset of supernovae.
 
         Parameters
         ----------
-        snid:
-            The snid (or snids) of SN(e) whose photometry is being requested.
-        idx:
-            The index (or indices) of SN(e) whose photometry is being requested.
+        snid : (N_query,) or str, optional
+            Supernova identifier(s).
+        idx : (N_query,) or int, optional
+            Integer supernova index or indices.
 
         Returns
         -------
-        phot_subset:
-            DataFrame photometry including only data for SN(e) specified by snid or idx.
+        Photometry table filtered to the selected supernovae.
         """
         idx = np.atleast_1d(self._parse_snid_idx_args(snid, idx))
         # isin will not preserve index ordering.
@@ -563,15 +687,24 @@ class SNDataset:
     #####################
     def append(
         self,
-        ds: None = None,
-        sn_dict: None | dict = None,
-        obs_df: pd.DataFrame = None,
-        phot_idx: None | ArrayLike = None
+        ds: SNDataset | None = None,
+        sn_dict: dict[str, Any] | None = None,
+        obs_df: pd.DataFrame | None = None,
+        phot_idx: ArrayLike | None = None,
     ) -> None:
-        """ Append an instance of the SNDataset class to the instance that called the
-        method, or append an sn_dict/obs_df such as the read_*.py methods in io.py
-        return. May need to clean SNANA_names.
-        Avoid creating duplicate metadata.
+        """
+        Append an SNDataset instance, or metadata dict and photometry DataFrame.
+
+        Parameters
+        ----------
+        ds
+            Dataset instance to append.
+        sn_dict
+            Metadata dictionary (e.g. from :mod:`bayesn.io` read functions).
+        obs_df
+            Photometry table.
+        phot_idx : (N_sn + 1,), optional
+            Partition indices for the photometry table.
         """
         # Arg parsing
         if ds is None and sn_dict is None and obs_df is None:
@@ -710,18 +843,18 @@ class SNDataset:
     ####################
     def remove_sn(
         self,
-        snid: None | str | ArrayLike = None,
-        idx: None | int | ArrayLike = None
+        snid: str | ArrayLike | None = None,
+        idx: int | ArrayLike | None = None,
     ) -> None:
-        """ Remove all photometry and metadata from the SN(e) specified by either snid
-        or idx. Adjusts phot_idx to preserve mappings for all other SNe.
+        """
+        Remove all photometry and metadata for specified supernovae.
 
         Parameters
         ----------
-        snid:
-            The snid (or snids) of the SN(e) to be removed.
-        idx:
-            The index (or indices) of the SN(e) to be removed.
+        snid : (N_query,) or str, optional
+            Supernova identifier(s) to remove.
+        idx : (N_query,) or int, optional
+            Integer index or indices of supernovae to remove.
         """
         idx = np.atleast_1d(self._parse_snid_idx_args(snid, idx))
         if not len(idx):
@@ -737,28 +870,27 @@ class SNDataset:
             self.other_metadata[key] = np.delete(self.other_metadata[key], idx)
         self.N_sn -= len(idx)
 
-    def keep_according_to_list(self, keep_list: list[str, ...]) -> None:
-        """ Given a list of SNID values to keep, drop all others.
+    def keep_according_to_list(self, keep_list: list[str]) -> None:
+        """
+        Retain only supernovae with SNIDs in `keep_list`, dropping all others.
 
         Parameters
         ----------
-        keep_list:
-            SNID values that should be kept.
+        keep_list
+            Supernova IDs to keep.
         """
         self.remove_sn(snid=set(self.snid).difference(keep_list))
 
-    def remove_phot_by_idx(self, idx: int | ArrayLike | pd.Index, inplace=True):
-        """ Remove the photometry at index (or indices if ArrayLike) idx.
-        Adjust phot_idx accordingly and remove SNe with no photometry afterwards.
+    def remove_phot_by_idx(self, idx: int | ArrayLike | pd.Index, inplace: bool = True) -> None:
+        """
+        Remove photometry at specified table row indices.
 
         Parameters
         ----------
-        idx:
-            An integer or 1D ArrayLike of integers that give the indices of the rows
-            in the photometry DataFrame to be removed.
-        inplace:
-            If True, actually remove the indicated data, otherwise return a new
-            DataFrame and metadata.
+        idx : (N_rows,) or int
+            Row indices in the photometry DataFrame to remove.
+        inplace
+            Whether to modify this dataset in place.
         """
         self.photometry = self.photometry.drop(idx).reset_index(drop=True)
         sn_indices = np.searchsorted(self.phot_idx, np.atleast_1d(idx), side="right")
@@ -767,36 +899,37 @@ class SNDataset:
         # Reverse order to preserve index order before the one being removed.
         self.remove_sn(idx=np.where(self.N_obs == 0)[0])
 
-    def drop_bands(self, drop_bands: list[str, ...]) -> None:
-        """ Removes photometric data observed in a band in drop_bands.
+    def drop_bands(self, drop_bands: list[str] | ArrayLike) -> None:
+        """
+        Remove observations observed in specified bandpasses.
 
         Parameters
         ----------
-        drop_bands:
-            ArrayLike of bands to be removed from the dataset.
+        drop_bands : (N_bands,) or list of str
+            Bandpass names to remove.
         """
         self.remove_phot_by_idx(np.where(self.photometry["flt"].isin(drop_bands))[0])
 
     def drop_by_band_lims(
         self,
-        band_lim_dict: dict[str, tuple[Number, Number]],
-        wave_min: Number,
-        wave_max: Number,
-        ignore_missing: bool = False
+        band_lim_dict: dict[str, tuple[float, float]],
+        wave_min: float,
+        wave_max: float,
+        ignore_missing: bool = False,
     ) -> None:
-        """ Drop data from bands whose redshifted transmissions contain significant
-        (>1%) throughput outside a given wavelength range.
+        """
+        Drop bands whose redshifted transmission extends outside a wavelength range.
 
         Parameters
-        band_lim_dict:
-            Keys corresponding to BayeSN bandpass names, values are 2-tuples indicating
-            the lower and upper observer-frame wavelength limits between which the
-            transmission is defined. The limits are defined by the transmission function
-            reaching 1% of its maximum throughput.
-        wave_min:
-            The bluest rest-frame wavelength to be retained.
-        wave_max:
-            The reddest rest-frame wavelength to be retained.
+        ----------
+        band_lim_dict
+            Mapping from BayeSN bandpass name to 2-tuple observer-frame wavelength limits.
+        wave_min
+            Minimum rest-frame wavelength to retain.
+        wave_max
+            Maximum rest-frame wavelength to retain.
+        ignore_missing
+            Whether to skip bands in the dataset that are missing from `band_lim_dict`.
         """
         bands = list(band_lim_dict.keys())
         missing = set(self.unique_bands).difference(bands)
@@ -825,24 +958,26 @@ class SNDataset:
         val: Number,
         inplace: bool = True,
         use_defaults: bool = False
-    ) -> None | tuple[dict[str, str | Number | ArrayLike], pd.DataFrame]:
-        """ Remove data from SNe selected based on numeric metadata.
+    ) -> tuple[dict[str, np.ndarray], pd.DataFrame] | None:
+        """
+        Filter supernovae based on numeric metadata cuts.
 
         Parameters
         ----------
-        name:
-            The name of the metadata attribute whose values will be filtered.
-        logic:
-            The logical operator of the comparison. Should be in =, <, <=, >, or >=.
-            See the where_logic docstring in utils.py for more options.
-        val:
-            The value against which the selected metadata will be compared.
-        inplace:
-            If True, remove the cut SNe from the dataset, otherwise return a tuple
-            containing a cut metadata dict and photometry DataFrame.
-        use_defaults:
-            If True, replace metadata stored as None with the default values in
-            default_values when determining cuts.
+        name
+            Metadata attribute name to filter by (or 'N_obs', 'snrmaxN').
+        logic
+            Comparison operator ('=', '<', '<=', '>', '>=').
+        val
+            Threshold value for comparison.
+        inplace
+            Whether to remove the cut SNe in place. If False, returns (meta_dict, phot_df).
+        use_defaults
+            Whether to substitute missing values with standard defaults when evaluating.
+
+        Returns
+        -------
+        (metadata_subset, phot_subset) if `inplace=False`, otherwise None.
         """
         old_name = name
         name = get_standard_name(old_name)
@@ -867,21 +1002,24 @@ class SNDataset:
 
     def cut_by_phot_numeric(
         self, name: str, logic: str, val: Number, inplace: bool = True
-    ) -> None | tuple[dict[str, str | Number | ArrayLike], pd.DataFrame, np.ndarray]:
-        """ Remove data from SNe selected based on photometry data.
+    ) -> tuple[dict[str, np.ndarray], pd.DataFrame] | None:
+        """
+        Filter observations based on numeric photometry cuts.
 
         Parameters
         ----------
-        name:
-            The name of the attribute whose values will be filtered.
-        logic:
-            The logical operator of the comparison. Should be in =, <, <=, >, or >=.
-            See the where_logic docstring in utils.py for more options.
-        val:
-            The value against which the selected metadata will be compared.
-        inplace:
-            If True, remove the cut observations from the photometry, otherwise return
-            a tuple containing a cut metadata dict and cut photometry DataFrame.
+        name
+            Photometry column name to filter.
+        logic
+            Comparison operator ('=', '<', '<=', '>', '>=').
+        val
+            Threshold value for comparison.
+        inplace
+            Whether to remove rows in place. If False, returns (meta_dict, phot_df).
+
+        Returns
+        -------
+        (metadata_subset, phot_subset) if `inplace=False`, otherwise None.
         """
         if name not in self.photometry:
             raise ValueError(
@@ -906,24 +1044,23 @@ class SNDataset:
         self,
         snid: str,
         N: int = 3,
-        default_value: int = -99.
-    ) -> list[float, ...]:
-        """ Calculates SNR maxima in top N unique bands for LC cuts.
+        default_value: float = -99.0,
+    ) -> list[float]:
+        """
+        Calculate maximum signal-to-noise ratios in top N unique bands.
 
         Parameters
         ----------
-        snid:
-            snid of SN for which to calculate snrmaxes.
-        N:
-            Number of unique bandpasses to calculate snrmaxes for. The returned list
-            will have length N regardless of the number of unique bandpasses.
-        default_value:
-            Value to pad return list with when there are fewer than N unique bands.
+        snid
+            Supernova identifier.
+        N
+            Number of top bands to calculate SNR maxima for.
+        default_value
+            Padding value when fewer than N unique bands exist.
 
         Returns
         -------
-        snrmaxes:
-            list of N floats providing the SNR maxima in descending order.
+        Top N maximum SNR values in descending order.
         """
         assert isinstance(snid, str), "Non-str snids are not supported."
         phot = self.get_phot_subset(snid=snid)
@@ -937,19 +1074,18 @@ class SNDataset:
             snrmaxes.append(snr.max())
         return snrmaxes
 
-    def estimate_tmax(self, snid: str) -> Number:
-        """ Use a SNR^2-weighted average of available epochs to estimate the time of
-        B-band maximum for SN snid.
-
-        If a SN's peak_mjd is None, it will need to be estimated to calculate
-        rest-frame phases. Fortunately, the guess does not need to be very accurate if
-        BayeSN is sampling for time of maximum, but to constrain the searched parameter
-        space, the guess needs to be within 10 days of the truth.
+    def estimate_tmax(self, snid: str) -> float:
+        """
+        Estimate time of maximum using SNR^2-weighted average of observation epochs.
 
         Parameters
         ----------
-        snid:
-            snid of SN for which to estimate tmax.
+        snid
+            Supernova identifier.
+
+        Returns
+        -------
+        Estimated time of B-band maximum in MJD.
         """
         assert isinstance(snid, str), "Non-str snids are not supported."
         phot = self.get_phot_subset(snid)
@@ -959,20 +1095,25 @@ class SNDataset:
             flux=phot["flux"],
             flux_err=phot["flux_err"]
         )
-        return tmax
+        return float(tmax)
 
 
-    def calculate_rest_phases(self, snid: str, peak_mjd: Number | None = None) -> None:
-        """ Given MJDs, a heliocentric redshift, and fiducial times (peak B-band), get
-        rest-frame phases (MJD - t_max)/(1+z_helio) and set it in self.photometry["phase"]
+    def calculate_rest_phases(self, snid: str, peak_mjd: Number | None = None) -> np.ndarray:
+        """
+        Calculate rest-frame phases for a given supernova.
 
         Parameters
         ----------
-        peak_mjd:
-            A guess for the value of tmax in modified Julian Date. Used to define
-            rest-frame phase. If None, this will be inferred from the photometry using
-            a SNR^2-weighted average of available epochs. This is not a reliable metric
-            if the peak is not covered.
+        snid
+            Supernova identifier.
+        peak_mjd, optional
+            Estimated peak MJD. If None, uses supernova's `peak_mjd` metadata or
+            estimates it via :meth:`estimate_tmax`.
+
+        Returns
+        -------
+        phases : (N_obs,)
+            Rest-frame phases in days relative to maximum.
         """
         assert isinstance(snid, str), "Non-str snids are not supported."
         idx = self.get_idx(snid)
@@ -983,26 +1124,23 @@ class SNDataset:
 
     def get_band_indices(
         self,
-        band_dict: None | dict[str, int] = None,
-        photometry: None | pd.DataFrame = None
+        band_dict: dict[str, int] | None = None,
+        photometry: pd.DataFrame | None = None,
     ) -> np.ndarray:
-        """ Get integer indices of the flt column in the photometry attribute.
+        """
+        Get integer indices of the filter band column.
 
         Parameters
         ----------
-        band_dict:
-            Dictionary with keys matching the names of the filters in the unique_bands
-            property and values corresponding to the index. If band_dict is None, use
-            the arbitrary ordering of unique_bands to assign 1-based indices.
-        photometry:
-            If None, use the attached photometry attribute. Allows for getting mapped
-            band indices of a subset of the entire DataFrame by passing the subset as an
-            argument.
+        band_dict, optional
+            Mapping from filter names to integer indices.
+        photometry, optional
+            Photometry table to map. If None, uses `self.photometry`.
 
         Returns
         -------
-        band_indices:
-            A 1-D array mapping the recorded bands to the specified indices.
+        band_indices : (N_obs,)
+            1D array mapping recorded bands to integer indices.
         """
         if photometry is None:
             photometry = self.photometry
@@ -1021,17 +1159,16 @@ class SNDataset:
                 ))
                 band_dict.update(missing_dict)
         return photometry["flt"].apply(lambda x: band_dict[x]).to_numpy()
+
     ###################################
     ### Astronomical Setter Methods ###
     ###################################
     # These methods alter state
     def fill_out_redshifts(self) -> None:
-        """ Given redshift metadata, try to infer any missing values by converting
-        between heliocentric and CMB rest-frames and treating peculiar velocities.
+        """
+        Infer missing redshift metadata by transforming between rest frames.
 
-        For error propagation, we ignore uncertainty in the CMB dipole and correlation
-        between peculiar velocities and redshifts.
-        We assume if an uncertainty is availabe, the redshift is also available.
+        Propagates between heliocentric and CMB frames and accounts for peculiar velocities.
         """
         attrs = ("ra", "dec", "z_helio", "z_cmb", "z_hubble", "z_helio_err",
                 "z_cmb_err", "z_hubble_err", "vpec", "vpec_err")
@@ -1077,12 +1214,15 @@ class SNDataset:
                 self.z_hubble[i] = (1+zcmb)/(1+v) - 1
 
     def set_all_rest_phases(self) -> None:
+        """Calculate and store rest-frame phases for all supernovae in ``self.photometry['phase']``."""
         self.photometry["phase"] = np.concatenate([self.calculate_rest_phases(snid) for snid in self.snid])
 
     def recalibrate_fluxcal_zpt(self) -> None:
-        """ Adjust the zeropoint in mag = zp - 2.5*log10(flux)
-        Assume the magnitudes are correct.
-        This is an irreversible operation as the data zeropoints are not retained.
+        """
+        Rescale fluxes and flux errors to match `fluxcal_zpt`.
+
+        Assumes observed magnitudes are correct and adjusts fluxes such that
+        :math:`m = {\\rm zp} - 2.5 \\log_{10}(f)`.
         """
         pos_mask = self.photometry["flux"] > 0
         if not pos_mask.any():
@@ -1101,23 +1241,23 @@ class SNDataset:
 
     def apply_filter_map(self, map_dict: dict[str, str]) -> None:
         """
+        Map non-standard filter names to canonical BayeSN filter names.
+
         Parameters
         ----------
-        map_dict:
-            Dictionary mapping non-standard filter names to their corresponding names in
-            bayesn/bayesn-filters/filters.yaml. This does not need to include filters whose
-            names in the data file are already aligned with their names in BayeSN.
+        map_dict
+            Dictionary mapping data filter names to BayeSN filter names.
         """
         self.photometry["flt"] = self.photometry["flt"].map(lambda f: map_dict.get(f, f))
 
     def apply_error_floor(self, error_floor: float) -> None:
         """
+        Enforce a minimum photometric error floor in magnitudes.
+
         Parameters
         ----------
-        error_floor:
-            Error floor in magnitudes. flux_err values less than this value will be
-            replaced with the error floor converted to flux space via
-            error_floor * (np.log(10)/2.5) * self.photometry["flux"].
+        error_floor
+            Error floor in magnitudes.
         """
         if error_floor <= 0:
             return
@@ -1128,7 +1268,17 @@ class SNDataset:
             np.full_like(self.photometry["mag_err"], error_floor)
         )
 
-    def apply_overrides(self, overrides: dict = {}) -> None:
+    def apply_overrides(self, overrides: dict | None = None) -> None:
+        """
+        Apply metadata overrides to the dataset.
+
+        Parameters
+        ----------
+        overrides, optional
+            Dictionary mapping metadata attribute names to override values.
+        """
+        if overrides is None:
+            overrides = {}
         # Ensure overrides map to attributes.
         for key in list(overrides.keys()):
             std_name = get_standard_name(key)
@@ -1205,52 +1355,49 @@ class SNDataset:
         cls,
         fname: str | Path | StringIO | ArrayLike,
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: list[str, ...] | str | None = None,
+        peakmjd_key: list[str] | str | None = None,
         file_format: str | ArrayLike = "SNANA",
-        overrides: dict = {},
+        overrides: dict | None = None,
         jobid: int = 1,
         njobtot: int = 1,
         sim_prescale: int = 1,
         **kwargs,
-    ):
-        """ Instantiate a SNDataset from a file or list of files in the ascii format.
+    ) -> SNDataset:
+        """
+        Instantiate an SNDataset from one or more ASCII files.
+
         Parameters
         ----------
-        fname:
+        fname
             The file to be read (string path, Path object, or file-like text-stream),
             or an ArrayLike of files to be read.
-        fluxcal_zpt:
+        fluxcal_zpt
             The common zeropoint used for converting between magnitudes and fluxes.
-        file_format:
-            The kind of files to be read in.
-        jobid:
-            The jobid and njobtot arguments can be used to parallelize the workflow of
+        peakmjd_key
+            Custom key(s) to check for peak MJD.
+        file_format
+            The kind of files to be read in ('SNANA' or 'snpy').
+        overrides
+            Metadata overrides.
+        jobid
+            The jobid and njobtot arguments can be used to parallelise the workflow of
             this method. Each method call will create a SNDataset with ~1/njobtot of
-            all file if fname is an ArrayLike. The subset ingested is based on
+            all files if fname is an ArrayLike. The subset ingested is based on
             (SN_idx - jobid) % njobtot == 0, such that njobtot consecutive jobids will
             ensure every SN index is processed once and only once.
-        njobtot:
+        njobtot
             See jobid above.
-        kwargs:
-            kwargs are directed to the read function, with the supported kwargs below
-            read_snana_ascii:
-                tablename:
-                    Lines for observations in SNANA files begin with a string for the
-                    table name. The lines do not contain metadata so will be ignored.
-                    If the tablename is inaccurate, the returned metadata will either
-                    raise a ValueError when it tries to interpret more than 2 or 3 data
-                    columns as a header term, or will include a key-value pair (and
-                    maybe one for error) in the metadata where the key is the actual
-                    table name.
-                comment: str
-                    Lines starting with the comment string will not be read in for
-                    metadata.
-            read_snpy:
-                comment:
-                    Lines starting with the comment string will not be read in, and
-                    text after the comment string will be ignored.
+        sim_prescale
+            Prescale factor for simulation files.
+        **kwargs
+            Additional keyword arguments directed to the read function (e.g. ``comment``, ``tablename``).
 
+        Returns
+        -------
+        Loaded supernova dataset.
         """
+        if overrides is None:
+            overrides = {}
         # Support non-array values.
         if isinstance(fname, str | Path):
             fname = [fname,]
@@ -1298,22 +1445,47 @@ class SNDataset:
         fname: str | Path | StringIO,
         data_root: str | Path = Path(),
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str] | str = "SEARCH_PEAKMJD",
         file_format: str | ArrayLike = "SNANA",
-        comment="#",
+        comment: str = "#",
         jobid: int = 1,
         njobtot: int = 1,
         sim_prescale: int = 1,
         **kwargs,
-    ):
-        """ Instantiate an SNDataset from a space-separated file. The only required
-        column is "files", which may contain multiple file-paths separated by commas.
-        Additional columns for any metadata attribute can be included to override the
-        metadata read in from the file. The SNID value within each file in a single row
-        must be identical so that the from_ascii_files method produces a dataset with
-        only one SN.
+    ) -> SNDataset:
+        """
+        Instantiate an SNDataset from a space-separated index table.
 
-        The accepted formats are ascii files in SNANA or snpy format.
+        The only required column is "files", which may contain multiple file-paths
+        separated by commas. Additional columns for any metadata attribute can be
+        included to override the metadata read in from the file.
+
+        Parameters
+        ----------
+        fname
+            Path or stream of index table containing a ``'files'`` column.
+        data_root
+            Base directory for relative paths in the index file.
+        fluxcal_zpt
+            Standard photometric zeropoint.
+        peakmjd_key
+            Key used for peak MJD.
+        file_format
+            File format ('SNANA' or 'snpy').
+        comment
+            Comment character in index file.
+        jobid
+            Job index for distributed loading.
+        njobtot
+            Total number of jobs.
+        sim_prescale
+            Prescale factor for simulations.
+        **kwargs
+            Additional keyword arguments forwarded to :meth:`from_ascii_files`.
+
+        Returns
+        -------
+        Combined supernova dataset.
         """
         sn_list = pd.read_csv(fname, comment=comment, sep=r"\s+")
         if "files" not in sn_list:
@@ -1359,14 +1531,42 @@ class SNDataset:
     def from_snana_fits(
         cls,
         fname: str | Path,
-        keep_list: list[str, ...] = [],
+        keep_list: list[str] | None = None,
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
         sim_prescale: int = 1,
         **kwargs,
-    ):
+    ) -> SNDataset:
+        """
+        Instantiate an SNDataset from SNANA FITS files (HEAD and PHOT).
+
+        Parameters
+        ----------
+        fname
+            Path to the SNANA FITS file (HEAD or PHOT).
+        keep_list
+            List of SNIDs to keep.
+        fluxcal_zpt
+            Photometric zeropoint.
+        peakmjd_key
+            Key for peak MJD.
+        jobid
+            Job index for batch loading.
+        njobtot
+            Total number of jobs.
+        sim_prescale
+            Prescale factor for simulations.
+        **kwargs
+            Additional arguments forwarded to :func:`bayesn.io.read_snana_fits`.
+
+        Returns
+        -------
+        Loaded supernova dataset.
+        """
+        if keep_list is None:
+            keep_list = []
         sn_dict, obs_df = io.read_snana_fits(
             fname,
             keep_list=keep_list,
@@ -1390,20 +1590,47 @@ class SNDataset:
         cls,
         fname: str | Path,
         data_root: str | Path = Path(),
-        keep_list: list[str, ...] = [],
+        keep_list: list[str] | None = None,
         fluxcal_zpt: Number = 27.5,
-        peakmjd_key: list[str, ...] | str = "SEARCH_PEAKMJD",
+        peakmjd_key: list[str] | str = "SEARCH_PEAKMJD",
         jobid: int = 1,
         njobtot: int = 1,
         sim_prescale: int = 1,
         **kwargs,
-    ):
-        """ Instantiate a SNDataset from a path to a LIST file as produced by SNANA.
-        This file contains lines of file names in the same directory.
-
-        The accepted formats are SNANA ascii files and SNANA fits files. Paths to fits
-        files should point to the HEAD files, not the PHOT files.
+    ) -> SNDataset:
         """
+        Instantiate an SNDataset from an SNANA LIST file.
+
+        This file contains lines of file names in the same directory.
+        Accepted formats are SNANA ASCII files and SNANA FITS files (pointing to HEAD).
+
+        Parameters
+        ----------
+        fname
+            Path to the LIST file containing supernova file names.
+        data_root
+            Base directory containing the files listed in `fname`.
+        keep_list
+            List of SNIDs to keep.
+        fluxcal_zpt
+            Photometric zeropoint.
+        peakmjd_key
+            Key for peak MJD.
+        jobid
+            Job index for batch loading.
+        njobtot
+            Total number of jobs.
+        sim_prescale
+            Prescale factor for simulations.
+        **kwargs
+            Additional keyword arguments.
+
+        Returns
+        -------
+        Loaded supernova dataset.
+        """
+        if keep_list is None:
+            keep_list = []
         sn_list = np.atleast_1d(np.loadtxt(fname, dtype="str"))
         file_format = np.array([s.rstrip(".gz").split(".")[1].lower() for s in sn_list])
         fits_files = np.where(file_format == "fits")
@@ -1445,38 +1672,45 @@ class SNDataset:
     def make_fitres_table(
         self,
         version_photometry: bool = False,
-        survey_overwrite: None | str = None,
-        cut_dict: dict = {},
-        keep_dict: dict = {},
-        survey_dict: dict = {},
-    ) -> QTable:
-        """ Create a fitres table which has something to do with SNANA and PIPPIN...
+        survey_overwrite: str | None = None,
+        cut_dict: dict | None = None,
+        keep_dict: dict | None = None,
+        survey_dict: dict | None = None,
+    ) -> tuple[QTable, pd.DataFrame]:
+        """
+        Create a fitres table compatible with SNANA and PIPPIN.
+
         Parameters
         ----------
-        version_photometry:
+        version_photometry
             There are some fitres table columns that are only included if working with
             the version_photometry arg. This boolean flag adds those extra keys if True.
-        survey_overwrite:
+        survey_overwrite
             If None, use the list of strings in the survey attribute, else use the
             survey_overwrite string for each SN in the dataset.
-        keep_dict:
-            Dictionary with keys matching fitres_table columns and values indicating
-            what to keep, cutting all else.
-            See the cut_fitres_table docstring for more details.
-        cut_dict:
+        cut_dict
             Similarly formatted dictionary where the values indicate what to cut.
-            See the cut_fitres_table docstring for more details.
+            See :meth:`cut_fitres_table` for more details.
+        keep_dict
+            Dictionary with keys matching fitres_table columns and values indicating
+            what to keep, cutting all else. See :meth:`cut_fitres_table` for details.
+        survey_dict
+            Mapping from survey names to integer IDs.
 
         Returns
         -------
-        fitres_table:
-            Something important for SNANA or PIPPIN, not sure exactly what it does.
-            SNe are sculpted by keep_dict and cut_dict.
-            The QTable allows for metadata to be attached later on.
-        all_table:
-            A similar table where nothing has been cut. This table has an additional
-            additional column ("DROP") indicating what cut caused the row to be dropped.
+        fitres_table
+            Table of supernova parameters filtered by `keep_dict` and `cut_dict`.
+        all_table
+            A similar table where nothing has been cut, with an additional column ("DROP")
+            indicating what cut caused the row to be dropped.
         """
+        if cut_dict is None:
+            cut_dict = {}
+        if keep_dict is None:
+            keep_dict = {}
+        if survey_dict is None:
+            survey_dict = {}
         meta = self.get_metadata_subset(use_defaults=True)
         varlist = ["SN:"] * self.N_sn
         if survey_overwrite is None:
@@ -1526,39 +1760,43 @@ class SNDataset:
     def cut_fitres_table(
         self,
         fitres_table: QTable,
-        keep_dict: dict,
-        cut_dict: dict,
+        keep_dict: dict | None = None,
+        cut_dict: dict | None = None,
     ) -> tuple[QTable, pd.DataFrame]:
-        """ Apply cuts to fitres_table based on cut_dict.
+        """
+        Apply cuts to fitres_table based on keep_dict and cut_dict.
 
         Parameters
         ----------
-        fitres_table:
-            An astropy.table.QTable as produced by the get_fitres_table method.
-        keep_dict:
+        fitres_table
+            An astropy.table.QTable as produced by :meth:`make_fitres_table`.
+        keep_dict
             Dictionary with keys matching fitres_table columns (case-insensitive) and
             2-tuple values which define an open interval, values outside of which
             (exclusive) will be cut. These cuts only affect the fitres_table, not the
             SNDataset.
-        cut_dict:
+        cut_dict
             Similarly formatted dictionary where the 2-tuple values define an open
             interval where values inside the interval will be cut.
 
             Example:
-                Using a keep_dict of {"mwEBV": (0.00, 0.3)} and a cut_dict of
-                {"HOST_logMASS": (12, np.inf), "SNRMAX3": (-100, 1)} will EXCLUDE SNe with
+                Using a keep_dict of ``{"mwEBV": (0.00, 0.3)}`` and a cut_dict of
+                ``{"HOST_logMASS": (12, np.inf), "SNRMAX3": (-100, 1)}`` will EXCLUDE SNe with
                 host-galaxy stellar masses greater than 12, SNRMAX3 values greater than
-                -100 (-99 would not cut default values of -99) and less than 1,
-                and MW E(B-V) values <= 0 or >= 0.3.
+                -100 and less than 1, and MW E(B-V) values <= 0 or >= 0.3.
 
         Returns
         -------
-        cut_table:
+        cut_table
             The fitres_table without rows that are cut by keep_dict or cut_dict.
-        all_table:
+        all_table
             The original fitres_table with an additional column ("DROP") indicating
             what cut caused the row to be dropped.
         """
+        if keep_dict is None:
+            keep_dict = {}
+        if cut_dict is None:
+            cut_dict = {}
         all_table = fitres_table.copy().to_pandas()
         all_table["DROP"] = ""
         param_convert_dict = {
@@ -1589,14 +1827,20 @@ class SNDataset:
                 fitres_table = fitres_table[keep]
         return fitres_table, all_table
 
-    def make_lcplot_data(self, N: None | int = None) -> pd.DataFrame:
-        """ Make light-weight DataFrame with CID, MJD, flux, flux_err, and flt columns.
-        Useful for plotting code.
+    def make_lcplot_data(self, N: int | None = None) -> pd.DataFrame:
+        """
+        Make light-weight DataFrame with CID, MJD, flux, flux_err, and flt columns.
+
+        Useful for light curve plotting code.
 
         Parameters
         ----------
-        N:
+        N
             Number of SNe to use for lcplot. Use N_sn if None.
+
+        Returns
+        -------
+        Formatted light curve DataFrame.
         """
         N = N or self.N_sn
         orig_columns = ["snid", "mjd", "flux", "flux_err", "flt"]
@@ -1605,57 +1849,43 @@ class SNDataset:
         lcplot_data.columns = renamed_columns
         lcplot_data["CID"] = lcplot_data["CID"].astype("O")
         return lcplot_data
+
     def make_bayesn_data(
         self,
         data_type: str,
-        band_dict: None | dict[str, int] = None,
-        N_obs_max: None | int = None,
+        band_dict: dict[str, int] | None = None,
+        N_obs_max: int | None = None,
         cosmo: Any = FlatLambdaCDM(H0=70, Om0=0.3),
         negative_flux_mag_val: Number = -99,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """ Make the arrays expected by bayesn_model.py's SEDmodel class.
-        This method will return numpy arrays, so for faster sampling they should be
-        converted to jax arrays and loaded to the device in bayesn_model.py.
+    ) -> ObsData:
+        """
+        Make the :class:`ObsData` container expected by :class:`~bayesn.bayesn_model.SEDmodel`.
 
         Parameters
         ----------
-        data_type:
+        data_type
             The valid options are "mag" or "flux", indicating which photometry columns
             should be included.
-        band_dict:
-            Dictionary with mapping band name keys to integer index values. See the
-            docstring of SNDataset.get_band_indices for more details.
-        N_obs_max:
+        band_dict
+            Dictionary mapping band name keys to integer index values. See
+            :meth:`get_band_indices` for details.
+        N_obs_max
             Since the SEDmodel class cannot support ragged arrays, the observations of
             all SNe must be padded to N_obs_max terms and the padded values will be
             masked. If N_obs_max is unspecified, it will take the maximum value of the
-            N_obs property that all observations are in the obs_data. SNe with more
+            N_obs property so that all observations are in the obs_data. SNe with more
             than N_obs_max observations will not be in the returned data products.
-        cosmo:
+        cosmo
             An instance of an astropy.cosmology, or at least something with a method
-            named "distmod" that calculates the distance modulus for a given redshift,
-            returning something that can be interpreted as an np.array.
-        negative_flux_mag_val:
+            named "distmod" that calculates the distance modulus for a given redshift.
+        negative_flux_mag_val
             If data_type == "mag", magnitudes of negative_flux_mag_val will be
             interpreted as values that came from negative fluxes, which should be
             masked.
 
         Returns
         -------
-        sn_data:
-            A shape (5, N_sn) array with the first axis including:
-                host-galaxy mass: Number
-                redshift: Positive Number
-                redshift_error: Positive Number
-                muhat: Positive Number
-                MWEBV: Positive Number
-        obs_data:
-            A shape (5, N_obs_max, N_sn) array with the first axis including:
-                phase: Number
-                flux or mag: Number
-                flux_err or mag_err: positive Number
-                band_indices: int
-                mask: bool
+        ObsData container containing padded observation arrays and metadata.
         """
         if data_type.lower() not in ("mag", "flux"):
             raise ValueError(f"data_type should be 'mag' or 'flux', not {data_type}.")
@@ -1728,19 +1958,3 @@ class SNDataset:
             band_indices=band_indices,
             mask=mask
         )
-
-
-class ObsData(NamedTuple):
-    """Light-weight container for data used by SEDmodel._model."""
-    # Arrays with shape (N_sn,)
-    host_logmass: ArrayLike
-    z_hel: ArrayLike
-    z_hel_err: ArrayLike
-    muhat: ArrayLike
-    MWEBV: ArrayLike
-    # Arrays with shape (N_max_epochs, N_sn)
-    mjd: ArrayLike
-    flux: ArrayLike
-    flux_err: ArrayLike
-    band_indices: ArrayLike
-    mask: ArrayLike

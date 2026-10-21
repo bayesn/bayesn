@@ -7,12 +7,13 @@ import subprocess
 
 from astropy.coordinates import EarthLocation, SkyCoord
 import astropy.units as u
+from jax import Array
+import jax.numpy as jnp
+from jax.typing import ArrayLike
 import numpy as np
 import numpyro.distributions as dist
 from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
-from jax.typing import ArrayLike
-import jax.numpy as jnp
 try:
     from sfdmap2 import sfdmap
     sfdmap_loaded = True
@@ -26,26 +27,38 @@ def convert_z(
     ra: Number,
     dec: Number,
     z_in_type: str = "hel",
-    z_err: None | ArrayLike = None
+    z_err: ArrayLike | None = None,
 ) -> float | tuple[float, float]:
-    """ Given a heliocentric or CMB-frame redshift, coordinates, and optionally an
-    uncertainty, convert to the other reference frame. Assume no correlation between
-    z_err and CMB_V_ERR, and ignore uncertainty in the CMB dipole location.
+    """
+    Convert redshift between heliocentric and CMB reference frames.
 
-    1 + z_cmb = (1 + z_hel) * (1 + z_pv)
+    Given a heliocentric or CMB-frame redshift, coordinates, and optionally an
+    uncertainty, convert to the other reference frame. Assumes no correlation between
+    z_err and CMB_V_ERR, and ignores uncertainty in the CMB dipole location:
+
+    .. math::
+
+        1 + z_{\\rm cmb} = (1 + z_{\\rm hel}) (1 + z_{\\rm pv})
 
     Parameters
     ----------
-    z:
-    ra:
-    dec:
-    z_in_type:
-    z_err:
+    z
+        Input redshift value.
+    ra
+        Right ascension in degrees (ICRS).
+    dec
+        Declination in degrees (ICRS).
+    z_in_type
+        Input frame, starting with 'hel' for heliocentric or 'cmb' for CMB frame.
+    z_err : () or scalar
+        Optional uncertainty on input redshift.
 
     Returns
     -------
-    converted_z:
-    converted_z_err:
+    converted_z : float
+        Redshift converted to the destination frame.
+    converted_z_err : float
+        Converted uncertainty, returned if `z_err` is provided.
     """
     c = constants.C_LIGHT
     sc = SkyCoord(ra * u.deg, dec * u.deg, frame="icrs")
@@ -67,8 +80,33 @@ def convert_z(
     converted_z_err = np.sqrt(pv_dz**2 + z_dpv**2)
     return converted_z, converted_z_err
 
-def convert_wavelengths(x: Number | ArrayLike, units_in: str, units_out: str = "angstroms"):
+def convert_wavelengths(
+    x: Number | ArrayLike,
+    units_in: str,
+    units_out: str = "angstroms",
+) -> float | np.ndarray:
+    """
+    Convert wavelength values between physical and inverse units.
+
+    Supported unit strings include 'micron', 'um', 'nanomet', 'nm', 'angstrom', 'aa',
+    and their inverse forms (e.g. 'inv_micron').
+
+    Parameters
+    ----------
+    x : (...) or scalar
+        Input wavelength or wavenumber value(s).
+    units_in
+        Input unit description string.
+    units_out
+        Output unit description string. Defaults to 'angstroms'.
+
+    Returns
+    -------
+    (...) or scalar
+        Converted wavelength values in `units_out`.
+    """
     x_mult = [1, 1]
+    is_scalar = isinstance(x, Number)
     x = np.array(x)
     x = 1/x if "inv" in units_in else x
     for i, unit_str in enumerate((units_in, units_out)):
@@ -86,9 +124,9 @@ def convert_wavelengths(x: Number | ArrayLike, units_in: str, units_out: str = "
                     "of the supported substrings 'micron', 'um', 'nanomet', 'nm', "
                     "'angstrom', or 'aa'."
                 )
-    x *= x_mult[0]/x_mult[1]
+    x = x * (x_mult[0]/x_mult[1])
     x = 1/x if "inv" in units_out else x
-    return x
+    return float(x) if is_scalar else x
 
 def _predict(model, args, kwargs, z_unc):
     """Run ``model`` at unconstrained latents z_unc and return the obs-site
@@ -135,37 +173,64 @@ def _dl_dustmaps(dustmaps_dir: Path) -> None:
 def get_MWEBV(
     ra: Number,
     dec: Number,
-    dustmaps_dir: None | str = None,
+    dustmaps_dir: Path | str | None = None,
     *args,
-    **kwargs
-) -> Number:
+    **kwargs,
+) -> float:
+    """
+    Get Milky Way E(B-V) extinction from SFD dust maps.
+
+    Parameters
+    ----------
+    ra
+        Right ascension in degrees (ICRS).
+    dec
+        Declination in degrees (ICRS).
+    dustmaps_dir
+        Path to directory containing SFD dust maps. If None, uses default package path.
+
+    Returns
+    -------
+    float
+        Milky Way E(B-V) color excess.
+    """
     if not sfdmap_loaded:
         raise ImportError("Could not import sfdmap2.")
     if dustmaps_dir is None:
         dustmaps_dir = Path(Path(__file__).parent, "data", "dust_maps")
+    elif isinstance(dustmaps_dir, str):
+        dustmaps_dir = Path(dustmaps_dir)
     if not dustmaps_dir.exists():
         _dl_dustmaps(dustmaps_dir)
     sfd = sfdmap.SFDMap(Path(dustmaps_dir, "sfddata-master"))
-    return sfd.ebv(ra, dec, *args, **kwargs)
+    return float(sfd.ebv(ra, dec, *args, **kwargs))
+
 def flux_to_mag(
     flux: Number | ArrayLike,
     flux_err: Number | ArrayLike,
     zp: Number = 27.5,
     nan_val: Number = np.nan,
-):
-    """ Convert fluxes and errors to magnitudes and errors given a zeropoint.
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert fluxes and uncertainties to Pogson magnitudes given a zeropoint.
 
     Parameters
     ----------
-    flux:
-    flux_err:
-    zp:
-    nan_val:
+    flux : (...) or scalar
+        Observed flux value(s).
+    flux_err : (...) or scalar
+        Flux uncertainty value(s).
+    zp
+        Magnitude zeropoint. Defaults to 27.5.
+    nan_val
+        Value assigned to unphysical non-positive fluxes. Defaults to np.nan.
 
     Returns
     -------
-    mag:
-    mag_err:
+    mag : (...)
+        Calculated magnitudes.
+    mag_err : (...)
+        Calculated magnitude uncertainties.
     """
     flux = jnp.atleast_1d(flux)
     flux_err = jnp.atleast_1d(flux_err)
@@ -178,20 +243,26 @@ def flux_to_mag(
 def mag_to_flux(
     mag: Number | ArrayLike,
     mag_err: Number | ArrayLike,
-    zp: Number = 27.5
-) -> tuple[float, float]:
-    """ Convert magnitudes errors to fluxes and errors given a zeropoint.
+    zp: Number = 27.5,
+) -> tuple[Array, Array]:
+    """
+    Convert magnitudes and uncertainties to fluxes given a zeropoint.
 
     Parameters
     ----------
-    mag:
-    mag_err:
-    zp:
+    mag : (...) or scalar
+        Observed magnitude value(s).
+    mag_err : (...) or scalar
+        Magnitude uncertainty value(s).
+    zp
+        Magnitude zeropoint. Defaults to 27.5.
 
     Returns
     -------
-    flux:
-    flux_err:
+    flux : (...)
+        Calculated fluxes.
+    flux_err : (...)
+        Calculated flux uncertainties.
     """
     mag = jnp.atleast_1d(mag)
     mag_err = jnp.atleast_1d(mag_err)
@@ -204,29 +275,39 @@ def mag_to_flux(
 def SNR_power_weighted_ave(
     arr: ArrayLike,
     power: Number = 2,
-    SNR: None | ArrayLike = None,
-    flux: None | ArrayLike = None,
-    flux_err: None | ArrayLike = None,
-    mag: None | ArrayLike = None,
-    mag_err: None | ArrayLike = None,
+    SNR: ArrayLike | None = None,
+    flux: ArrayLike | None = None,
+    flux_err: ArrayLike | None = None,
+    mag: ArrayLike | None = None,
+    mag_err: ArrayLike | None = None,
 ) -> float:
-    """ Supports three channels for calculating SNR, either the SNR argument, the flux
-    and flux_err arguments, or the mag and mag_err arguments.
-    Only one of these channels should not be Nones.
+    """
+    Calculate power-weighted average using signal-to-noise ratio weights.
+
+    Supports three channels for calculating SNR: direct `SNR`, `(flux, flux_err)`,
+    or `(mag, mag_err)`. Exactly one of these three channels must be provided.
 
     Parameters
     ----------
-    arr:
-    power:
-    SNR:
-    flux:
-    flux_err:
-    mag:
-    mag_err:
+    arr : (N,)
+        Array of values to average.
+    power
+        Exponent applied to SNR for weighting. Defaults to 2 (variance weighting).
+    SNR : (N,)
+        Direct SNR values.
+    flux : (N,)
+        Flux measurements.
+    flux_err : (N,)
+        Flux uncertainties.
+    mag : (N,)
+        Magnitude measurements.
+    mag_err : (N,)
+        Magnitude uncertainties.
 
     Returns
     -------
-    ave_val:
+    float
+        Weighted average value.
     """
     # Figure out which channel is being provided through the args.
     SNR_channel = SNR is not None
@@ -248,28 +329,33 @@ def SNR_power_weighted_ave(
         SNR = np.abs(flux/flux_err)
     return np.average(arr, weights=SNR**power)
 def where_logic(arr: ArrayLike, val: Number, logic: str) -> tuple[np.ndarray, ...]:
-    """ Apply np.where with logic based on the string argument.
+    """
+    Apply np.where with logic based on the string argument.
 
     Parameters
     ----------
-    arr:
-        An ArrayLike (can be cast as a np.array) of arbitrary shape.
-    val:
-        A single numeric value used to filter arr
-    logic:
-        The logical operator in the where method. Supported operators are the strings:
-        (=, ==, eq), (!=, neq), (<, lt), (<=, lte, leq), (>, gt), (>=, gte, geq),
-        where equivalent operators are grouped by parentheses.
+    arr : (...)
+        Array of arbitrary shape to filter.
+    val
+        A single numeric value used to filter arr.
+    logic
+        The logical operator in the where method. Supported operators:
+        * (=, ==, eq)
+        * (!=, neq)
+        * (<, lt)
+        * (<=, lte, leq)
+        * (>, gt)
+        * (>=, gte, geq)
 
     Returns
     -------
-    out:
-        An array with the indices of arr where `arr logic val` is True.
+    tuple of np.ndarray
+        Indices of `arr` where `arr logic val` evaluates to True.
 
-    Example
-    -------
-    where_logic(np.arange(5, 10), 7, '<=') will return (array([0, 1]),), which is the
-    output from np.where(np.arange(5, 10) <= 7)
+    Examples
+    --------
+    >>> where_logic(np.arange(5, 10), 7, '<=')
+    (array([0, 1, 2]),)
     """
     arr = np.array(arr)
     match logic:
@@ -287,11 +373,37 @@ def where_logic(arr: ArrayLike, val: Number, logic: str) -> tuple[np.ndarray, ..
             return np.where(arr >= val)
         case _:
             raise ValueError(f"Unsupported logic {logic}. Use =, <, <=, >, or >=.")
-def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, flag_nans=False, rtol=0, atol=0):
-    """ Given two dictionaries, check to see if there are any discrepancies that may
-    indicate inaccurate data. If any discrepancies are found, raise a ValueError.
-    Missing data in one dict does not count as a discrepancy unless the
-    flag_missing_data arg is True.
+
+def assert_dicts_match(
+    d1: dict,
+    d2: dict,
+    flag_missing_data: bool = False,
+    flag_nans: bool = False,
+    rtol: float = 0.0,
+    atol: float = 0.0,
+) -> None:
+    """
+    Check two dictionaries for discrepancies in keys and array values.
+
+    Parameters
+    ----------
+    d1
+        First dictionary to compare.
+    d2
+        Second dictionary to compare.
+    flag_missing_data
+        If True, missing keys or Nones in only one dict raise an AssertionError.
+    flag_nans
+        If True, NaNs are treated as non-matching.
+    rtol
+        Relative tolerance for numeric comparison.
+    atol
+        Absolute tolerance for numeric comparison.
+
+    Raises
+    ------
+    AssertionError
+        If dictionaries differ in keys, shapes, or values beyond tolerance.
     """
     keys_in_only_one = set(d1).symmetric_difference(d2)
     if keys_in_only_one and flag_missing_data:
@@ -342,7 +454,23 @@ def assert_dicts_match(d1: dict, d2: dict, flag_missing_data=False, flag_nans=Fa
             raise AssertionError(
                 f"The dictionaries contain discrepant non-numeric data in key {key}."
             )
-def find_data_dir_in_SNANA(private_data_path) -> tuple[str, dict]:
+
+def find_data_dir_in_SNANA(private_data_path: list[str]) -> tuple[str, dict]:
+    """
+    Locate SNANA photometry directory across standard and private paths.
+
+    Parameters
+    ----------
+    private_data_path
+        List of private directory paths to search.
+
+    Returns
+    -------
+    data_dir : str
+        Found data directory path.
+    survey_dict : dict
+        Dictionary of survey definitions from SURVEY.DEF.
+    """
     # Assuming you're using SNANA running on Perlmutter or a similar cluster
     # Look in standard public repositories for real data/simulations
     dir_list = ["SNDATA_ROOT/lcmerge", "SNDATA_ROOT/SIM"]
@@ -391,8 +519,20 @@ def find_data_dir_in_SNANA(private_data_path) -> tuple[str, dict]:
                 survey_dict[split[1]] = split[2]
     return data_dir, survey_dict
 
-def get_yaml_comments(yaml_path: Path) -> dict[str, str]:
-    """Extract comment descriptions preceding mapping keys in a YAML file."""
+def get_yaml_comments(yaml_path: Path | str) -> dict[str, str]:
+    """
+    Extract comment descriptions preceding mapping keys in a YAML file.
+
+    Parameters
+    ----------
+    yaml_path
+        Path to the YAML file to parse comments from.
+
+    Returns
+    -------
+    dict of str: str
+        Dictionary mapping YAML keys to their preceding comment text.
+    """
     yaml = YAML()
     with open(yaml_path, "r") as f:
         data = yaml.load(f)
@@ -432,9 +572,32 @@ def get_yaml_comments(yaml_path: Path) -> dict[str, str]:
                 comments[k] = cleaned
 
     return comments
-def get_model_params_from_chains(chains: dict, N_knots_sig: int=24, N_W: int=36):
-    """ Return shape (N_params, N_chains*N_samples) array of scalar model parameters in the order
-    L_Omega, W0, W1, sigma0, tauA, then (RV) or (mu_RV, sigma_RV) depending on RV_type
+
+def get_model_params_from_chains(
+    chains: dict,
+    N_knots_sig: int = 24,
+    N_W: int = 36,
+) -> np.ndarray:
+    """
+    Collate scalar model parameters from posterior chain samples.
+
+    Extracts and flattens parameters in the order: L_Sigma, W0, W1, sigma0, tauA,
+    followed by either (RV) or (mu_R, sigma_R) depending on whether RV is fixed or sampled.
+
+    Parameters
+    ----------
+    chains
+        Dictionary of MCMC chains containing keys 'Ds', 'sigmaepsilon', 'L_Omega',
+        'W0', 'W1', 'sigma0', 'tauA', and 'RV' or ('mu_R', 'sigma_R').
+    N_knots_sig
+        Number of knots in the sigma surface. Defaults to 24.
+    N_W
+        Number of knots in W surface. Defaults to 36.
+
+    Returns
+    -------
+    (N_params, N_chains * N_samples)
+        Collated matrix of model parameters across all samples and chains.
     """
     N_chains, N_samples = chains["Ds"].shape[:2]
     N_L = int(N_knots_sig*(N_knots_sig+1)/2)
