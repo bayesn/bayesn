@@ -375,7 +375,7 @@ class TestYaml:
         mode_args = deepcopy(initial_args)
         mode_args["mode"] = mode
         mode_args.pop("shared_RV", None)
-        with pytest.warns(UserWarning, match=f"shared_RV was inferred as {shared_RV}"):
+        with pytest.warns(DeprecationWarning, match=f"shared_RV was inferred as {shared_RV}"):
             mode_args = model._parse_mode(mode_args)
         for key, val in self.expected_values.items():
             assert mode_args[key] == val[1]
@@ -421,14 +421,14 @@ class TestYaml:
         mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fit global rv"
         mode_args.pop("shared_RV", None)
-        with pytest.warns(UserWarning, match="shared_RV was inferred as True"):
+        with pytest.warns(DeprecationWarning, match="shared_RV was inferred as True"):
             model._parse_mode(mode_args)
 
     def test_parse_mode_not_global_or_pop(self, initial_args: dict, model: SEDmodel):
         mode_args = deepcopy(initial_args)
         mode_args["mode"] = "fit_rv"
         mode_args["shared_RV"] = True
-        with pytest.warns(UserWarning, match="The indicated mode fit_rv contains"):
+        with pytest.raises(ValueError, match="The indicated mode fit_rv contains"):
             model._parse_mode(mode_args, verbose=True)
 
     def test_parse_args(self, loaded_model_and_args: tuple[SEDmodel, dict]):
