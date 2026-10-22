@@ -78,7 +78,7 @@ from .spline_utils import invKD, spline_coeffs, spline_coeffs_step
 from .extinction_relations import DustExtRel
 from .io import write_snana_lcfile, read_snana_spectra, read_snana_ascii
 from bayesn.datasets import SNDataset, ObsData
-from bayesn.utils import _predict, _prior_pot, find_data_dir_in_SNANA
+from bayesn.utils import _predict, _prior_pot, find_data_dir_in_SNANA, convert_wavelengths
 import bayesn.zltn_utils as zltn
 from bayesn import constants
 
@@ -1781,7 +1781,19 @@ class SEDmodel(object):
         ds.apply_filter_map(args["map"])
         ds.drop_bands(args["drop_bands"])
         self._set_used_bands(ds.unique_bands)
-        ds.drop_by_band_lims(self.band_lim_dict, wave_min=self.model_wave[0], wave_max=self.model_wave[-1])
+        ext_rel_range = convert_wavelengths(self.ext_rel.range, self.ext_rel.units, "angstroms")
+        ds.drop_by_band_lims(  # rest-frame model wavelength check
+            self.band_lim_dict, wave_min=self.model_wave[0],
+            wave_max=self.model_wave[-1], rest_frame=True, z_err="default",
+        )
+        ds.drop_by_band_lims(  # rest-frame extinction relation check
+            self.band_lim_dict, wave_min=min(ext_rel_range),
+            wave_max=max(ext_rel_range), rest_frame=True, z_err="default",
+        )
+        ds.drop_by_band_lims(  # obs-frame extinction relation check
+            self.band_lim_dict, wave_min=min(ext_rel_range),
+            wave_max=max(ext_rel_range), rest_frame=False,
+        )
         ds.cut_by_phot_numeric("phase", "<=", self.tau_knots[0])
         ds.cut_by_phot_numeric("phase", ">=", self.tau_knots[-1])
         ds.cut_by_meta_numeric("z_helio", ">", args["zlim"])
