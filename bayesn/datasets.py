@@ -475,7 +475,7 @@ class SNDataset:
     @property
     def N_obs(self) -> np.ndarray:
         if not len(self.photometry):
-            return np.array([])
+            return np.zeros(self.N_sn)
         counts = self.photometry["snid"].value_counts()
         return np.array([counts.get(s, 0) for s in self.snid], dtype=int)
 
@@ -916,6 +916,8 @@ class SNDataset:
         wave_min: float,
         wave_max: float,
         ignore_missing: bool = False,
+        rest_frame: bool = True,
+        z_err: ArrayLike | str | None = None,
     ) -> None:
         """
         Drop bands whose redshifted transmission extends outside a wavelength range.
@@ -930,6 +932,18 @@ class SNDataset:
             Maximum rest-frame wavelength to retain.
         ignore_missing
             Whether to skip bands in the dataset that are missing from `band_lim_dict`.
+        rest_frame
+            Whether the band_lim_dict limits should be converted to rest-frame first.
+        z_err
+            Redshift uncertainties that can be included to make sure sampling z_helio
+            does not push the redshifted transmission outside the wavelength range.
+            If None error will be assumed to be irrelevant (i.e. z will not be sampled).
+            If 'default', the SNDataset.z_helio_err array will be used as z_err.
+            If a number or 1D array with length N_sn, that will be treated as a normal
+            standard deviation and photometry will be dropped if they come within 3
+            times the uncertainty of the limits. If a 2D array with shape (N_sn, ...),
+            the second axis will be assumed to be quantiles evenly spanning 0 to 1.
+            Each SN's minimum and maximum values will be checked.
         """
         bands = list(band_lim_dict.keys())
         missing = set(self.unique_bands).difference(bands)
@@ -940,14 +954,33 @@ class SNDataset:
                 "want to proceed without checking these bands, you can set the "
                 "'ignore_missing' argument to True and run this method again."
             )
+        if z_err is None:
+            z_err = np.zeros(self.N_sn)
+        elif isinstance(z_err, str) and z_err == "default":
+            z_err = self.z_helio_err
+        elif isinstance(z_err, Number):
+            z_err = np.full(self.N_sn, z_err)
+        if z_err.ndim == 1:
+            z_lo = self.z_helio - 3*z_err
+            z_hi = self.z_helio + 3*z_err
+        elif z_err.ndim == 2:
+            z_lo, z_hi = z_err[:, 0], z_err[:, -1]
+        else:
+            raise ValueError(
+                "Unrecognised z_err value. Should be None, 'default', an array of "
+                "errors with shape (N_sn,), or an array of quantiles with shape "
+                "(N_sn, N_quantiles)."
+            )
+        if not rest_frame:
+            z_lo, z_hi = np.zeros((2, self.N_sn))
         # shape (N_bands, N_sn)
-        blue_lim_arr = np.array([val[0]/(1+self.z_helio) for val in band_lim_dict.values()])
-        red_lim_arr = np.array([val[1]/(1+self.z_helio) for val in band_lim_dict.values()])
+        blue_lim_arr = np.array([val[0]/(1+z_hi) for val in band_lim_dict.values()])
+        red_lim_arr = np.array([val[1]/(1+z_lo) for val in band_lim_dict.values()])
         band_indices, sn_indices = np.where((blue_lim_arr < wave_min) | (red_lim_arr > wave_max))
         rm_phot_idx = []
         for sn_idx in set(sn_indices):
             sn_bands = np.array(bands)[band_indices[np.where(sn_indices == sn_idx)[0]]]
-            sn_phot = self.get_phot_subset(self.snid[sn_idx])
+            sn_phot = self.get_phot_subset(idx=sn_idx)
             rm_phot_idx += list(sn_phot[sn_phot["flt"].isin(sn_bands)].index + self.phot_idx[sn_idx])
         self.remove_phot_by_idx(rm_phot_idx)
 
@@ -1277,8 +1310,7 @@ class SNDataset:
         overrides, optional
             Dictionary mapping metadata attribute names to override values.
         """
-        if overrides is None:
-            overrides = {}
+        overrides = overrides if overrides is not None else {}
         # Ensure overrides map to attributes.
         for key in list(overrides.keys()):
             std_name = get_standard_name(key)
@@ -1793,10 +1825,8 @@ class SNDataset:
             The original fitres_table with an additional column ("DROP") indicating
             what cut caused the row to be dropped.
         """
-        if keep_dict is None:
-            keep_dict = {}
-        if cut_dict is None:
-            cut_dict = {}
+        keep_dict = keep_dict if keep_dict is not None else {}
+        cut_dict = cut_dict if cut_dict is not None else {}
         all_table = fitres_table.copy().to_pandas()
         all_table["DROP"] = ""
         param_convert_dict = {
