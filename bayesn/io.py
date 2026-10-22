@@ -383,6 +383,8 @@ def read_snana_fits(
     job_per_sn[idx] = True
     if len(keep_list):
         job_per_sn &= np.array([s in keep_list for s in snid_decoded])
+    for key, val in sn_dict.items():
+        sn_dict[key] = val[job_per_sn]
 
     # Per-row keep mask, built from PTROBS bounds of kept SNe only.
     # Boolean-indexing the memmap'd phot_data lets the OS page in
@@ -397,7 +399,7 @@ def read_snana_fits(
     sn_idx = sn_idx[row_keep]
 
     phot_data = phot_data[row_keep][["MJD", "BAND", "FLUXCAL", "FLUXCALERR"]]
-    phot_data = phot_data.byteswap().newbyteorder()
+    phot_data = phot_data.byteswap().view(phot_data.dtype.newbyteorder())
     phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
     phot_df["FLT"] = phot_df.pop("BAND").str.decode("utf-8").str.strip()
     phot_df.rename(columns={"FLUXCAL": "flux", "FLUXCALERR": "flux_err"}, inplace=True)

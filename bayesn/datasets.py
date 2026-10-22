@@ -111,8 +111,8 @@ def get_standard_name(name: str) -> str:
         return name
     misc = {
         # metadata names
-        "zhel":                "z_hubble",
-        "zhel_err":            "z_hubble_err",
+        "zhel":                "z_helio",
+        "zhel_err":            "z_helio_err",
         "zhd":                 "z_hubble",
         "zhd_err":             "z_hubble_err",
         "redshift_final":      "z_cmb",
@@ -1680,9 +1680,9 @@ class SNDataset:
                 sim_prescale=sim_prescale,
             )
             ds.append(ds=row_ds)
-        for sn_file in sn_list[ascii_files]:
-            row_ds = SNDataset.from_ascii_files(
-                Path(data_root, sn_file),
+        if len(ascii_files[0]):
+            ascii_ds = SNDataset.from_ascii_files(
+                [Path(data_root, f) for f in sn_list[ascii_files]],
                 fluxcal_zpt=fluxcal_zpt,
                 peakmjd_key=peakmjd_key,
                 file_format="SNANA",
@@ -1691,7 +1691,7 @@ class SNDataset:
                 njobtot=njobtot,
                 sim_prescale=sim_prescale,
             )
-            ds.append(row_ds)
+            ds.append(ds=ascii_ds)
         ds.recalibrate_fluxcal_zpt()
         ds.set_all_rest_phases()
         ds.fill_out_redshifts()

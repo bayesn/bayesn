@@ -1813,7 +1813,11 @@ class SEDmodel(object):
             ds.keep_according_to_list(args["keep_list"])
 
         # Making all_table before lc_cuts to store reasons why things were cut
-        self.fitres_table, self.all_table = ds.make_fitres_table("version_photometry" in args, keep_dict=args["lc_cuts"])
+        self.fitres_table, self.all_table = ds.make_fitres_table(
+            "version_photometry" in args,
+            keep_dict=args["lc_cuts"],
+            survey_dict=survey_dict,
+        )
         for key, val in args["lc_cuts"].items():
             ds.cut_by_meta_numeric(key, "<", val[0])
             ds.cut_by_meta_numeric(key, ">", val[1])
@@ -3403,6 +3407,7 @@ class SEDmodel(object):
             RV = float(args["RV"])
         except ValueError:
             RV = self.RV or self.mu_R
+        args.update({"shared_RV": True, "RV": RV})
         noeps_kwargs, vi_kwargs = [copy.deepcopy(args) for _ in range(2)]
         noeps_kwargs.update({"fix_eps": True, "shared_RV": True, "RV": RV})
         vi_kwargs.update({
@@ -4278,7 +4283,7 @@ class SEDmodel(object):
         for key, val in dump_args.items():
             if isinstance(val, Path):
                 dump_args[key] = str(val)
-            elif isinstance(val, Array) and getattr(val.ndim, 1) == 1:
+            elif isinstance(val, Array | np.ndarray) and getattr(val, "ndim", 1) == 0:
                 dump_args[key] = float(val)
             elif isinstance(val, Array | np.ndarray):
                 dump_args[key] = val.tolist()
@@ -5141,7 +5146,7 @@ class SEDmodel(object):
             )
         else:
             if band_weights.shape == (1, len(self.model_wave), len(bands)+1) and N > 1:
-                if np.std(param_dict["z"]):
+                if not np.allclose(param_dict["z"], param_dict["z"][0]):
                     raise ValueError(
                         "band_weights was provided as an array of shape "
                         f"{band_weights.shape}, which would normally be interpreted "

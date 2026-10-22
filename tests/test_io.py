@@ -215,6 +215,25 @@ class TestRead:
         assert_dicts_match(sn_dict, ref_sn_dict, flag_missing_data=True, rtol=1e-5, atol=1e-8)
         pd.testing.assert_frame_equal(obs_df, ref_obs_df)
 
+    def test_read_snana_fits_jobsplit(self):
+        head_path = TEST_DIR / "training_data/BAYESN_test_fits/BAYESN_test_fits_HEAD.FITS"
+        dict_all, _ = io.read_snana_fits(head_path)
+        dict_j1, _ = io.read_snana_fits(head_path, jobid=1, njobtot=2)
+        dict_j2, _ = io.read_snana_fits(head_path, jobid=2, njobtot=2)
+
+        cids_all = set(dict_all["SNID"])
+        cids_1 = set(dict_j1["SNID"])
+        cids_2 = set(dict_j2["SNID"])
+
+        assert len(cids_1) > 0 and len(cids_2) > 0
+        assert cids_1.isdisjoint(cids_2)
+        assert cids_1.union(cids_2) == cids_all
+
+        for key, val in dict_j1.items():
+            assert len(val) == len(cids_1), f"Key {key} length {len(val)} != {len(cids_1)}"
+        for key, val in dict_j2.items():
+            assert len(val) == len(cids_2), f"Key {key} length {len(val)} != {len(cids_2)}"
+
 class TestWrite:
     def test_write_from_sn_dict_obs_df(self):
         example_lc = BASE_DIR.parent / "bayesn/data/example_lcs/Foundation_DR1_2016W.txt"

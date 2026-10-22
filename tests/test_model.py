@@ -431,6 +431,32 @@ class TestYaml:
         with pytest.raises(ValueError, match="The indicated mode fit_rv contains"):
             model._parse_mode(mode_args, verbose=True)
 
+    def test_get_rv_type_default_resolution(self, model: SEDmodel):
+        shared, rv = model._get_rv_type({"RV": "default", "shared_RV": True}, verbose=False)
+        assert shared is True and float(rv) == float(model.RV)
+
+        shared, rv = model._get_rv_type({"RV": "default", "shared_RV": False}, verbose=False)
+        assert shared is False and rv == "normal"
+
+        shared, rv = model._get_rv_type({"RV": "default", "shared_RV": True, "infer_dust_properties": True}, verbose=False)
+        assert shared is True and rv == "uniform"
+
+        model_g26 = SEDmodel(load_model="G26_model")
+        shared, rv = model_g26._get_rv_type({"RV": "default", "shared_RV": False}, verbose=False)
+        assert shared is False and rv == "normal"
+
+        shared, rv = model_g26._get_rv_type({"RV": "default", "shared_RV": True}, verbose=False)
+        assert shared is True and rv == "normal"
+
+    def test_process_dataset_lc_cuts_zhel(self, initial_args: dict, model: SEDmodel):
+        args = deepcopy(initial_args)
+        args["lc_cuts"] = {"zHEL": (0.015, 0.04)}
+        args = model.parse_args(args, verbose=False)
+        args["outputdir"].rmdir()
+        model.process_dataset(args)
+        assert len(model.dataset.snid) > 0
+        npt.assert_equal(model.fitres_table["CID"].tolist(), list(model.dataset.snid))
+
     def test_parse_args(self, loaded_model_and_args: tuple[SEDmodel, dict]):
         # If regenerating the pickled results, remove your personal directory structure
         # before dumping with args["data_root"] = args["data_root"].lstrip(BASE_DIR)
@@ -831,6 +857,18 @@ class TestSimulation:
         assert "SNID" in sn_dict
         assert len(obs_df) == len(t)
 
+    def test_simulate_light_curve_state_cleanup(self, model: SEDmodel):
+        old_bands = set(model.used_band_dict.keys())
+        old_ext_rel = model.ext_rel.name
+        model.simulate_light_curve(
+            t=np.array([0.0]),
+            N=1,
+            bands=["g_PS1"],
+            ext_rel="F19" if old_ext_rel != "F19" else "CCM89",
+        )
+        assert set(model.used_band_dict.keys()) == old_bands
+        assert model.ext_rel.name == old_ext_rel
+
 
 class TestPhotometryChains:
     def test_get_flux_from_chains(self, model: SEDmodel, tmp_path: Path):
@@ -871,6 +909,33 @@ class TestPhotometryChains:
             num_samples=1, num_sne=1
         )
         assert f_from_file.shape == (1, 1, 1, len(t))
+
+    def test_get_flux_from_chains_staggered_bands(self, model: SEDmodel):
+        n_l = model.l_knots.shape[0] - 2
+        n_tau = model.tau_knots.shape[0]
+        shape = (1, 2, 2)
+        chains = {
+            "Ds": np.full(shape, 34.0),
+            "theta": np.zeros(shape),
+            "AV": np.full(shape, 0.1),
+            "tmax": np.zeros(shape),
+            "mu": np.full(shape, 34.0),
+            "delM": np.zeros(shape),
+            "eps": np.zeros((1, 2, n_l * n_tau, 2)),
+            "RV": np.full(shape, 3.1),
+        }
+        t = np.array([-5.0, 0.0, 5.0])
+        bands = [["g_PS1", "r_PS1"], ["r_PS1", "i_PS1"]]
+        fluxes = model.get_flux_from_chains(
+            t=t,
+            bands=bands,
+            chains=chains,
+            zs=np.array([0.02, 0.03]),
+            ebv_mws=np.array([0.01, 0.02]),
+            num_samples=2,
+            num_sne=2,
+        )
+        assert fluxes.shape == (2, 2, 2, len(t))
 
     def test_get_fitprob(self, loaded_model_and_args, RNG_seed: int = 0):
         model, args = loaded_model_and_args
@@ -1082,3 +1147,19 @@ class TestFit:
         assert np.all(np.isfinite(samples["theta"]))
         assert np.all(np.isfinite(samples["AV"]))
 
+    @pytest.mark.slow
+    def test_fit_vi_g26_model(self, initial_args: dict, tmp_path: Path):
+        args = deepcopy(initial_args)
+        args["load_model"] = "G26_model"
+        args["keep_list"] = ["2016W"]
+        args["fit_method"] = "vi"
+        args["num_samples"] = 10
+        args["num_warmup"] = 10
+        args["outputdir"] = tmp_path
+        args["plot_lightcurves"] = False
+
+        model_g26 = SEDmodel(load_model="G26_model")
+        model_g26.run(args)
+
+        for out_file in ("chains.pkl", "fit_summary.csv", "input.yaml", "output.FITRES.TEXT"):
+            assert (tmp_path / out_file).exists()
