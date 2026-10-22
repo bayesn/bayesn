@@ -19,7 +19,7 @@ BayeSN depends on the following packages
 * sncosmo >= 2.10
 * h5py >= 3.6.0
 * scipy >= 1.15.0
-* ruamel.yaml 0.16.0
+* ruamel.yaml >= 0.16.0
 * tqdm >= 4.29.1
 * numpyro >= 0.14.0
 

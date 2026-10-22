@@ -1,8 +1,8 @@
 Output
 =============
 
-The output of BayeSN will vary depending on whether the mode you are using. The output will be saved in
-``outputdir/name`` where ``outputdir`` and ``name`` correspond to the keys present in the input file as described in
+The output of BayeSN will vary depending on the mode you are using. The output will be saved in
+``outputdir`` with filenames prefixed by ``outfile_prefix`` (defaulting to ``output``) as described in
 :ref:`running_bayesn`.
 
 Training output
@@ -22,8 +22,11 @@ The output of a fitting job will have the following structure:
 
 - ``fit_summary.csv``: A summary of the MCMC output, showing parameter means/medians etc. as well as the Gelman-Rubin statistic and effective sample sizes to assess fit quality.
 - ``chains.pkl``: The MCMC chains, as for the training output. Unlike for training, no postprocessing is required therefore only one set of chains needs to be saved.
-- ``output.fitres``: A FITRES file of the same structure as those returned by fits done within SNANA e.g. from SALT, summarising the properties of each fit light curve.
-- ``output.LCPLOT``: An LCPLOT data table containing both the data that was fit and corresponding model fits (with or without errors depending on whether you set ``save_fit_errors`` in the input yaml. Data is stored in rows with DATA_FLAG=1, while the fit is stored in rows with DATA_FLAG=0.
+- ``output.FITRES.TEXT``: A FITRES file of the same structure as those returned by fits done within SNANA e.g. from SALT, summarising the properties of each fit light curve.
+- ``output.LCPLOT``: An LCPLOT data table containing both the data that was fit and corresponding model fits (with or without errors depending on whether you set ``save_fit_errors`` in the input yaml). Data is stored in rows with DATA_FLAG=1, while the fit is stored in rows with DATA_FLAG=0.
+- ``output.LCSUMMARY.TEXT``: A summary table of light curve quality and processing metrics for all SNe.
+- ``output.SUMMARY.TEXT``: An optional ArviZ summary table containing MCMC convergence metrics (e.g. R-hat and effective sample size), generated when ``save_summary=True`` in the input yaml.
+- ``input.yaml``: A copy of the configuration dictionary used for the run.
 
 The plan for large SNANA jobs is that only the last of these outputs will be saved to avoid creating a very large number of output files.
 

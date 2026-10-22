@@ -41,8 +41,8 @@ is given below, and also in the notebook `example_fits.ipynb` included on the Gi
 
     t = np.arange(-10, 40, 1) # Define rest-frame phases to calculate model photometry at
     bands = ['g_PS1', 'r_PS1', 'i_PS1', 'z_PS1'] # PS1 griz bands, for example
-    z = # Whatever the real heliocentric redshifts of your sample are
-    ebv_mw = # Whatever the real Milky Way extinction colour excesses are
+    z = 0.03  # Example heliocentric redshift (or 1D array of redshifts per SN)
+    ebv_mw = 0.02  # Example Milky Way extinction E(B-V) (or 1D array per SN)
 
     # Get model photometry for all posterior samples
     phot_grid = model.get_flux_from_chains(t, bands, 'PATH/TO/chains.pkl', z, ebv_mw, mag=True)
@@ -143,7 +143,7 @@ plots.
 
 Regarding the phases and bands, you can use this model in two ways. If ``len(bands) == len(t)``, this code will assume
 that you have a set of phases and the corresponding filter used for each time of observation, and will generate one
-photometric value for each phase only for that given band i.e. with 20 phases, you will get 20 data points per obejct.
+photometric value for each phase only for that given band i.e. with 20 phases, you will get 20 data points per object.
 This might be the case if you have a set of phases and bands derived from a real survey. Otherwise, if
 ``len(bands) != len(t)``, the code will work in the same way as ``simulate_spectrum`` and just simulate photometry at
 all of the requested phases for all bands i.e. with 4 bands and 20 phases you will get 80 data points per object.

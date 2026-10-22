@@ -16,10 +16,10 @@ provide a map to match up the names in the data files with the BayeSN names, as 
 
 - Standard
 
-    - Strinzinger *UBVRI* filters
+    - Stritzinger *UBVRI* filters
 
         - Names: `U`, `B`, `V`, `R`, `I`
-        - Source: Strinzinger+11, 2005PASP..117..810S
+        - Source: Stritzinger+05, 2005PASP..117..810S
 
     - 2MASS Peters Automated Infrared Imaging Telescope *JHK* filters
 
