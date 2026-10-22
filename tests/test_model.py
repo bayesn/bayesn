@@ -1163,3 +1163,22 @@ class TestFit:
 
         for out_file in ("chains.pkl", "fit_summary.csv", "input.yaml", "output.FITRES.TEXT"):
             assert (tmp_path / out_file).exists()
+
+    @pytest.mark.slow
+    def test_fit_fix_tmax_and_fix_eps(self, initial_args: dict, tmp_path: Path):
+        args = deepcopy(initial_args)
+        args["keep_list"] = ["2016W"]
+        args["fix_tmax"] = True
+        args["fix_eps"] = True
+        args["num_samples"] = 5
+        args["num_warmup"] = 5
+        args["outputdir"] = tmp_path
+        args["plot_lightcurves"] = False
+
+        model = SEDmodel(load_model=args["load_model"], load_ext_rel=args["load_ext_rel"])
+        model.run(args)
+
+        for out_file in ("chains.pkl", "fit_summary.csv", "input.yaml", "output.FITRES.TEXT"):
+            assert (tmp_path / out_file).exists()
+        assert model.fitres_table["PEAKMJD"][0] == model.dataset.peak_mjd[0]
+        assert model.fitres_table["PEAKMJDERR"][0] == 0.0
