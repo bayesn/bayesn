@@ -4083,7 +4083,11 @@ class SEDmodel(object):
         if args["fix_tmax"]:
             samples["tmax"] = np.zeros_like(samples["Ds"])
         if args["fix_eps"]:
-            samples["eps_tform"] = np.zeros((*samples["Ds"].shape[:2], self.N_knots_sig, samples["Ds"].shape[2]))
+            for key in ("eps", "eps_tform"):
+                # "eps" needed for get_flux_from_chains, "eps_tform" for get_fitporb.
+                samples[key] = np.zeros(
+                    (*samples["Ds"].shape[:2], self.N_knots_sig, samples["Ds"].shape[2])
+                )
         if args["fix_theta"] is not None:
             samples["theta"] = np.full_like(samples["Ds"], args["fix_theta"])
         if args["fix_AV"] is not None:
@@ -4125,7 +4129,10 @@ class SEDmodel(object):
             if not args["fix_tmax"]:  # Convert tmax samples into peak_MJD samples
                 # Time dilation at the fitted z for photo-z, else the fixed catalog z
                 z_dilation = samples["z"] if args["photoz"] else self.data.z_hel[None, None, :]
-                samples["peak_MJD"] = self.dataset.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
+            else:
+                z_dilation = 0
+            # peak_MJD needed for populating fitres_table.
+            samples["peak_MJD"] = self.dataset.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
             fitprob, fitchi2, ndof = self.get_fitprob(samples, batch_size=args.get("batch_size"), data_type=args["data_type"])
