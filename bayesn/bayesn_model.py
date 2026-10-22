@@ -1467,40 +1467,40 @@ class SEDmodel(object):
                     f"This is not consistent with typical {mode} behavior. "
                     "Consider changing the mode or setting it to 'custom'."
                 )
+            args["RV"] = "normal"
             args["shared_RV"] = False
 
         # RV information was previously provided through the mode parameter.
         # Check for backwards compatibility.
-        # e.g. fit_poprv should give shared_RV = False
-        #      train_global_rv should give shared_RV = True
-        supported_RV_dict = {True: "global", False: "pop"}
-        if "shared_RV" in args and supported_RV_dict[not args["shared_RV"]] in mode:
+        # e.g. fit_poprv should give shared_RV = False, RV = "normal"
+        #      train_global_rv should give shared_RV = True, RV = "uniform"
+        supported_RV_dict = {True: ("global", "uniform"), False: ("pop", "normal")}
+        if "shared_RV" in args and supported_RV_dict[not args["shared_RV"]][0] in mode:
             raise ValueError(
                 f"shared_RV was provided as {args['shared_RV']}. However, the mode "
                 f"{mode} seems to indicate that a different shared_RV should be used. "
                 "Please remove the inconsistency."
             )
-        for shared_RV, mode_name in supported_RV_dict.items():
+        for shared_RV, (mode_name, mode_RV) in supported_RV_dict.items():
             if mode_name not in mode:
                 continue
             args["shared_RV"] = shared_RV
+            args["RV"] = mode_RV
             if verbose:
-                warn(UserWarning(
+                warn(DeprecationWarning(
                     f"shared_RV was inferred as {args['shared_RV']} from the mode "
                     f"{args['mode']}. Indicating shared_RV with the mode is supported "
                     "for backwards compatibility, but in the future please consider "
                     "including the shared_RV parameter in the input yaml file."
                 ))
-        if not any([val in mode for val in supported_RV_dict.values()]):
-            if verbose and "rv" in mode:
-                warn(UserWarning(
-                    f"The indicated mode {mode} contains the string 'rv', but not the "
-                    "strings 'global' or 'pop', which correspond to shared_RV True and "
-                    "False respectively. Indicating shared_RV and RV with the mode arg "
-                    "will be deprecated at some point, but for now you may wish to fix "
-                    "the mode argument to include 'global' or 'pop' (case insensitive)."
-                ))
-            return args
+        if "rv" in mode and "global" not in mode and "pop" not in mode:
+            raise ValueError(
+                f"The indicated mode {mode} contains the string 'rv', but not the "
+                "strings 'global' or 'pop', so it is unclear what configuration should "
+                "be used. Indicating shared_RV and RV with the mode arg will be "
+                "deprecated at some point, but for now you may wish to fix the mode "
+                "argument to include 'global' or 'pop' (case insensitive)."
+            )
         return args
 
     def _get_rv_type(self, args: dict, verbose: bool = True) -> tuple[bool, Number | str]:
@@ -1553,7 +1553,16 @@ class SEDmodel(object):
 
         if detected_RV == "default":
             msg = f"RV is 'default', which will be treated as "
-            if model_shared_RV:
+            if args.get("infer_dust_properties", False) or args.get("train_new_model", False):
+                if detected_shared_RV:
+                    detected_RV = "uniform"
+                else:
+                    detected_RV = "normal"
+                msg += f"{detected_RV} to match previous work flows."
+            elif not detected_shared_RV:
+                detected_RV = "normal"
+                msg += f"normal to match previous work flows."
+            elif model_shared_RV:
                 detected_RV = float(self.RV)
                 msg += f"{self.RV} to match the loaded model's 'RV' attribute. "
             else:
@@ -2967,7 +2976,7 @@ class SEDmodel(object):
             AV = numpyro.sample(f"AV{suffix}", AV_dist(1 / (dust_params.tauA + redshift * dust_params.tau_z_grad)))
 
         z_drift = redshift * dust_params.mu_z_grad
-        if shared_RV:
+        if shared_RV or isinstance(dust_params.RV, Number):
             RV = dust_params.RV + z_drift
         elif dust_params.RV == "uniform":
                 RV = numpyro.sample(
@@ -3395,13 +3404,13 @@ class SEDmodel(object):
         except ValueError:
             RV = self.RV or self.mu_R
         noeps_kwargs, vi_kwargs = [copy.deepcopy(args) for _ in range(2)]
-        noeps_kwargs.update({"fix_eps": True, "rv_type": "global", "RV": RV})
+        noeps_kwargs.update({"fix_eps": True, "shared_RV": True, "RV": RV})
         vi_kwargs.update({
             "fix_eps": False,
             "AV_dist": zltn.My_Exponential,
             "muhat_err": 5,
             "prior_only": False,
-            "rv_type": "global",
+            "shared_RV": True,
             "RV": RV,
         })
         if args['laplace_method'] == 'lm':
