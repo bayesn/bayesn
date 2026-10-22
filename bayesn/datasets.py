@@ -1737,12 +1737,9 @@ class SNDataset:
             A similar table where nothing has been cut, with an additional column ("DROP")
             indicating what cut caused the row to be dropped.
         """
-        if cut_dict is None:
-            cut_dict = {}
-        if keep_dict is None:
-            keep_dict = {}
-        if survey_dict is None:
-            survey_dict = {}
+        cut_dict = cut_dict if cut_dict is not None else {}
+        keep_dict = keep_dict if keep_dict is not None else {}
+        survey_dict = survey_dict if survey_dict is not None else {}
         meta = self.get_metadata_subset(use_defaults=True)
         varlist = ["SN:"] * self.N_sn
         if survey_overwrite is None:
@@ -1849,7 +1846,6 @@ class SNDataset:
                     keep = (fitres_table[param] < low) | (fitres_table[param] > high)
                 else:
                     keep = (fitres_table[param] > low) & (fitres_table[param] < high)
-                drop = (1 - keep).sum()
                 # Record what cut caused a row to be dropped.
                 all_table.loc[
                     all_table["CID"].isin(fitres_table[~keep]["CID"]), "DROP"

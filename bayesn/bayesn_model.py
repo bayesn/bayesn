@@ -642,8 +642,10 @@ class SEDmodel(object):
         for key in ("RV", "mu_R", "sigma_R"):
             setattr(self, key, None)
         if "RV" in params:
+            self.shared_RV = True
             self.RV = jnp.array(params["RV"])
         elif "MUR" in params:
+            self.shared_RV = False
             self.mu_R = jnp.array(params["MUR"])
             self.sigma_R = jnp.array(params["SIGMAR"])
         # Build the model wavelengths in log space
@@ -992,7 +994,7 @@ class SEDmodel(object):
             apply_dovekie_mag_shifts = self.apply_dovekie_mag_shifts
         if shift_df is None:
             shift_df = self.shift_df
-        if apply_lam_shifts is None:
+        if apply_mag_shifts is None:
             apply_mag_shifts = self.apply_mag_shifts
         if apply_lam_shifts is None:
             apply_lam_shifts = self.apply_lam_shifts
@@ -2288,9 +2290,7 @@ class SEDmodel(object):
         chain_samples = chains["Ds"].shape[0] * chains["Ds"].shape[1]
         if num_sne is None:
             num_sne = chains["Ds"].shape[2]
-        if mean:
-            num_samples = 1
-        elif num_samples is None:
+        if num_samples is None:
             num_samples = chain_samples
         elif num_samples > chain_samples:
             raise ValueError(
@@ -2338,7 +2338,8 @@ class SEDmodel(object):
                 f"mag_shifts does not map to the unique bands {unique_bands}."
             )
 
-        flux_grid = jnp.zeros((num_sne, num_samples, max_bands, len(t)))
+        out_samples = 1 if mean else num_samples
+        flux_grid = jnp.zeros((num_sne, out_samples, max_bands, len(t)))
         print("Getting best fit light curves from chains...")
         for i in tqdm(np.arange(num_sne)):
             # Defining SN-specific terms
@@ -2415,7 +2416,7 @@ class SEDmodel(object):
                 band_weights=sn_weights,
             )
             lc = lc.T
-            lc = lc.reshape(num_samples, len(sn_bands), len(t))
+            lc = lc.reshape(out_samples, len(sn_bands), len(t))
             flux_grid = flux_grid.at[i, :, : len(sn_bands), :].set(lc)
 
         return flux_grid
@@ -4113,7 +4114,7 @@ class SEDmodel(object):
                 samples["peak_MJD"] = self.dataset.peak_mjd[None, None, :] + samples["tmax"] * (1 + z_dilation)
 
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
-            fitprob, fitchi2, ndof = self.get_fitprob(samples, batch_size=args.get("batch_size"))
+            fitprob, fitchi2, ndof = self.get_fitprob(samples, batch_size=args.get("batch_size"), data_type=args["data_type"])
 
             # Add flux from chains to lcplot_data and create lcplot file
             # Real data will have DATA_FLAG=1 and model flux 0
@@ -4418,7 +4419,7 @@ class SEDmodel(object):
         return jnp.array([self.hsiao_offset + jnp.floor(t), self.hsiao_offset + jnp.ceil(t), jnp.remainder(t, 1)])
 
     def get_fitprob(
-        self, samples: dict, batch_size: int | None = None
+        self, samples: dict, batch_size: int | None = None, data_type: str = "flux",
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute FITPROB for each SN using posterior mean parameters.
@@ -4511,8 +4512,10 @@ class SEDmodel(object):
         model_flux = np.concatenate(chunks, axis=-1)
 
         # --- 5. chi2_data ---
-        obs_flux = self.data.flux
-        obs_err = self.data.flux_err
+        if data_type == "mag":
+            obs_flux, obs_err = utils.mag_to_flux(self.data.flux, self.data.flux_err, self.ZPT)
+        else:
+            obs_flux, obs_err = self.data.flux, self.data.flux_err
         residuals_sq = (obs_flux - model_flux) ** 2
         chi2_per_obs = jnp.where(mask, residuals_sq / obs_err ** 2, 0.0)
         chi2_data = jnp.sum(chi2_per_obs, axis=0)
@@ -5026,7 +5029,8 @@ class SEDmodel(object):
             return var
 
         self._set_used_bands(bands)
-        if self.ext_rel.name != ext_rel:
+        old_ext_rel = self.ext_rel.name
+        if old_ext_rel != ext_rel:
             self.load_ext_rel(ext_rel)
         param_dict = {
             "del_M": (del_M, self.sample_del_M, N),
@@ -5209,6 +5213,10 @@ class SEDmodel(object):
                 sn_files.append(sn_file)
         elif write_to_files:
             raise ValueError("If writing to SNANA files, please generate mags")
+
+        if old_ext_rel != ext_rel:
+            self.load_ext_rel(old_ext_rel)
+
         return data, yerr, param_dict
     def list_bandpasses(
         self, group_by: str = "bp_name", return_dict: bool = False

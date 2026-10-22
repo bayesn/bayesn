@@ -7,6 +7,7 @@ import pytest
 from scipy.stats import chi2
 
 from bayesn.bayesn_model import SEDmodel
+from bayesn.utils import get_model_params_from_chains
 
 BASE_DIR: Path = Path(__file__).parent.parent.absolute()
 
