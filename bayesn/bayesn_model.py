@@ -2322,18 +2322,18 @@ class SEDmodel(object):
         self.band_weights = self._calculate_band_weights(zs, ebv_mws, lam_shifts=lam_shifts)
 
         if isinstance(lam_shifts, Number):
-            lam_shifts = np.full(max_bands+1, lam_shifts)
-        elif len(lam_shifts) == len(bands):
+            lam_shifts = np.full(len(unique_bands)+1, lam_shifts)
+        elif len(lam_shifts) == len(unique_bands):
             lam_shifts = np.append(0, lam_shifts)  # NULL band padding
-        elif len(lam_shifts) != len(bands)+1:
+        elif len(lam_shifts) != len(unique_bands)+1:
             raise ValueError(
                 f"lam_shifts does not map to the unique bands {unique_bands}."
             )
         if isinstance(mag_shifts, Number):
-            mag_shifts = np.full(max_bands+1, mag_shifts)
-        elif len(mag_shifts) == len(bands):
+            mag_shifts = np.full(len(unique_bands)+1, mag_shifts)
+        elif len(mag_shifts) == len(unique_bands):
             mag_shifts = np.append(0, mag_shifts)  # NULL band padding
-        elif len(mag_shifts) != len(bands)+1:
+        elif len(mag_shifts) != len(unique_bands)+1:
             raise ValueError(
                 f"mag_shifts does not map to the unique bands {unique_bands}."
             )
@@ -4907,7 +4907,7 @@ class SEDmodel(object):
         write_to_files: bool = False,
         output_dir: str | Path | None = None,
         band_weights: Array | None = None,
-        ext_rel: str = "F19",
+        ext_rel: str = "default",
     ) -> tuple[Array, Array, dict]:
         """
         Simulate light curves from the BayeSN model in either mag or flux space
@@ -5028,10 +5028,18 @@ class SEDmodel(object):
                     )
             return var
 
-        self._set_used_bands(bands)
+        ext_rel = self.ext_rel.name if ext_rel == "default" else ext_rel
         old_ext_rel = self.ext_rel.name
         if old_ext_rel != ext_rel:
             self.load_ext_rel(ext_rel)
+
+        old_used_info = {
+            key: getattr(self, f"used_{key}") for key in (
+                "band_dict", "band_inds", "calib_chcov", "calib_cov",
+                "wave_sigmas", "zps",
+            )
+        }
+        self._set_used_bands(bands)
         param_dict = {
             "del_M": (del_M, self.sample_del_M, N),
             "AV": (AV, self.sample_AV, N),
@@ -5134,7 +5142,7 @@ class SEDmodel(object):
                         f"of shape (N, N_model_wave, N_bands) = ({N}, "
                         f"{len(self.model_wave)}, {len(bands)})."
                     )
-                weights = jnp.repeat(band_weights, N, axis=0)
+                band_weights = jnp.repeat(band_weights, N, axis=0)
             elif band_weights.shape != (N, len(self.model_wave), len(bands)+1):
                 raise ValueError(
                     "band_weights was provided as an array of shape "
@@ -5214,8 +5222,11 @@ class SEDmodel(object):
         elif write_to_files:
             raise ValueError("If writing to SNANA files, please generate mags")
 
+        # cleaning changed state
         if old_ext_rel != ext_rel:
             self.load_ext_rel(old_ext_rel)
+        for key in old_used_info:
+            setattr(self, f"used_{key}", old_used_info[key])
 
         return data, yerr, param_dict
     def list_bandpasses(
