@@ -89,5 +89,14 @@ bayesn.constants module
    :undoc-members:
    :show-inheritance:
 
+bayesn.run\_bayesn module
+-------------------------
+
+.. automodule:: bayesn.run_bayesn
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
 
 
