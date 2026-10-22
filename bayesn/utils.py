@@ -2,7 +2,6 @@ import functools
 from numbers import Number
 import os
 from pathlib import Path
-from ruamel.yaml import YAML
 import subprocess
 
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -14,11 +13,8 @@ import numpy as np
 import numpyro.distributions as dist
 from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
-try:
-    from sfdmap2 import sfdmap
-    sfdmap_loaded = True
-except:
-    sfdmap_loaded = False
+from ruamel.yaml import YAML
+from sfdmap2 import sfdmap
 
 from bayesn import constants
 
@@ -455,7 +451,7 @@ def assert_dicts_match(
                 f"The dictionaries contain discrepant non-numeric data in key {key}."
             )
 
-def find_data_dir_in_SNANA(private_data_path: list[str]) -> tuple[str, dict]:
+def find_data_dir_in_SNANA(data_dir: str, private_data_path: list[str]) -> tuple[str, dict]:
     """
     Locate SNANA photometry directory across standard and private paths.
 
@@ -473,6 +469,11 @@ def find_data_dir_in_SNANA(private_data_path: list[str]) -> tuple[str, dict]:
     """
     # Assuming you're using SNANA running on Perlmutter or a similar cluster
     # Look in standard public repositories for real data/simulations
+    if os.environ.get("SNDATA_ROOT") is None:
+        raise ValueError(
+            "The environment variable SNDATA_ROOT is not set. This does not seem to be "
+            "the expected cluster, so it is not clear where to find the data."
+        )
     dir_list = ["SNDATA_ROOT/lcmerge", "SNDATA_ROOT/SIM"]
     sim_list = np.loadtxt(
         os.path.join(

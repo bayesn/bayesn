@@ -1372,13 +1372,12 @@ class SEDmodel(object):
             args["snana"] = True
         else:
             args["jobsplit"] = [1, 1]
-            args["snana"] = False
+            args["snana"] = args.get("snana", False)
         args["jobid"], args["njobtot"] = args["jobsplit"]
 
         if not (args["mode"].startswith("fit") and args["snana"]):
             try:
-                if not args["outputdir"].exists():
-                    args["outputdir"].mkdir()
+                args["outputdir"].mkdir(parents=True, exist_ok=True)
             except FileNotFoundError:
                 raise FileNotFoundError(
                     "Requested output directory does not exist and could not be created"
@@ -1749,10 +1748,14 @@ class SEDmodel(object):
             defines model wavelength range and data set to load.
         """
         survey_dict = {}
-        if args.get("version_photometry"):
-            data_dir, survey_dict = find_data_dir_in_SNANA(
-                private_data_path=args["private_data_path"]
-            ) if args["snana"] else (args["version_photometry"], {})
+        if args.get("version_photometry") and args["snana"]:
+            try:
+                data_dir, survey_dict = find_data_dir_in_SNANA(
+                        data_dir=args["version_photometry"],
+                        private_data_path=args["private_data_path"],
+                )
+            except ValueError:
+                data_dir = args["version_photometry"]
             list_file = Path(data_dir, Path(data_dir).name+".LIST")
             ds = SNDataset.from_snana_list(
                 list_file,
