@@ -14,7 +14,11 @@ import numpyro.distributions as dist
 from numpyro.handlers import substitute, trace
 from numpyro.infer.util import log_density, _unconstrain_reparam
 from ruamel.yaml import YAML
-from sfdmap2 import sfdmap
+try:
+    from sfdmap2 import sfdmap
+    sfdmap_loaded = True
+except ModuleNotFoundError:
+    sfdmap_loaded = False
 
 from bayesn import constants
 
