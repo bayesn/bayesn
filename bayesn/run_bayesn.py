@@ -75,7 +75,7 @@ def get_cmd_args() -> argparse.Namespace:
         "save_fit_errors", "save_summary",
     ]:
         parser.add_argument(
-            f"--{arg}", action="store_true", default=False, required=False, help=arg_help.get(arg)
+            f"--{arg}", action="store_true", required=False, help=arg_help.get(arg)
         )
     # list of floats args
     for arg in ["l_knots", "tau_knots"]:
@@ -132,6 +132,10 @@ def override_input_args_w_cmd_args(input_args: dict[str, Any], cmd_args: argpars
     """
     for key, val in vars(cmd_args).items():
         if key == "input" or val is None:
+            continue
+        if isinstance(val, bool) and not val:
+            # boolean flags will default to False if not included, which should not
+            # override specified input_args.
             continue
         if key == "map" and isinstance(val, str):
             filt_map = np.loadtxt(cmd_args.map, dtype=str)
