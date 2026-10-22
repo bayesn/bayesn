@@ -3376,7 +3376,7 @@ class SEDmodel(object):
                 num_warmup=args["num_warmup"],
                 num_chains=args["num_chains"],
                 chain_method=args["chain_method"],
-                progress_bar=args["chain_method"] == "vectorized",
+                progress_bar=False,
             )
             if args["photoz"] and self.z_icdf_grid is not None:
                 args["z_icdf"] = z_icdf
