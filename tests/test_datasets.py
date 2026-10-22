@@ -576,33 +576,118 @@ class TestDataRemoval:
         assert unique_bands[2] not in dataset_sim.unique_bands
         assert len(dataset_sim.photometry) == original_length - counts[0] - counts[2]
 
-    def test_drop_by_band_lims(self, dataset_sim):
+    @pytest.fixture
+    def band_lim_params(self, dataset_sim):
         all_bands = dataset_sim.unique_bands
-        original_length = len(dataset_sim.photometry)
         wave_min, wave_max = 2000, 9000
         # start band_lim dict with all bandpasses well within wave range.
         band_lim_dict = dict(zip(all_bands, [[4000, 7000] for _ in all_bands]))
         # Remove one band from lowest (highest) redshift due to red (blue) limit.
         # Other SNe should not be affected.
         zmin_idx, zmax_idx = dataset_sim.z_helio.argmin(), dataset_sim.z_helio.argmax()
-        zmin_band, zmax_band = [
+        zmin_band, zmax_band = [  # arbitrarily dropping the first (0th) bandpass
             dataset_sim.get_phot_subset(idx=idx)["flt"].unique()[0]
             for idx in (zmin_idx, zmax_idx)
         ]
         zmin_counts = (dataset_sim.get_phot_subset(idx=zmin_idx)["flt"] == zmin_band).sum()
         zmax_counts = (dataset_sim.get_phot_subset(idx=zmax_idx)["flt"] == zmax_band).sum()
-        band_lim_dict[zmin_band][1] = wave_max*(1+dataset_sim.z_helio[zmin_idx]) + 1e-5
-        band_lim_dict[zmax_band][0] = wave_min*(1+dataset_sim.z_helio[zmax_idx]) - 1e-5
-        with pytest.raises(ValueError, match="The data contain a set of bandpasses not"):
-            dataset_sim.drop_by_band_lims(
-                band_lim_dict={}, wave_min=wave_min, wave_max=wave_max
-            )
-        dataset_sim.drop_by_band_lims(
-            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max
+        return (
+            band_lim_dict, wave_min, wave_max,
+            {"idx": zmin_idx, "band": zmin_band, "counts": zmin_counts},
+            {"idx": zmax_idx, "band": zmax_band, "counts": zmax_counts},
         )
-        assert zmin_band not in dataset_sim.get_phot_subset(idx=zmin_idx)["flt"]
-        assert zmax_band not in dataset_sim.get_phot_subset(idx=zmax_idx)["flt"]
-        assert len(dataset_sim.photometry) == original_length - zmin_counts - zmax_counts
+
+    def test_drop_by_band_lims_missing_coverage(self, dataset_sim):
+        test_ds = copy.deepcopy(dataset_sim)
+        with pytest.raises(ValueError, match="The data contain a set of bandpasses not"):
+            test_ds.drop_by_band_lims(band_lim_dict={}, wave_min=2000, wave_max=9000)
+
+    def test_drop_by_band_lims(self, dataset_sim, band_lim_params: tuple):
+        test_ds = copy.deepcopy(dataset_sim)
+        band_lim_dict, wave_min, wave_max, zmin, zmax = band_lim_params
+        for i, wave_lim, z, sign in zip(
+            (0, 1), (wave_min, wave_max), (zmax, zmin), (-1, 1)
+        ):
+            # buffering with 1e-5 for floating point safety
+            band_lim_dict[z["band"]][i] = sign*1e-5 + wave_lim*(1+test_ds.z_helio[z["idx"]])
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err=None,
+        )
+        assert zmin["band"] not in test_ds.get_phot_subset(idx=zmin["idx"])["flt"].values
+        assert zmax["band"] not in test_ds.get_phot_subset(idx=zmax["idx"])["flt"].values
+        assert len(test_ds.photometry) == len(dataset_sim.photometry) - zmin["counts"] - zmax["counts"]
+
+    def test_drop_by_band_lims_z_err(self, dataset_sim, band_lim_params: tuple):
+        test_ds = copy.deepcopy(dataset_sim)
+        band_lim_dict, wave_min, wave_max, zmin, zmax = band_lim_params
+        for i, wave_lim, z, sign in zip(
+            (0, 1), (wave_min, wave_max), (zmax, zmin), (-1, 1)
+        ):
+            band_lim_dict[z["band"]][i] = sign*1e-5 + wave_lim*(
+                1+test_ds.z_helio[z["idx"]] - sign*(2.5+i)*test_ds.z_helio_err[z["idx"]]
+            )  # 2.5 and 3.5 straddle the 3*z_err cutoff, so only zmax loses photometry.
+
+        with pytest.raises(ValueError, match="Unrecognised z_err value"):
+            test_ds.drop_by_band_lims(
+                band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+                z_err=np.zeros((test_ds.N_sn, 5, 2))
+            )
+
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err="default",
+        )
+        ref_length = len(dataset_sim.photometry) - zmax["counts"]
+        assert zmin["band"] in test_ds.get_phot_subset(idx=zmin["idx"])["flt"].values
+        assert zmax["band"] not in test_ds.get_phot_subset(idx=zmax["idx"])["flt"].values
+        assert len(test_ds.photometry) == ref_length
+
+        # Removing all photometry from second target via huge z_err
+        z_err = test_ds.z_helio_err
+        z_err[1] = 1
+        ref_length -= test_ds.N_obs[1]
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err=z_err,
+        )
+        assert dataset_sim.snid[1] not in test_ds.snid
+        assert len(test_ds.photometry) == ref_length
+
+        # Removing all photometry from new first target with z_err quantiles
+        z_err = np.array([test_ds.z_helio - test_ds.z_helio_err, test_ds.z_helio + test_ds.z_helio_err]).T
+        z_err[1] = [-1, 1] # unphysical, but tests the math
+        ref_length -= test_ds.N_obs[1]
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err=z_err,
+        )
+        assert dataset_sim.snid[2] not in test_ds.snid
+        assert len(test_ds.photometry) == ref_length
+
+        # Removing all targets with huge z_err
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err=1,
+        )
+        assert test_ds.N_sn == 0
+
+    def test_drop_by_band_lims_obs_frame(self, dataset_sim, band_lim_params: tuple):
+        test_ds = copy.deepcopy(dataset_sim)
+        band_lim_dict, wave_min, wave_max, zmin, zmax = band_lim_params
+        band = test_ds.unique_bands[0]
+        for i, wave_lim, sign in zip(
+            (0, 1), (wave_min, wave_max), (-1, 1)
+        ):
+            # buffering with 1e-5 for floating point safety
+            band_lim_dict[band][i] = sign*1e-5 + wave_lim
+        test_ds.drop_by_band_lims(
+            band_lim_dict=band_lim_dict, wave_min=wave_min, wave_max=wave_max,
+            z_err=None, rest_frame=False,
+        )
+
+        assert band not in test_ds.photometry["flt"].values
+        assert len(test_ds.photometry) == sum(dataset_sim.photometry["flt"] != band)
 
     def test_cut_by_meta_numeric(self, dataset_sim):
         test_ds = copy.deepcopy(dataset_sim)

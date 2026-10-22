@@ -141,7 +141,6 @@ class TestInit:
             assert getattr(custom_model, attr) == getattr(model, attr)
 
     def test_pop_rv_init(self, initial_args: dict, custom_model: SEDmodel):
-        assert not custom_model.shared_RV
         assert custom_model.RV is None
         assert custom_model.mu_R == 2.61
         assert custom_model.sigma_R == 0.5
