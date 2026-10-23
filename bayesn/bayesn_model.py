@@ -1748,15 +1748,18 @@ class SEDmodel(object):
             defines model wavelength range and data set to load.
         """
         survey_dict = {}
-        if args.get("version_photometry") and args["snana"]:
-            try:
-                data_dir, survey_dict = find_data_dir_in_SNANA(
+        if args.get("version_photometry"):
+            if args["snana"]:
+                try:
+                    data_dir, survey_dict = find_data_dir_in_SNANA(
                         data_dir=args["version_photometry"],
                         private_data_path=args["private_data_path"],
-                )
-            except ValueError:
+                    )
+                except (ValueError, FileNotFoundError, OSError):
+                    data_dir = args["version_photometry"]
+            else:
                 data_dir = args["version_photometry"]
-            list_file = Path(data_dir, Path(data_dir).name+".LIST")
+            list_file = Path(data_dir, Path(data_dir).name + ".LIST")
             ds = SNDataset.from_snana_list(
                 list_file,
                 data_root=data_dir,
@@ -3278,7 +3281,7 @@ class SEDmodel(object):
 
         return param_init
 
-    def run(self, args: dict) -> None:
+    def run(self, args: dict, RNG_seed: int = 0) -> None:
         """
         Main method to run BayeSN. The input yaml file allows for customisation of the
         sampling configuration and model via keyword arguments.
@@ -3291,6 +3294,7 @@ class SEDmodel(object):
         """
         args = self.parse_args(args)
         self.process_dataset(args)
+        RNG_seed = args.get("RNG_seed", RNG_seed)
 
         mode = args["mode"]
         fitting_mode = (
@@ -3340,16 +3344,16 @@ class SEDmodel(object):
         if (
             fitting_mode and args["fit_method"] == "mcmc"
         ):  # Use vmap to vectorise over individual fitting jobs
-            samples = self._run_fit_mcmc(args, nuts_kernel)
+            samples = self._run_fit_mcmc(args, nuts_kernel, RNG_seed=RNG_seed)
         elif fitting_mode and args["fit_method"] == "vi":
-            samples = self._run_fit_vi(args, init_strategy)
+            samples = self._run_fit_vi(args, init_strategy, RNG_seed=RNG_seed)
         else:
-            samples = self._run_other(args, nuts_kernel)
+            samples = self._run_other(args, nuts_kernel, RNG_seed=RNG_seed)
         end = timeit.default_timer()
         print(f"Total inference runtime: {end - start:.2f} seconds")
-        self.postprocess(samples, args)
+        self.postprocess(samples, args, RNG_seed=RNG_seed)
 
-    def _run_fit_mcmc(self, args, nuts_kernel):
+    def _run_fit_mcmc(self, args, nuts_kernel, RNG_seed=0):
         def fit_vmap_mcmc(data: ArrayLike, weights: ArrayLike, z_icdf) -> dict:
             """
             Short function-in-a-function just to allow you to do a vectorised map over multiple objects on a single
@@ -3369,7 +3373,7 @@ class SEDmodel(object):
                 Samples and other information from MCMC fit
 
             """
-            rng_key = PRNGKey(0)
+            rng_key = PRNGKey(RNG_seed)
             mcmc = MCMC(
                 nuts_kernel,
                 num_samples=args["num_samples"],
@@ -3405,7 +3409,7 @@ class SEDmodel(object):
             samples[key] = np.moveaxis(val, 0, -1)
         return samples
 
-    def _run_fit_vi(self, args, init_strategy):
+    def _run_fit_vi(self, args, init_strategy, RNG_seed: int = 0):
         try:
             RV = float(args["RV"])
         except ValueError:
@@ -3424,13 +3428,13 @@ class SEDmodel(object):
         if args['laplace_method'] == 'lm':
             from numpyro.infer.util import initialize_model
             self._lm_model_info = initialize_model(
-                PRNGKey(0), self._model,
+                PRNGKey(RNG_seed), self._model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
                 model_kwargs=noeps_kwargs,
             )
             self._vi_model_info = initialize_model(
-                PRNGKey(0), self._model,
+                PRNGKey(RNG_seed), self._model,
                 init_strategy=init_strategy, dynamic_args=True,
                 model_args=(self.get_sn_slice_of_data(slice(0,1)), self.band_weights[0:1, ...]),
                 model_kwargs=vi_kwargs,
@@ -3534,7 +3538,7 @@ class SEDmodel(object):
                 svi = SVI(self._model, laplace_guide, optimizer, loss=Trace_ELBO(5))
                 svi_kwargs = copy.deepcopy(noeps_kwargs)
                 svi_kwargs.update(z_kwargs)
-                svi_result = svi.run(PRNGKey(123), 15000, padded_data, weights[None, ...], progress_bar=False, **svi_kwargs)
+                svi_result = svi.run(PRNGKey(RNG_seed), 15000, padded_data, weights[None, ...], progress_bar=False, **svi_kwargs)
                 params, losses = svi_result.params, svi_result.losses
                 laplace_median = laplace_guide.median(params)
 
@@ -3561,12 +3565,12 @@ class SEDmodel(object):
             svi = SVI(self._model, zltn_guide, Adam(step_size), Trace_ELBO(args["zltn_particles"]))
             svi_kwargs = copy.deepcopy(vi_kwargs)
             svi_kwargs.update(z_kwargs)
-            svi_result = svi.run(PRNGKey(123), args["num_zltn_iter"], padded_data, weights[None, ...], progress_bar=False, **svi_kwargs)
+            svi_result = svi.run(PRNGKey(RNG_seed), args["num_zltn_iter"], padded_data, weights[None, ...], progress_bar=False, **svi_kwargs)
             params, losses = svi_result.params, svi_result.losses
             predictive = Predictive(
                 zltn_guide, params=params, num_samples=4 * args["num_samples"]
             )
-            samples = predictive(PRNGKey(123), data=None)
+            samples = predictive(PRNGKey(RNG_seed), data=None)
             if args["photoz"]: # surface z (a deterministic, so not in the guide samples)
                 if self.z_icdf_grid is not None:
                     samples['z'] = jnp.interp(samples['u'], self.z_u_grid, z_icdf)
@@ -3645,7 +3649,7 @@ class SEDmodel(object):
             )
         return samples
 
-    def _run_other(self, args, nuts_kernel):
+    def _run_other(self, args, nuts_kernel, RNG_seed: int = 0):
         mcmc = MCMC(
             nuts_kernel,
             num_samples=args["num_samples"],
@@ -3654,7 +3658,7 @@ class SEDmodel(object):
             chain_method=args["chain_method"],
             progress_bar=True,
         )
-        rng = PRNGKey(0)
+        rng = PRNGKey(RNG_seed)
         mcmc.run(
             rng, self.data, self.band_weights, **args, extra_fields=("potential_energy",),
         )
@@ -3909,7 +3913,7 @@ class SEDmodel(object):
 
         if verbose and any(~keep):
             print(
-                f"Cutting {len(t) - sum(keep)} data due to rest-frame phases "
+                f"Cutting {sum(~keep)} data due to rest-frame phases "
                 "beyond model limits."
             )
 
@@ -4848,7 +4852,7 @@ class SEDmodel(object):
                 "For ebv_mw, either pass a single scalar value or an array of values for each of the N simulated objects"
             )
         if RV is None:
-            RV = self.RV
+            RV = self.sample_RV(N)
         RV = np.array(RV)
         if len(RV.shape) == 0:
             RV = RV.repeat(N)
@@ -5121,7 +5125,7 @@ class SEDmodel(object):
             t = t[:, None].repeat(num_bands, axis=1).flatten(order="F")
             for i, band in enumerate(bands):
                 if band not in self.band_dict:
-                    raise ValueError(f"{band} is present in filters yaml file")
+                    raise ValueError(f"{band} is not present in filters yaml file.")
                 band_indices[i * num_per_band : (i + 1) * num_per_band] = (
                     self.used_band_dict[self.band_dict[band]]
                 )
