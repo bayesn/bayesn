@@ -1,0 +1,158 @@
+SNID         peak_mjd  z_helio  z_helio_err  z_hubble  z_hubble_err files
+      2016W 57418.12  0.019253 0.000067     0.02013   0.00007             training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_2016W.txt
+    2016afk 57440.00  0.045605 0.000007     0.04686   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_2016afk.txt
+ASASSN-15bc 57046.93  0.036715 0.000097     0.03801   0.00010       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15bc.txt
+ASASSN-15fa 57103.76  0.027345 0.000007     0.02726   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15fa.txt
+ASASSN-15fs 57112.71  0.029020 0.000047     0.02925   0.00005       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15fs.txt
+ASASSN-15go 57122.90  0.018923 0.000150     0.01879   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15go.txt
+ASASSN-15hg 57132.05  0.029917 0.000010     0.03112   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15hg.txt
+ASASSN-15il 57162.24  0.023316 0.000150     0.02289   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15il.txt
+ASASSN-15jl 57165.67  0.034682 0.000010     0.03520   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15jl.txt
+ASASSN-15jt 57168.90  0.023063 0.000010     0.02178   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15jt.txt
+ASASSN-15kx 57192.20  0.018019 0.000083     0.01715   0.00008       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15kx.txt
+ASASSN-15la 57188.60  0.027821 0.000008     0.02824   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15la.txt
+ASASSN-15lg 57196.66  0.020151 0.000009     0.02018   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15lg.txt
+ASASSN-15lu 57200.45  0.035054 0.000009     0.03643   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15lu.txt
+ASASSN-15mf 57212.99  0.026039 0.000008     0.02652   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15mf.txt
+ASASSN-15mg 57218.63  0.042778 0.000012     0.04460   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15mg.txt
+ASASSN-15mi 57220.85  0.034423 0.000005     0.03595   0.00000       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15mi.txt
+ASASSN-15np 57241.90  0.037683 0.000045     0.03886   0.00005       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15np.txt
+ASASSN-15nq 57248.05  0.030360 0.000012     0.02995   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15nq.txt
+ASASSN-15nr 57249.89  0.023206 0.000183     0.02343   0.00018       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15nr.txt
+ASASSN-15od 57256.62  0.017603 0.000013     0.01726   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15od.txt
+ASASSN-15oh 57255.98  0.016835 0.000107     0.01574   0.00011       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15oh.txt
+ASASSN-15pm 57277.87  0.048784 0.000150     0.04847   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15pm.txt
+ASASSN-15pn 57279.91  0.038358 0.000005     0.03961   0.00000       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15pn.txt
+ASASSN-15pr 57281.18  0.033093 0.000150     0.03313   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15pr.txt
+ASASSN-15sf 57333.86  0.024680 0.001000     0.02440   0.00100       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15sf.txt
+ASASSN-15ss 57338.48  0.035558 0.000117     0.03602   0.00012       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15ss.txt
+ASASSN-15tg 57361.88  0.035615 0.000057     0.03533   0.00006       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15tg.txt
+ASASSN-15ti 57364.11  0.017320 0.000055     0.01647   0.00005       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15ti.txt
+ASASSN-15tz 57376.29  0.022862 0.000030     0.02404   0.00003       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15tz.txt
+ASASSN-15uu 57390.01  0.026779 0.000007     0.02641   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15uu.txt
+ASASSN-15uv 57391.17  0.020279 0.000017     0.02169   0.00002       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15uv.txt
+ASASSN-15uw 57393.70  0.030811 0.000150     0.03107   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-15uw.txt
+ASASSN-16ad 57406.46  0.016131 0.000012     0.01589   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16ad.txt
+ASASSN-16aj 57401.87  0.030745 0.000083     0.03016   0.00008       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16aj.txt
+ASASSN-16av 57408.02  0.025668 0.000067     0.02758   0.00007       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16av.txt
+ASASSN-16ay 57416.69  0.028343 0.000013     0.02898   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16ay.txt
+ASASSN-16bc 57430.77  0.031939 0.000150     0.03319   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16bc.txt
+ASASSN-16bq 57438.29  0.024935 0.000010     0.02489   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16bq.txt
+ASASSN-16br 57439.63  0.028520 0.000150     0.03003   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16br.txt
+ASASSN-16ch 57454.14  0.026683 0.000008     0.02913   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16ch.txt
+ASASSN-16cs 57464.23  0.018019 0.000015     0.01893   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16cs.txt
+ASASSN-16ct 57460.33  0.041910 0.000036     0.04365   0.00004       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16ct.txt
+ASASSN-16db 57465.71  0.034864 0.000007     0.03575   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16db.txt
+ASASSN-16dw 57483.08  0.034657 0.000150     0.03450   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16dw.txt
+ASASSN-16em 57501.13  0.023020 0.000090     0.02390   0.00009       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16em.txt
+ASASSN-16fo 57540.40  0.028900 0.000213     0.03098   0.00021       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16fo.txt
+ASASSN-16fs 57543.22  0.029205 0.000010     0.02914   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16fs.txt
+ASASSN-16hc 57583.02  0.050934 0.000011     0.05144   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16hc.txt
+ASASSN-16hr 57596.36  0.030858 0.000008     0.03097   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16hr.txt
+ASASSN-16hz 57605.06  0.025308 0.000150     0.02481   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16hz.txt
+ASASSN-16ip 57619.25  0.017008 0.000100     0.01700   0.00010       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16ip.txt
+ASASSN-16lg 57674.61  0.021171 0.000113     0.02130   0.00011       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16lg.txt
+ASASSN-16oz 57751.01  0.031000 0.002000     0.03184   0.00200       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-16oz.txt
+ASASSN-17aj 57772.71  0.021275 0.000107     0.02255   0.00011       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-17aj.txt
+ASASSN-17at 57777.71  0.025370 0.000009     0.02708   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-17at.txt
+ASASSN-17bs 57791.36  0.020397 0.000020     0.02045   0.00002       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-17bs.txt
+ASASSN-17co 57808.05  0.018259 0.000150     0.01845   0.00015       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-17co.txt
+ASASSN-17eb 57834.45  0.049239 0.000012     0.05092   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ASASSN-17eb.txt
+   AT2016aj 57443.21  0.067406 0.000046     0.06845   0.00005         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016ajl.txt
+  AT2016bln 57499.35  0.023303 0.000027     0.02318   0.00003         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016bln.txt
+  AT2016cor 57542.79  0.049543 0.000033     0.05097   0.00003         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016cor.txt
+  AT2016cvv 57559.75  0.044571 0.000400     0.04431   0.00040         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016cvv.txt
+  AT2016cvw 57560.35  0.038877 0.000093     0.03859   0.00009         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016cvw.txt
+  AT2016cyt 57580.73  0.030740 0.000090     0.03099   0.00009         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016cyt.txt
+  AT2016eoa 57615.57  0.021087 0.000067     0.02113   0.00007         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016eoa.txt
+  AT2016ews 57620.82  0.045553 0.000008     0.04649   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016ews.txt
+  AT2016fbk 57625.85  0.035865 0.000012     0.03609   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016fbk.txt
+  AT2016gmg 57662.37  0.049437 0.000107     0.04856   0.00011         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016gmg.txt
+  AT2016gsu 57671.15  0.076419 0.000055     0.07585   0.00006         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016gsu.txt
+  AT2016hns 57697.47  0.038170 0.000060     0.03717   0.00006         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016hns.txt
+  AT2016htm 57702.88  0.043313 0.000150     0.04283   0.00015         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016htm.txt
+  AT2016htn 57700.91  0.053117 0.000150     0.05303   0.00015         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2016htn.txt
+  AT2017cfb 57836.85  0.022904 0.000014     0.02219   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017cfb.txt
+  AT2017cfc 57837.69  0.024027 0.000163     0.02416   0.00016         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017cfc.txt
+   AT2017lm 57779.52  0.030636 0.000064     0.03055   0.00006          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017lm.txt
+   AT2017ns 57784.75  0.028766 0.000397     0.02846   0.00040          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017ns.txt
+   AT2017oz 57787.80  0.055689 0.000010     0.05611   0.00001          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017oz.txt
+   AT2017po 57782.02  0.031828 0.000007     0.03234   0.00001          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017po.txt
+   AT2017wb 57789.94  0.030653 0.000084     0.03118   0.00008          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017wb.txt
+   AT2017yk 57789.03  0.046439 0.000150     0.04673   0.00015          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017yk.txt
+   AT2017zd 57793.43  0.029470 0.000150     0.02940   0.00015          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_AT2017zd.txt
+ ATLAS16bwu 57608.85  0.071803 0.000058     0.07236   0.00006        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS16bwu.txt
+ ATLAS16cpu 57629.30  0.018195 0.000008     0.01842   0.00001        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS16cpu.txt
+ ATLAS16cxr 57666.63  0.015520 0.001000     0.01544   0.00100        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS16cxr.txt
+ ATLAS16dpb 57688.93  0.023083 0.000033     0.02260   0.00003        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS16dpb.txt
+ ATLAS16dqf 57702.05  0.021170 0.000180     0.02008   0.00018        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS16dqf.txt
+ ATLAS17ajn 57778.73  0.028706 0.000033     0.02968   0.00003        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS17ajn.txt
+ ATLAS17ajs 57783.65  0.032655 0.000007     0.03395   0.00001        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS17ajs.txt
+ ATLAS17axb 57797.08  0.031652 0.000102     0.03131   0.00010        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS17axb.txt
+ ATLAS17bas 57813.63  0.022220 0.000010     0.02278   0.00001        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_ATLAS17bas.txt
+  Gaia16acv 57435.35  0.077720 0.000099     0.07834   0.00010         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_Gaia16acv.txt
+  Gaia16aki 57492.30  0.073632 0.000007     0.07386   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_Gaia16aki.txt
+  Gaia16bba 57624.98  0.030458 0.000086     0.02979   0.00009         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_Gaia16bba.txt
+MASTERJ0134 57666.61  0.044846 0.000040     0.04339   0.00004       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_MASTERJ0134.txt
+    PS15ahs 57156.67  0.025513 0.000041     0.02529   0.00004           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15ahs.txt
+    PS15aii 57159.46  0.046549 0.000009     0.04758   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15aii.txt
+    PS15atx 57192.73  0.071881 0.000268     0.07310   0.00027           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15atx.txt
+    PS15bbn 57212.59  0.037100 0.000120     0.03602   0.00012           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bbn.txt
+    PS15bdr 57215.91  0.070960 0.000014     0.07130   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bdr.txt
+    PS15bif 57233.91  0.079370 0.000265     0.07829   0.00027           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bif.txt
+    PS15bjg 57239.09  0.068888 0.000012     0.06766   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bjg.txt
+    PS15brr 57260.05  0.051804 0.000089     0.05053   0.00009           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15brr.txt
+    PS15bsq 57263.22  0.034304 0.000017     0.03405   0.00002           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bsq.txt
+    PS15bzz 57285.18  0.080240 0.000010     0.07948   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15bzz.txt
+    PS15cku 57320.35  0.023273 0.000070     0.02327   0.00007           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15cku.txt
+    PS15cms 57326.54  0.064790 0.000027     0.06638   0.00003           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15cms.txt
+    PS15coh 57329.62  0.018837 0.000070     0.01858   0.00007           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15coh.txt
+    PS15cwx 57348.09  0.030065 0.000109     0.03099   0.00011           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15cwx.txt
+    PS15cze 57365.04  0.039371 0.000021     0.04086   0.00002           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15cze.txt
+     PS15mt 57105.30  0.070850 0.000088     0.07140   0.00009            training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS15mt.txt
+    PS16aer 57434.70  0.055467 0.000013     0.05717   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16aer.txt
+    PS16axi 57461.38  0.039299 0.000011     0.04002   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16axi.txt
+    PS16ayd 57461.21  0.053997 0.000011     0.05471   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16ayd.txt
+    PS16bby 57467.15  0.053427 0.000083     0.05522   0.00008           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16bby.txt
+    PS16bnz 57487.63  0.062700 0.000213     0.06434   0.00021           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16bnz.txt
+    PS16ccn 57508.81  0.024310 0.000160     0.02457   0.00016           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16ccn.txt
+    PS16cqa 57542.74  0.043857 0.000013     0.04540   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16cqa.txt
+    PS16cvc 57565.19  0.029540 0.000090     0.02961   0.00009           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16cvc.txt
+    PS16dnp 57599.32  0.051273 0.000031     0.05013   0.00003           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16dnp.txt
+     PS16el 57394.86  0.047806 0.000010     0.04947   0.00001            training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16el.txt
+     PS16em 57387.10  0.069815 0.000173     0.07097   0.00017            training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16em.txt
+    PS16evk 57697.26  0.054468 0.000014     0.05271   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16evk.txt
+     PS16fa 57400.38  0.046110 0.000010     0.04705   0.00001            training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16fa.txt
+    PS16fbb 57720.48  0.052500 0.000100     0.05122   0.00010           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16fbb.txt
+      PS16n 57391.97  0.052727 0.000022     0.05321   0.00002             training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS16n.txt
+    PS17akj 57799.30  0.046808 0.000006     0.04789   0.00001           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS17akj.txt
+    PS17bii 57812.29  0.073391 0.000017     0.07421   0.00002           training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS17bii.txt
+     PS17tn 57785.60  0.044704 0.000011     0.04618   0.00001            training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PS17tn.txt
+PSNJ0107203 57351.97  0.017005 0.000039     0.01736   0.00004       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ0107203.txt
+PSNJ0153424 57394.16  0.025647 0.000007     0.02557   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ0153424.txt
+PSNJ0252467 57289.95  0.028086 0.000028     0.02803   0.00003       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ0252467.txt
+PSNJ0859349 57098.88  0.028120 0.000014     0.02918   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ0859349.txt
+PSNJ1204051 57169.96  0.043851 0.000014     0.04539   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ1204051.txt
+PSNJ1602512 57171.82  0.020254 0.000127     0.02030   0.00013       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ1602512.txt
+PSNJ2352371 57286.08  0.026482 0.000008     0.02602   0.00001       training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PSNJ2352371.txt
+ PTSS-16efw 57509.05  0.035573 0.000023     0.03577   0.00002        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PTSS-16efw.txt
+ PTSS17-niq 57842.95  0.068280 0.000014     0.06919   0.00001        training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_PTSS17-niq.txt
+  SN2016aqb 57450.65  0.062894 0.000040     0.06392   0.00004         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016aqb.txt
+  SN2016ayg 57467.59  0.042690 0.000120     0.04340   0.00012         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016ayg.txt
+  SN2016esh 57612.82  0.044573 0.000026     0.04586   0.00003         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016esh.txt
+  SN2016gfr 57656.77  0.016693 0.000120     0.01692   0.00012         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016gfr.txt
+  SN2016gmb 57657.50  0.058269 0.000080     0.05867   0.00008         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016gmb.txt
+  SN2016hhv 57694.00  0.061940 0.000140     0.06119   0.00014         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016hhv.txt
+  SN2016hpx 57703.29  0.033375 0.000465     0.03242   0.00046         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016hpx.txt
+  SN2016ixf 57743.94  0.066020 0.000110     0.06709   0.00011         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2016ixf.txt
+  SN2017cii 57836.79  0.033238 0.000007     0.03275   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017cii.txt
+  SN2017ciy 57842.59  0.037655 0.001050     0.03843   0.00105         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017ciy.txt
+  SN2017cjv 57840.73  0.059528 0.000140     0.06076   0.00014         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017cjv.txt
+  SN2017ckx 57846.66  0.027158 0.000005     0.02820   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017ckx.txt
+  SN2017coa 57848.40  0.040000 0.003000     0.04092   0.00300         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017coa.txt
+  SN2017cpu 57848.00  0.054405 0.000010     0.05499   0.00001         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017cpu.txt
+   SN2017hn 57767.98  0.023850 0.000008     0.02507   0.00001          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017hn.txt
+   SN2017jl 57784.93  0.016331 0.000444     0.01592   0.00044          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017jl.txt
+   SN2017mf 57778.09  0.025612 0.000009     0.02577   0.00001          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017mf.txt
+   SN2017ms 57781.99  0.024483 0.000008     0.02560   0.00001          training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_SN2017ms.txt
+  iPTF16auf 57537.37  0.015018 0.000005     0.01532   0.00000         training_data/Foundation_DR1/Foundation_DR1/Foundation_DR1_iPTF16auf.txt

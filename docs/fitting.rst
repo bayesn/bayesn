@@ -6,7 +6,7 @@ Light curve fits within Python/Jupyter
 If you have a large data set which you want to use for training, or if you want to fit a large sample of light curves,
 you should follow the instructions on :ref:`running_bayesn`. However, often that won't be the case; you may well just have
 a small selection of light curves that you'd like to fit and plot. For those cases, BayeSN includes methods
-designed for use within your own Jupyter notebooks/Python scrips.
+designed for use within your own Jupyter notebooks/Python scripts.
 
 The notebook `example_fits.ipynb` that is included on the Github repo for BayeSN
 `here <https://github.com/bayesn/bayesn>`_ provides examples of how to use this functionality. Much of this
@@ -39,7 +39,7 @@ object, the filter names are just griz, this map will ensure that Pan-STARRS 1 f
 ``fit_from_file`` is looking for particular keys in an SNANA file. Most of those are fairly standard but depending on your
 file you may want to use different keys for peak MJD (this is only a rough guess, BayeSN will fit for time of maximum).
 By default, the code will look for the key 'SEARCH_PEAKMJD', but you can change this with the optional kwarg
-``peak_mjd_key``.
+``peakmjd_key``.
 
 Fitting more general data formats
 ----------------------------------------
@@ -68,8 +68,8 @@ Both ``model.fit()`` and ``model.fit_from_file()`` allow you to fit light curves
 If you use the kwarg ``fix_tmax=True``, tmax will not be inferred and will instead be fixed to the peak MJD you
 specified/present in the input file, or if you already have rest-frame phases will just be fixed to zero.
 
-If you want to fix either theta or AV, you can do this by setting the optional kwargs ``fit_theta`` and ``fix_AV`` to
-the value you want these parameters fixed to e.g. if you use ``fit_theta=1``, theta will be fixed to 1 for your fits.
+If you want to fix either theta or AV, you can do this by setting the optional kwargs ``fix_theta`` and ``fix_AV`` to
+the value you want these parameters fixed to e.g. if you use ``fix_theta=1``, theta will be fixed to 1 for your fits.
 
 Testing different dust parameters
 ---------------------------------------

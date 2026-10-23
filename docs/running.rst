@@ -20,40 +20,89 @@ The ``input.yaml`` therefore underpins this code. Examples and explanations of a
 Specifying input to BayeSN
 ---------------------------------
 
-The keys which can be specified are described below. Depending on whether you are training or fitting, different keys will be required:
+The keys which can be specified are described below. Depending on your use case, different keys will be required:
 
-- ``outputdir``: The directory in which to save the output. If not specified, output files will be saved in current directory. This directory will be created if it does not already exist.
-- ``mode``: The BayeSN mode to use, specifies what you want to do. Options are:
+- ``load_model``: The existing BayeSN model to use if you are fitting or only doing dust inference. You can either specify one of the built-in models (one of 'G26_model', 'G25_model', 'W22_model', 'T21_model' or 'M20_model') or use a path to a model you have trained yourself (defined by a bayesn.yaml file).
+- ``load_ext_rel``: The existing dust extinction relation to use. You can either specify one of the built-in relations (one of 'CCM89', 'C94', 'O94', 'F99', 'F99_AVGLMC', 'F99_LMC2', 'F99_SNANA', 'C00', 'F04', 'VCG04', 'GCC09', 'M14', 'F19', 'D22', or 'G23') or use a path to an extinction relation you have trained yourself (defined by a bayesn.yaml file).
+- ``train_new_model``: Boolean specifying whether ``W0``, ``W1``, and ``L_Sigma`` should be sampled or taken from the loaded model.
+- ``infer_dust_properties``: Boolean specifying whether ``sigma0``, ``tauA`` should be sampled or taken from the loaded model. If ``RV='normal'``, also affects ``mu_R`` and ``sigma_R``. If ``vary_redshift=True``, also affects ``tau_z_grad`` and ``mu_z_grad``.
+- ``shared_RV``: Boolean specifying whether a single RV should be shared across all SNe or whether RVs should be sampled for each SN. Defaults to True.
+- ``RV``: Indicates how RV values should be sampled (if at all). Defaults to 'default'. Options are:
 
-  - 'training_singleRV': Train a model with a single RV values across the population.
-  - 'training_popRV': Train a model with a truncated Gaussian RV population distribution.
-  - 'fitting': Fit using fixed global parameters previously inferred during model training. The code will figure out whether the model assumes a fixed RV or population RV based on the bayesn.yaml which defines the model you use to fit.
-  - 'dust': Infer dust properties while keeping SN population parameters fixed based on previously inferred model, as explored in Grayling+2024.
-  - 'dust_split_mag': Infer dust properties separately in different mass bins split at 10^10 solar masses, allowing for an intrinsic magnitude offset between the bins, as explored in Grayling+2024.
-  - 'dust_split_sed': Infer dust properties separately in different mass bins split at 10^10 solar masses, allowing for a difference in baseline intrinsic SED, as explored in Grayling+2024.
-- ``load_model``: The existing BayeSN to use if you are fitting or only doing dust inference. You can either specify one of the built-in models (one of 'G26_model', 'G25_model', 'W22_model', 'T21_model' or 'M20_model') or use a path to a model you have trained yourself (defined by a bayesn.yaml file).
+  - 'default': All SNe will share a single RV, even if ``shared_RV=False``. This number comes from either ``SEDmodel.RV`` or ``SEDmodel.mu_R`` depending on how the model was trained.
+  - Number: All SNe will use the provided Number as RV, even if ``shared_RV=False``.
+  - 'normal': RV(s) will be sampled from a normal distribution centred at ``mu_R`` with scales ``sigma_R``, which may provided as inputs or sampled.
+  - 'uniform': RV(s) will be sampled from a uniform distribution between ``uniform_RV_min`` and ``uniform_RV_max``, which will take default values if not provided.
+
+- ``num_chains``: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.
 - ``num_warmup``: The number of warmup steps for HMC. Typically 500 is sufficient for training and 250 for fitting for convergence, but you may need to increase this.
 - ``num_samples``: The number of posterior samples to take. Again, typically in development 500 was used when training and 250 when fitting, but you may want to experiment with this to achieve sufficient convergence.
-- ``num_chains``: The number of MCMC chains to run. Using HMC, it is recommended to use at least 4 chains to assess model convergence.
-- ``filters``: Path to a yaml file describing the filters you want to use, if you require custom filters. For more details, please see :ref:`filters`.
-- ``fit_method``: The inference method to use for light curve fitting, only used if fitting. Options are 'mcmc', for doing HMC using the NUTS algorithm, or 'vi' for using variational inference as presented in Uzsoy+2024, defaults to 'mcmc'. Variational inference makes an approximation to the shape of the posterior but is faster than MCMC, ideal for fitting large samples.
+- ``fit_method``: The inference method to use for light curve fitting, only used if fitting. Options are 'mcmc', for doing HMC using the NUTS algorithm, or 'vi' for using variational inference as presented in Uzsoy+2024, which makes an approximation to the shape of the posterior but is faster than MCMC and is ideal for fitting large samples. Defaults to 'mcmc'.
 - ``chain_method``: The method to use for running multiple chains in numpyro. If 'sequential', chains will be run one-after-the-other until all are complete. If 'parallel', the chains will be run in parallel over multiple devices - with 4 chains and a node with 4 GPUs, the chains will be run simultaneously in parallel. If 'vectorized', chains will be run in parallel on a single device which may or may not be quicker than running them sequentially depending on the device you are using, and may result in memory issues unless you are using a large GPU.
-- ``initialisation``: The strategy used to initialise the HMC chains. Must be one of:
-
-  - 'median': Initialise chains to the prior media with some additonal scatter between chains applied by numpyro.
-  - 'sample': Initialise chains to random samples from the priors.
-  - Alternatively, when training the model you can pass either the name of a built-in model or the path to a custom model (as for ``load_model`` above). This will initialise some global parameters to those of the that BayeSN model, specifically W0 and W1. This is useful just to stop these complex, multidimensional parameters starting in a very bad region of parameter space. Other parameters are random samples from the priors. If using different wavelength knots to the specified model, the initial values for W0 and W1 matrices will be determined by cubic spline interpolation of the originals if within the wavelength range covered by T21, and initialised to 0 otherwise.
-- ``l_knots``: The wavelength knot locations for the 2d cubic spline surfaces that define the BayeSN model. These only need to be specified when training, as they are already specified in the model definition when fitting or doing dust inference.
-- ``tau_knots``: The rest-frame phase knot locations for the 2d cubic spline surfaces that define the BayeSN model. These only need to be specified when training, as they are already specified in the model definition when fitting or dust inference.
+- ``filters``: Path to a yaml file describing the filters you want to use, if you require custom filters. For more details, please see :ref:`filters`.
 - ``map``: A set of ``key: value`` pairs specifying a mapping between filter names. You will want to use this if the filter names in the data files you are using do not match the names in your `filters.yaml` file (see below). For example, if your data files use the filter names _griz_ and you want ensure that you use DES filters you can set ``map: {g: g_DES, r: r_DES, i: i_DES, z: z_DES}``, and just make sure that the filter names _g_DES_ etc. are in your ``filters.yaml`` file. If the filter names in your data files already match those in ``filters.yaml``, this is not required.
-- ``data_table``: The path to a table providing paths to data files and metadata for each SN - see below for the required format. This should be used **only** if working with real data, as if you are using an SNANA simulation we can expect all files to be located in the same folder and be confident about the information contained in the headers - in this case, use the ``data_dir`` key instead.
-- ``data_root``: A root directory which will be pre-pended to all file paths in data_table, as well as the location of data_table itself. Not required if using ``data_dir``, only for ``data_table``.
+- ``data_table``: The path to a table providing paths to data files and metadata for each SN - see below for the required format. This should be used **only** if working with real data, as if you are using an SNANA simulation we can expect all files to be located in the same folder and be confident about the information contained in the headers - in this case, use the ``version_photometry`` key instead.
+- ``data_root``: A root directory which will be pre-pended to all file paths in data_table, as well as the location of data_table itself. Not required if using ``version_photometry``, only for ``data_table``.
 - ``version_photometry``: The path to an SNANA input directory. Use this if you are running on NERSC Perlmutter and want to use an SNANA input directory. The code will look for a directory with this name in typical public directories within SNDATA_ROOT, or optionally private directories if you specify them using the argument ``private_data_path`` below. Otherwise, use a combination of ``data_table`` and ``data_root`` instead.
 - ``private_data_path``: If you are using NERSC Perlmutter and wish to use a directory located in a private location, add a path to the location where your directory sits and it will be added to the default list of locations ``version_photometry`` searches for.
-- ``drop_bands``: A list of bands which are present in the data files that you are using which you do not wish to include in the analysis, optional.
+- ``data_type``: Either 'flux' or 'mag', indicating whether the input photometric data are in flux units or magnitudes. Defaults to 'flux'.
 - ``save_fit_errors``: Boolean to specify if you want to save model fit errors in the produced LCPLOT table, only relevant when fitting. This will add a bit of computation time as it will involve calculating model photometry for each step along the chains for all SNe fitted. If False, only the light curve corresponding to the posterior mean of each parameter will be saved in the LCPLOT file; if True, the mean and standard deviation of model photometry across all posterior samples will be saved. Defaults to False.
+- ``outputdir``: The directory in which to save the output. If not specified, output files will be saved in current directory. This directory will be created if it does not already exist.
+- ``outfile_prefix``: A string prefix to prepend to all output files (e.g. ``output.LCPLOT``, ``output.FITRES.TEXT``). Defaults to 'output'.
 
-There are a few extra keys present in the code not yet documented here, which are specific for usage within SNANA.
+Finer Control with Additional Inputs
+------------------------------------
+
+For semi-completeness, seldom used inputs are described here. Most users can safely ignore this section.
+There are a few keys present in the code that are not documented here. These are specific for usage within SNANA or for fitting with variational inference.
+
+- ``initialisation``: The strategy used to initialise the HMC chains. Must be one of:
+
+  - 'median': Initialise chains to the prior median with some additional scatter between chains applied by numpyro.
+  - 'sample': Initialise chains to random samples from the priors.
+  - Alternatively, when training the model you can pass either the name of a built-in model or the path to a custom model (as for ``load_model`` above). This will initialise some global parameters to those of that BayeSN model, specifically W0 and W1. This is useful just to stop these complex, multidimensional parameters starting in a very bad region of parameter space. Other parameters are random samples from the priors. If using different wavelength knots to the specified model, the initial values for W0 and W1 matrices will be determined by cubic spline interpolation of the originals if within the wavelength range covered by T21, and initialised to 0 otherwise.
+- ``split_variant``: If not None, then must be either 'split_mag' or 'split_sed'. 'split_mag' will divide SNe by host-galaxy stellar mass and sample independent ``M0`` values for the two populations, replicating a 'mass step'. 'split_sed' will divide SNe the same way, but sample independent ``W0`` values which parameterizes magnitude differences as a function of phase and wavelength. Either non-None value will sample independent dust properties in each population. Defaults to None.
+- ``M_split``: The log10(stellar mass [solar mass])) dividing SNe into low-mass and high-mass populations if ``split_variant`` is 'split_mag' or 'split_sed'.
+- ``vary_redshift``: If True and ``infer_dust_properties=True``, sample ``tau_z_grad`` and ``mu_z_grad`` and formulate any SN's ``tauA`` (``mu_R``) as ``tauA + tau_z_grad*z`` (``mu_R + mu_z_grad*z``).
+- ``tau_z_min``: The lower limit of the uniform distribution for ``tau_z_grad``.
+- ``tau_z_max``: The upper limit of the uniform distribution for ``tau_z_grad``.
+- ``vary_filter_shifts``: If True, infer filter wavelength calibration shifts (in Angstroms) for each bandpass (as introduced in Grayling+2026). Defaults to False.
+- ``vary_offsets``: If True, infer zero-point magnitude calibration shifts for each bandpass (as introduced in Grayling+2026). Defaults to False.
+- ``photoz``: If True, sample each SN's redshift using photometric redshift priors (Gaussian uncertainties or quantiles). Defaults to False.
+- ``error_floor``: A lower limit for magnitude uncertainties (in mag units regardless of ``data_type``). The equivalent flux uncertainty is computed and applied. Defaults to 0.0.
+- ``batch_size``: An integer limit on the number of SNe processed simultaneously to manage GPU memory usage during light curve fitting. Defaults to None (all in a single batch).
+- ``save_summary``: If True, saves an ArviZ summary table to ``{outfile_prefix}.SUMMARY.TEXT`` during postprocessing and records ``MEANRHAT`` and ``MAXRHAT`` in the fitres table. Defaults to False.
+- ``jobsplit``: A 2-tuple ``[jobid, njobtot]`` specifying a job number and total jobs to partition and selectively process a fraction of a dataset across batch jobs. Defaults to None.
+- ``zlim``: Upper redshift limit; SNe with heliocentric redshift >= ``zlim`` will not be loaded. Defaults to 99.0.
+- ``peakmjd_key``: Key in the SN data files identifying the estimated peak MJD. Defaults to 'PEAKMJD'.
+- ``l_knots``: The wavelength knot locations for the 2D cubic spline surfaces that define the BayeSN model. These only need to be specified when ``train_new_model=True``, as they are otherwise specified in the model definition.
+- ``tau_knots``: The rest-frame phase knot locations for the 2D cubic spline surfaces that define the BayeSN model. These only need to be specified when ``train_new_model=True``, as they are otherwise specified in the model definition.
+- ``fix_tmax``: If False, each SN's time of maximum will be sampled from a uniform distribution between 10 days before and 10 days after the ``peak_mjd`` in the data. If True, treat the ``peak_mjd`` values as the times of maxima.
+- ``fix_eps``: If False, each SN's residual term spline knots (epsilon) will be sampled from a multivariate normal distribution centred at 0 with covariance matrix ``L_Sigma`` (which may itself be sampled). If True, treat all epsilon terms as 0 at all knots.
+- ``fix_AV``: If None, samples AV for each SN. If a Number, uses that value for all SNe.
+- ``fix_theta``: If None, samples theta for each SN. If a Number, uses that value for all SNe.
+- ``mu_R``: The centre of the normal distribution for RV(s) when ``RV='normal'`` and ``infer_dust_properties=False``. If 'default', uses either ``SEDmodel.RV`` or ``SEDmodel.mu_R``, depending on how the model was trained.
+- ``sigma_R``: The standard deviation of the normal distribution for RV(s) when ``RV='normal'`` and ``infer_dust_properties=False``. If 'default', uses ``SEDmodel.sigma_R`` if the model was trained with ``shared_RV=False`` or 0.5.
+- ``uniform_RV_min``: The lower limit of the uniform distribution for RV(s) when ``RV='uniform'``. Defaults to 1.
+- ``uniform_RV_max``: The upper limit of the uniform distribution for RV(s) when ``RV='uniform'``. Defaults to 6.
+- ``mu_R_min``: The lower limit of the uniform distribution for ``mu_R`` when ``RV='normal'`` and ``infer_dust_properties=True``. Defaults to 1.2.
+- ``mu_R_max``: The upper limit of the uniform distribution for ``mu_R`` when ``RV='normal'`` and ``infer_dust_properties=True``. Defaults to 6.
+- ``sigma_sigma_R``: The scale factor of the Half-Normal distribution for ``sigma_R`` when ``RV='normal'`` and ``infer_dust_properties=True``. Defaults to 2.
+- ``muhat_err``: Part of the uncertainty in the redshift-based luminosity distance modulus used as a prior for the inferred distance modulus. If None, ``muhat_err`` is calculated from the redshift uncertainty. If a number, that value is assumed. In both cases, the total error is the quadrature sum of ``muhat_err`` and a peculiar velocity uncertainty. Defaults to None.
+- ``fix_dist_limit``: Replaces the quadrature sum of ``muhat_err`` and a peculiar velocity uncertainty with ``fix_dist_Ds_err`` for SNe with redshifts above ``fix_dist_limit``. Useful when training a model using data covering a large redshift range, where cosmological effects can mimic population drift in ``M0`` or ``W0``. Defaults to 0.08.
+- ``fix_dist_Ds_err``: The large uncertainty assigned to SNe at redshifts beyond ``fix_dist_limit``. Defaults to 5.
+- ``keep_list``: A list of SN names which are present in the data files that you are using which you wish to keep in the analysis. If None, include everything.
+- ``drop_bands``: A list of bands which are present in the data files that you are using which you do not wish to include in the analysis, optional.
+- ``lc_cuts``: A dictionary with keys matching SNe metadata names and values of 2-tuples, defining the lower and upper limits beyond which SNe will be cut. As an example, ``lc_cuts={'mwebv': (0, 0.3)}`` will identify and remove all SNe with MW E(B-V) values greater than 0.3 before sampling.
+- ``mode``: A legacy term included for backwards compatibility. Used to influence BayeSN behavior by specifying other inputs. Supported options are:
+
+  - 'training_globalRv': Train a model with a single RV value across the population. Sets ``train_new_model=True``, ``infer_dust_properties=True``, ``shared_RV=True``, ``RV='uniform'``, ``data_type='mag'``, ``uniform_RV_min=1``, ``uniform_RV_max=5``, and ``fix_tmax=True``. ('training_singleRV' is also accepted for backwards compatibility).
+  - 'training_popRV': Train a model with a truncated Gaussian RV population distribution. Sets ``train_new_model=True``, ``infer_dust_properties=True``, ``shared_RV=False``, ``RV='normal'``, ``data_type='mag'``, ``mu_R_min=1``, ``mu_R_max=5``, ``sigma_sigma_R=2``, and ``fix_tmax=True``.
+  - 'fitting': Fit using fixed global parameters previously inferred during model training. Sets ``train_new_model=False``, ``infer_dust_properties=False``, ``RV='default'``, ``data_type='flux'``, and ``muhat_err=5``.
+  - 'dust': Infer dust properties while keeping SN population parameters fixed based on previously inferred model, as explored in Grayling+2024. Sets ``train_new_model=False``, ``infer_dust_properties=True``, ``shared_RV=False``, ``RV='normal'``, ``data_type='flux'``, ``mu_R_min=1.2``, ``mu_R_max=6``, ``sigma_sigma_R=2``, and ``fix_tmax=True``.
+  - 'dust_split_mag': Infer dust properties separately in different mass bins, allowing for an intrinsic magnitude offset between the bins, as explored in Grayling+2024. Sets ``train_new_model=False``, ``infer_dust_properties=True``, ``split_variant='split_mag'``, ``M_split=10``, ``shared_RV=False``, ``RV='normal'``, ``data_type='flux'``, ``mu_R_min=1.2``, ``mu_R_max=6``, ``sigma_sigma_R=2``, and ``fix_tmax=True``.
+  - 'dust_split_sed': Infer dust properties separately in different mass bins, allowing for a difference in baseline intrinsic SED, as explored in Grayling+2024. Sets ``train_new_model=False``, ``infer_dust_properties=True``, ``split_variant='split_sed'``, ``M_split=10``, ``shared_RV=False``, ``RV='normal'``, ``data_type='flux'``, ``mu_R_min=1.2``, ``mu_R_max=6``, ``sigma_sigma_R=2``, and ``fix_tmax=True``.
+
 
 You can see an example of input.yaml files for training and fitting below.
 
@@ -67,18 +116,27 @@ This example demonstrates the input.yaml that could be used to train the BayeSN 
 
 .. code-block:: yaml
 
-    mode: training
+    load_ext_rel: F99
+    train_new_model: True
+    infer_dust_properties: True
+    shared_RV: True
+    RV: uniform
+    uniform_RV_min: 1
+    uniform_RV_max: 5
+    initialisation: T21
     num_chains: 4
     num_warmup: 500
     num_samples: 500
-    chain_method: parallel
-    initialisation: T21
+    map: {g: g_PS1, r: r_PS1, i: i_PS1, z: z_PS1}
     l_knots: [3500.0, 4900.0, 6200.0, 7700.0, 8700.0, 9500.0]
     tau_knots: [-10.0, 0.0, 10.0, 20.0, 30.0, 40.0]
-    map: {g: g_PS1, r: r_PS1, i: i_PS1, z: z_PS1}
     data_root: /PATH/TO/DATA/ROOT
-    input_table: T21_training_set.txt
+    data_table: T21_training_set.txt
     outputdir: /PATH/TO/OUTPUT/DIR
+    apply_dovekie_mag_shifts: False
+    data_type: mag
+    fix_dist_limit: 0.1  # to avoid affecting a SN at z>0.0805
+    fix_tmax: True
 
 
 Fitting example
@@ -90,13 +148,11 @@ for the fitting.
 
 .. code-block:: yaml
 
-    mode: fitting
     load_model: /PATH/TO/CUSTOM/bayesn.yaml
     num_chains: 4
     num_warmup: 250
     num_samples: 250
     filters: /PATH/TO/custom_filters.yaml
-    chain_method: parallel
     fit_method: vi
     initialisation: median
     version_photometry: NAME_OF_SNANA_SIMULATION
@@ -105,8 +161,8 @@ for the fitting.
 Specifying data to use
 -------------------------------
 
-As discussed above, if you are an SNANA input directory with SNDATA_ROOT on NERSC Perlmutter as input you need only pass
-the name of the directory to the ``version_photometry`` key in the input file. However, you want to have more control
+As discussed above, if you are using an SNANA input directory with SNDATA_ROOT on NERSC Perlmutter as input you need only pass
+the name of the directory to the ``version_photometry`` key in the input file. However, if you want to have more control
 over the input data e.g. you may want to use data spanning multiple surveys which means you won't necessarily be able to
 point to a single directory, you should use the keys ``data_table`` and ``data_root`` in the input. ``data_table``
 should contain file paths to the data for each SN as well as associated metadata for the SN, with the following structure:

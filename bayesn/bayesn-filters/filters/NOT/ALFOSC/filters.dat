@@ -1,0 +1,14 @@
+Unot ALFOSC_U_Bes_362_60_7.dat 18.5079 NOT ALFOSC U-band
+Bnot ALFOSC_B_Bes_440_100_74.dat 19.9290 NOT ALFOSC B-band
+Vnot ALFOSC_V_Bes_530_80_75.dat 19.7210 NOT ALFOSC V-band
+Rnot ALFOSC_R_Bes_650_130_76.dat 19.6851 NOT ALFOSC R-band
+Inot ALFOSC_i_int_797_157_12.dat 19.5085 NOT ALFOSC I_int-band
+Unat not_u_al_mod_lambda.dat 5.0324 NOT ALFOSC effective U-band
+Bnat not_b_al_mod_lambda.dat 6.2063 NOT ALFOSC effective B-band
+Vnat not_v_al_lambda.dat 5.5858 NOT  ALFOSC effective V-band
+Rnat not_r_al_lambda.dat 5.3809 NOT ALFOSC effective R-band
+Inat not_i_al_lambda.dat 4.6809 NOT ALFOSC effective I_int-band
+gnot sdss_g.dat 14.2013159905 sloan g at NOT ALFOSC
+rnot sdss_r.dat 14.2156544329 sloan r at NOT ALFOSC
+inot sdss_i.dat 13.7775438954 sloan i at NOT ALFOSC
+znot sdss_z.dat 11.8525822106 sloan z at NOT ALFOSC

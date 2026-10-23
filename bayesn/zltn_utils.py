@@ -1,23 +1,25 @@
+from collections.abc import Callable
 import numpyro
+from numpyro.util import is_prng_key
 from numpyro.infer.autoguide import AutoContinuous
 from numpyro.distributions import constraints
 from numpyro.infer.initialization import init_to_median
 from numpyro.distributions.distribution import Distribution
-from numpyro.distributions.continuous import MultivariateNormal
+from numpyro.distributions.continuous import Normal, MultivariateNormal
 from numpyro.distributions.truncated import TruncatedNormal
 from numpyro.distributions.constraints import _SingletonConstraint
 from numpyro.distributions.transforms import biject_to, IdentityTransform, LowerCholeskyAffine
+from jax import Array, lax
 import jax.numpy as jnp
-from numpyro.distributions.util import is_prng_key, promote_shapes, validate_sample
-from jax import lax
 from jax.random import normal, exponential
+from jax.typing import ArrayLike
+from numpyro.distributions.util import promote_shapes, validate_sample
 
 
 class _FirstPositive(_SingletonConstraint):
     event_dim = 1
 
     def __call__(self, x):
-        print("Constraint is being called")
         return (x[0] >= 0)
 
     def feasible_like(self, prototype):
@@ -33,6 +35,12 @@ def _transform_to_real(constraint):
 
 
 class MultiZLTN(Distribution):
+    """
+    Multivariate Zero-Lower-Truncated Normal (MultiZLTN) distribution.
+
+    A multivariate normal distribution truncated such that its first element is
+    constrained to be strictly non-negative (x[0] >= 0).
+    """
     arg_constraints = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
@@ -51,26 +59,40 @@ class MultiZLTN(Distribution):
         return firstpositive
 
     def __init__(
-            self,
-            loc=0.0,
-            covariance_matrix=None,
-            precision_matrix=None,
-            scale_tril=None,
-            validate_args=None,
-    ):
+        self,
+        loc: ArrayLike = 0.0,
+        covariance_matrix: ArrayLike | None = None,
+        precision_matrix: ArrayLike | None = None,
+        scale_tril: ArrayLike | None = None,
+        validate_args: bool | None = None,
+    ) -> None:
+        """
+        Initialise a MultiZLTN distribution.
+
+        Parameters
+        ----------
+        loc : (D,) or scalar
+            Mean location of the unconstrained multivariate normal.
+        covariance_matrix : (D, D)
+            Positive-definite covariance matrix.
+        precision_matrix : (D, D)
+            Positive-definite precision matrix.
+        scale_tril : (D, D)
+            Lower-cholesky factor of the covariance matrix.
+        validate_args
+            Whether to validate distribution arguments.
+        """
         if jnp.ndim(loc) == 0:
             (loc,) = promote_shapes(loc, shape=(1,))
-        # temporary append a new axis to loc
         loc = loc[..., jnp.newaxis]
         if covariance_matrix is not None:
             loc, self.covariance_matrix = promote_shapes(loc, covariance_matrix)
             self.scale_tril = jnp.linalg.cholesky(self.covariance_matrix)
         elif precision_matrix is not None:
             loc, self.precision_matrix = promote_shapes(loc, precision_matrix)
-            self.scale_tril = cholesky_of_inverse(self.precision_matrix)
+            self.scale_tril = jnp.linalg.cholesky(jnp.linalg.inv(self.precision_matrix))
         elif scale_tril is not None:
             loc, self.scale_tril = promote_shapes(loc, scale_tril)
-            self.covariance_matrix = jnp.matmul(self.scale_tril, self.scale_tril.T)
         else:
             raise ValueError(
                 "One of `covariance_matrix`, `precision_matrix`, `scale_tril`"
@@ -80,76 +102,89 @@ class MultiZLTN(Distribution):
             jnp.shape(loc)[:-2], jnp.shape(self.scale_tril)[:-2]
         )
         event_shape = jnp.shape(self.scale_tril)[-1:]
-        # self.loc = loc[..., 0]
         self.mu = loc
         self.mu_1 = self.mu[0]
-        # print("Distribution mean:", self.mu_1)
         self.mu_2 = jnp.squeeze(self.mu[1:])
-        # print("input mu 2", self.mu_2)
 
-        self.sigma = self.covariance_matrix
-        self.sigma_11 = self.sigma[0][0]
-        self.sigma_22 = self.sigma[1:, 1:]
-        self.sigma_21 = self.sigma[1:, :1]
-        self.sigma_12 = self.sigma[:1, 1:]
+        L = self.scale_tril
+        self.sigma_11 = L[0, 0] * L[0, 0]
+        self.sigma_21 = L[1:, 0:1] * L[0, 0]
+        self.sigma_12 = self.sigma_21.T
+        self.sigma_22 = jnp.matmul(L[1:, :], L[1:, :].T)
+
+        self._sigma_11_inv = 1.0 / self.sigma_11
+        self._sigma_hat = (
+            self.sigma_22
+            - jnp.matmul(self.sigma_21 * self._sigma_11_inv, self.sigma_12)
+            + 1.0e-9 * jnp.eye(event_shape[0] - 1)
+        )
+        self._chol_sigma_hat = jnp.linalg.cholesky(self._sigma_hat)
 
         self.zltn_dist = TruncatedNormal(self.mu_1, self.scale_tril[0][0], low=0.)
-        # print("batch shape: ", batch_shape)
         super(MultiZLTN, self).__init__(
             batch_shape=batch_shape,
             event_shape=event_shape,
             validate_args=validate_args,
         )
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
+        """
+        Generate random samples from the MultiZLTN distribution.
+
+        Parameters
+        ----------
+        key
+            JAX PRNG key.
+        sample_shape
+            Shape of the sample batch to draw.
+
+        Returns
+        -------
+        (\\*sample_shape, D)
+            D-dimensional samples with the first coordinate >= 0.
+        """
         assert is_prng_key(key)
-
         first_samples = self.zltn_dist.sample(key, sample_shape)
-        sigma_11_inverse = 1. / self.sigma_11
-
         if sample_shape == ():
-            mu_hat = self.mu_2 + jnp.matmul(self.sigma_21, ((1.0 / self.sigma_11) * (first_samples - self.mu_1)).T)
-            sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-            sigma_hat += 1.e-9 * jnp.eye(self.event_shape[0] - 1)
-
-            eps = normal(
-                key, shape=sample_shape + self.batch_shape + (self.event_shape[0] - 1,)
-            )
-            second_samples = mu_hat.T + jnp.squeeze(
-                jnp.matmul(jnp.linalg.cholesky(sigma_hat), eps[..., jnp.newaxis]), axis=-1
-            )
-            return jnp.concatenate((first_samples, second_samples), axis=0)
-
-        mu_hat = self.mu_2[:, None] + jnp.matmul(self.sigma_21, ((1.0 / self.sigma_11) * (first_samples - self.mu_1)).T)
-        # print("mu hat", mu_hat)
-        sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-        sigma_hat += 1.e-9 * jnp.eye(self.event_shape[0] - 1)
-
+            mu_2_b = self.mu_2
+            concat_axis = 0
+        else:
+            mu_2_b = self.mu_2[:, None]
+            concat_axis = 1
+        mu_hat = mu_2_b + jnp.matmul(
+            self.sigma_21,
+            (self._sigma_11_inv * (first_samples - self.mu_1)).T,
+        )
         eps = normal(
             key, shape=sample_shape + self.batch_shape + (self.event_shape[0] - 1,)
         )
         second_samples = mu_hat.T + jnp.squeeze(
-            jnp.matmul(jnp.linalg.cholesky(sigma_hat), eps[..., jnp.newaxis]), axis=-1
+            jnp.matmul(self._chol_sigma_hat, eps[..., jnp.newaxis]), axis=-1
         )
-        return jnp.concatenate((first_samples, second_samples), axis=1)
+        return jnp.concatenate((first_samples, second_samples), axis=concat_axis)
 
-    def log_prob(self, value):
+    def log_prob(self, value: ArrayLike) -> Array:
+        """
+        Evaluate log probability density under the MultiZLTN distribution.
+
+        Parameters
+        ----------
+        value : (..., D)
+            Points at which to evaluate log probability.
+
+        Returns
+        -------
+        (...)
+            Log probability densities.
+        """
         log_prob_x = self.zltn_dist.log_prob(value[..., 0])
-        sigma_11_inverse = 1. / self.sigma_11
-        # mu_hat = self.mu_2 + self.sigma_21*sigma_11_inverse*(value[0]- self.mu_1)
-        # print(self.mu_1.shape)
-        # print(value)
-        # print(value[...,0].shape)
-        # print(value[0][0].shape)
-
-        mu_hat = self.mu_2[..., None] + jnp.matmul(self.sigma_21,
-                                                   sigma_11_inverse * (value[..., 0] - self.mu_1[None, ...]))
-        sigma_hat = self.sigma_22 - jnp.matmul((self.sigma_21 * sigma_11_inverse), self.sigma_12)
-        # print(mu_hat.shape, sigma_hat.shape, value[...,1:].shape)
-        m = MultivariateNormal(mu_hat.T, sigma_hat)
-
-        log_prob_y_given_x = MultivariateNormal(mu_hat.T, sigma_hat).log_prob(value[..., 1:])
-        # print(log_prob_x + log_prob_y_given_x)
+        mu_hat = self.mu_2[..., None] + jnp.matmul(
+            self.sigma_21,
+            self._sigma_11_inv * (value[..., 0] - self.mu_1[None, ...]),
+        )
+        log_prob_y_given_x = MultivariateNormal(
+            mu_hat.T, scale_tril=self._chol_sigma_hat
+        ).log_prob(value[..., 1:])
         return log_prob_x + log_prob_y_given_x
 
     # old method without vectorization
@@ -165,78 +200,198 @@ class MultiZLTN(Distribution):
 
 
 class AutoMultiZLTNGuide(AutoContinuous):
-    # scale_tril_constraint = constraints.scaled_unit_lower_cholesky
+    """
+    AutoContinuous variational guide using a MultiZLTN posterior approximation.
+    """
     scale_tril_constraint = constraints.lower_cholesky
 
     def __init__(
-            self,
-            model,
-            *,
-            prefix="auto",
-            init_loc_fn=init_to_median,
-            init_scale=0.1,
-    ):
+        self,
+        model: Callable,
+        *,
+        prefix: str = "auto",
+        init_loc_fn: Callable = init_to_median,
+        init_scale: float = 0.1,
+        init_scale_tril: ArrayLike | None = None,
+    ) -> None:
+        """
+        Initialise the AutoMultiZLTN guide.
+
+        Parameters
+        ----------
+        model
+            Python callable containing NumPyro primitives.
+        prefix
+            Prefix for guide parameter names.
+        init_loc_fn
+            Initialization strategy for latent means.
+        init_scale
+            Initial scale factor for diagonal covariance.
+        init_scale_tril : (D, D)
+            Optional initial lower-Cholesky factor for covariance.
+        """
         if init_scale <= 0:
             raise ValueError("Expected init_scale > 0. but got {}".format(init_scale))
         self._init_scale = init_scale
+        self._init_scale_tril = init_scale_tril
         super().__init__(model, prefix=prefix, init_loc_fn=init_loc_fn)
 
-    def _get_posterior(self):
+    def _get_posterior(self) -> MultiZLTN:
         loc = numpyro.param("{}_loc".format(self.prefix), self._init_latent)
+        if self._init_scale_tril is None:
+            init_scale_tril = jnp.identity(self.latent_dim) * self._init_scale
+        else:
+            init_scale_tril = self._init_scale_tril
         scale_tril = numpyro.param(
             "{}_scale_tril".format(self.prefix),
-            jnp.identity(self.latent_dim) * self._init_scale,
+            init_scale_tril,
             constraint=self.scale_tril_constraint,
         )
         return MultiZLTN(loc, scale_tril=scale_tril)
 
-    def get_base_dist(self):
-        return dist.Normal(jnp.zeros(self.latent_dim), 1).to_event(1)
+    def get_base_dist(self) -> Distribution:
+        """
+        Return the base standard normal distribution.
+        """
+        return Normal(jnp.zeros(self.latent_dim), 1).to_event(1)
 
-    def get_transform(self, params):
+    def get_transform(self, params: dict) -> LowerCholeskyAffine:
+        """
+        Construct the affine transformation for the variational guide.
+
+        Parameters
+        ----------
+        params
+            Dictionary of variational parameters.
+
+        Returns
+        -------
+        LowerCholeskyAffine
+            Cholesky affine transformation mapping standard normal to target.
+        """
         loc = params["{}_loc".format(self.prefix)]
         scale_tril = params["{}_scale_tril".format(self.prefix)]
         return LowerCholeskyAffine(loc, scale_tril)
 
-    def get_posterior(self, params):
+    def get_posterior(self, params: dict) -> MultiZLTN:
         """
-        Returns a Multi ZLTN posterior distribution.
+        Return a MultiZLTN posterior distribution given variational parameters.
+
+        Parameters
+        ----------
+        params
+            Dictionary containing variational parameters '{prefix}_loc' and
+            '{prefix}_scale_tril'.
+
+        Returns
+        -------
+        MultiZLTN
+            Fitted MultiZLTN posterior distribution.
         """
         transform = self.get_transform(params)
         return MultiZLTN(transform.loc, scale_tril=transform.scale_tril)
 
 
 class My_Exponential(Distribution):
+    """
+    Exponential distribution with a soft quadratic barrier for negative values.
+    """
     reparametrized_params = ["rate"]
     arg_constraints = {"rate": constraints.positive}
     support = constraints.real
 
-    def __init__(self, rate=1.0, *, validate_args=None):
+    def __init__(self, rate: ArrayLike = 1.0, *, validate_args: bool | None = None) -> None:
+        """
+        Initialise the My_Exponential distribution.
+
+        Parameters
+        ----------
+        rate : (...) or scalar
+            Rate parameter lambda of the exponential distribution.
+        validate_args
+            Whether to validate distribution arguments.
+        """
         self.rate = rate
         super(My_Exponential, self).__init__(
             batch_shape=jnp.shape(rate), validate_args=validate_args
         )
 
-    def sample(self, key, sample_shape=()):
+    def sample(self, key: ArrayLike, sample_shape: tuple[int, ...] = ()) -> Array:
+        """
+        Draw samples from the exponential distribution.
+
+        Parameters
+        ----------
+        key
+            JAX PRNG key.
+        sample_shape
+            Batch shape of samples to draw.
+
+        Returns
+        -------
+        (\\*sample_shape, ...)
+            Drawn samples.
+        """
         assert is_prng_key(key)
         return (
-                exponential(key, shape=sample_shape + self.batch_shape) / self.rate
+            exponential(key, shape=sample_shape + self.batch_shape) / self.rate
         )
 
     @validate_sample
-    def log_prob(self, value):
-        return jnp.log(self.rate) - self.rate * value
+    def log_prob(self, value: ArrayLike) -> Array:
+        """
+        Evaluate log probability density with quadratic penalty for negative values.
+
+        Parameters
+        ----------
+        value : (...)
+            Points at which to evaluate log probability.
+
+        Returns
+        -------
+        (...)
+            Log probability density values.
+        """
+        base = jnp.log(self.rate) - self.rate * value
+        neg = jnp.where(value < 0, value, 0.0)
+        return base - 1.0e2 * neg * neg
 
     @property
-    def mean(self):
+    def mean(self) -> Array:
         return jnp.reciprocal(self.rate)
 
     @property
-    def variance(self):
+    def variance(self) -> Array:
         return jnp.reciprocal(self.rate ** 2)
 
-    def cdf(self, value):
+    def cdf(self, value: ArrayLike) -> Array:
+        """
+        Cumulative distribution function.
+
+        Parameters
+        ----------
+        value : (...)
+            Values at which to evaluate CDF.
+
+        Returns
+        -------
+        (...)
+            CDF values.
+        """
         return -jnp.expm1(-self.rate * value)
 
-    def icdf(self, q):
+    def icdf(self, q: ArrayLike) -> Array:
+        """
+        Inverse cumulative distribution function (quantile function).
+
+        Parameters
+        ----------
+        q : (...)
+            Quantile values in [0, 1].
+
+        Returns
+        -------
+        (...)
+            Quantile values.
+        """
         return -jnp.log1p(-q) / self.rate
