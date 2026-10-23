@@ -1,3 +1,5 @@
+# seed for reproducibility
+RNG_seed: 0
 # legacy term for specific combinations of parameters
 mode: custom
 # Number of chains to use for sampling

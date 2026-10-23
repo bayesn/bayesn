@@ -955,13 +955,19 @@ class TestAstroSetter:
         # no op for non-positive error floors.
         test_ds.apply_error_floor(0)
         pdt.assert_frame_equal(test_ds.photometry, dataset_two_sne.photometry)
-        sorted_mag_errs = test_ds.photometry.mag_err.sort_values()
+        sorted_mag_errs = test_ds.photometry["mag_err"].sort_values()
         floor = sorted_mag_errs.values[3]
-        test_ds.apply_error_floor(floor)
+        test_ds.apply_error_floor(floor, approx=True)
         for i in range(3):
             idx = sorted_mag_errs.index[i]
             assert test_ds.photometry.mag_err[idx] == floor
             assert test_ds.photometry.flux_err[idx] == floor*np.log(10)/2.5*test_ds.photometry.flux[idx]
+        floor = sorted_mag_errs.values[5]
+        test_ds.apply_error_floor(floor, approx=False)
+        for i in range(3):
+            idx = sorted_mag_errs.index[i]
+            assert test_ds.photometry.mag_err[idx] == floor
+            assert test_ds.photometry.flux_err[idx] == (10**(floor/2.5) - 1)*test_ds.photometry.flux[idx]
 
     def test_apply_overrides_coords_vpec(self, dataset_two_sne):
         test_ds = copy.deepcopy(dataset_two_sne)

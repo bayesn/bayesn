@@ -56,7 +56,7 @@ def get_cmd_args() -> argparse.Namespace:
     # int args
     for arg in [
         "num_chains", "num_warmup", "num_samples", "lm_maxiter", "zltn_particles",
-        "num_zltn_iter", "batch_size", "sim_prescale", "num_lcplot",
+        "num_zltn_iter", "batch_size", "sim_prescale", "num_lcplot", "RNG_seed",
         "file_format" # should these be here?
     ]:
         parser.add_argument(f"--{arg}", type=int, required=False, help=arg_help.get(arg))

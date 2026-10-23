@@ -210,6 +210,7 @@ def flux_to_mag(
     flux_err: Number | ArrayLike,
     zp: Number = 27.5,
     nan_val: Number = np.nan,
+    approx: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert fluxes and uncertainties to Pogson magnitudes given a zeropoint.
@@ -224,6 +225,10 @@ def flux_to_mag(
         Magnitude zeropoint. Defaults to 27.5.
     nan_val
         Value assigned to unphysical non-positive fluxes. Defaults to np.nan.
+    approx
+        If False, mag_err = 2.5*log10(1+flux_err/flux)
+        If True, mag_err = 2.5/ln(10)*flux_err/flux, which assumes ln(1+flux_err/flux)
+        is roughly flux_err/flux.
 
     Returns
     -------
@@ -237,13 +242,17 @@ def flux_to_mag(
     if (flux_err < 0).any():
         raise ValueError("Negative flux errors are not supported.")
     mag = np.where(flux > 0, zp - 2.5 * np.log10(flux), nan_val)
-    mag_err = np.where(flux > 0, 2.5 * np.log10(1 + flux_err / flux), nan_val)
+    if approx:
+        mag_err = np.where(flux > 0, 2.5 / np.log(10) * flux_err / flux, nan_val)
+    else:
+        mag_err = np.where(flux > 0, 2.5 * np.log10(1 + flux_err / flux), nan_val)
     return mag, mag_err
 
 def mag_to_flux(
     mag: Number | ArrayLike,
     mag_err: Number | ArrayLike,
     zp: Number = 27.5,
+    approx: bool = False
 ) -> tuple[Array, Array]:
     """
     Convert magnitudes and uncertainties to fluxes given a zeropoint.
@@ -256,6 +265,10 @@ def mag_to_flux(
         Magnitude uncertainty value(s).
     zp
         Magnitude zeropoint. Defaults to 27.5.
+    approx
+        If False, the flux_err = flux * (10^(mag_err / 2.5) - 1)
+        If True, the flux_err = flux * mag_err * ln(10) / 2.5, which assumes
+        ln(1+flux_err/flux) is roughly flux_err/flux.
 
     Returns
     -------
@@ -269,7 +282,10 @@ def mag_to_flux(
     if (mag_err <= 0).any():
         raise ValueError("Please do not provide unphysical non-positve errors.")
     flux = 10 ** (0.4 * (zp - mag))
-    flux_err = flux * (10 ** (mag_err / 2.5) - 1)
+    if approx:
+        flux_err = flux * mag_err * np.log(10) / 2.5
+    else:
+        flux_err = flux * (10 ** (mag_err / 2.5) - 1)
     return flux, flux_err
 
 def SNR_power_weighted_ave(

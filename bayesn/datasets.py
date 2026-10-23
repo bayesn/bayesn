@@ -804,7 +804,7 @@ class SNDataset:
         indices = self.get_idx(sn_dict["snid"])
         meta = self.get_metadata_subset(idx=indices)
         # some metadata should be allowed to vary.
-        for key in ("survey", "N_obs"):
+        for key in ("survey", "N_obs", "n_obs", "nobs"):
             meta.pop(key, None)
             sn_dict.pop(key, None)
         utils.assert_dicts_match(meta, sn_dict, flag_missing_data=False)
@@ -1283,7 +1283,7 @@ class SNDataset:
         """
         self.photometry["flt"] = self.photometry["flt"].map(lambda f: map_dict.get(f, f))
 
-    def apply_error_floor(self, error_floor: float) -> None:
+    def apply_error_floor(self, error_floor: float, data_type: str = "mag", approx: bool = False) -> None:
         """
         Enforce a minimum photometric error floor in magnitudes.
 
@@ -1291,10 +1291,17 @@ class SNDataset:
         ----------
         error_floor
             Error floor in magnitudes.
+        approx
+            If True, flux-magnitude conversion assumes error_floor is small enough for
+            ln(1+flux_err/flux) to be roughly equal to flux_err/flux.
+            If False, the full equation is used.
         """
         if error_floor <= 0:
             return
-        min_err = error_floor * (np.log(10) / 2.5) * self.photometry["flux"].to_numpy()
+        if approx:
+            min_err = error_floor * (np.log(10) / 2.5) * self.photometry["flux"].to_numpy()
+        else:
+            min_err = (10 ** (error_floor /  2.5) - 1) * self.photometry["flux"].to_numpy()
         self.photometry["flux_err"] = np.maximum(self.photometry["flux_err"].to_numpy(), min_err)
         self.photometry["mag_err"] = np.maximum(
             self.photometry["mag_err"].to_numpy(),
