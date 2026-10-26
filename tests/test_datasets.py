@@ -1079,8 +1079,9 @@ class TestFactoryMethods:
         test_ds = SNDataset.from_snana_fits(path, peakmjd_key="PEAKMJD")
         sn_dict, obs_df = io.read_snana_fits(path)
         sn_dict = clean_peakmjd_key(sn_dict, "PEAKMJD")
-        sn_dict = clean_sn_dict(sn_dict)
-        ref_ds = make_dataset(sn_dict, obs_df, sim=True)
+        ref_ds = SNDataset(sim=True)
+        ref_ds.append(sn_dict=sn_dict, obs_df=obs_df)
+        ref_ds.recalibrate_fluxcal_zpt()
         ref_ds.fill_out_redshifts()
         ref_ds.set_all_rest_phases()
         assert test_ds == ref_ds
