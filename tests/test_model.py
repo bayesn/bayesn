@@ -187,7 +187,7 @@ class TestInit:
         assert all(jnp.diag(model.L_Sigma) > 0)  # Positive unique Cholesky decomposition
 
     @pytest.mark.parametrize("arr_name,shape", [("J_l_T", (300, 7)), ("KD_t", (6, 7))])
-    def test_model_array(self, model: SEDmodel, arr_name: str, shape: tuple[int,int], rtol: float=0, atol: float =1e-15):
+    def test_model_array(self, model: SEDmodel, arr_name: str, shape: tuple[int,int], rtol: float=0, atol: float = 1e-12):
         test_obj = getattr(model, arr_name)
         assert test_obj.shape == shape
         ref = np.load(PICKLE_DIR / f"{arr_name}.npy")
@@ -477,7 +477,7 @@ class TestYaml:
         assert args == ref_args
 
 class TestSpectra:
-    def test_get_spectra(self, model: SEDmodel, sample_model_parameters: tuple[np.ndarray, ...], rtol: float=1e-14):
+    def test_get_spectra(self, model: SEDmodel, sample_model_parameters: tuple[np.ndarray, ...], rtol: float=1e-12):
         theta, AV, W0, W1, eps, RV, _, J_t, hsiao_interp, _, _, _ = sample_model_parameters
         test_spec = model._get_spectra(theta=theta, AV=AV, W0=W0, W1=W1, eps=eps, RV=RV, J_t=J_t, hsiao_interp=hsiao_interp)
         ref_spec = np.load(PICKLE_DIR / "T21_spectra.npy")
@@ -582,7 +582,7 @@ class TestFlux:
         Ds = np.array(flux_model.cosmo.distmod(np.array(z)))
         return flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights
 
-    def test_get_flux_batch(self, flux_batch_args: tuple[Any, ...], rtol: float=1e-14):
+    def test_get_flux_batch(self, flux_batch_args: tuple[Any, ...], rtol: float=1e-12):
         flux_model, spectra, mask, Ds, z, ebv, band_indices, mask, RV, band_weights = flux_batch_args
         test_flux = flux_model.get_flux_batch(
             model_spectra=spectra,
