@@ -1469,7 +1469,7 @@ class SNDataset:
             sn_dict, obs_df = read_fn(fname=f, fluxcal_zpt=fluxcal_zpt, **kwargs)
             sn_dict = clean_peakmjd_key(sn_dict, peakmjd_key)
             ds.append(sn_dict=sn_dict, obs_df=obs_df)
-        ds.photometry.reset_index(drop=True, inplace=True)
+        ds.photometry = ds.photometry.reset_index(drop=True)
         ds.apply_overrides(overrides=overrides)
 
         # Cleaning

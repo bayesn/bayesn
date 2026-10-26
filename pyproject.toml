@@ -68,6 +68,11 @@ markers = [
     "slow: Deep integration or long-running tests (run with -m slow)",
 ]
 testpaths = "tests"
+filterwarnings = [
+    "ignore:.*ArviZ is undergoing a major refactor.*:FutureWarning",
+    "ignore:.*Degrees of freedom <= 0 for slice.*:RuntimeWarning",
+    "ignore:.*Pickled array contains an aval with a named_shape attribute.*:DeprecationWarning",
+]
 
 [tool.setuptools.package-data]
 bayesn = [

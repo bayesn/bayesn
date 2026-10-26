@@ -402,7 +402,7 @@ def read_snana_fits(
     phot_data = phot_data.byteswap().view(phot_data.dtype.newbyteorder())
     phot_df = pd.DataFrame(phot_data, columns=phot_data.dtype.names)
     phot_df["FLT"] = phot_df.pop("BAND").str.decode("utf-8").str.strip()
-    phot_df.rename(columns={"FLUXCAL": "flux", "FLUXCALERR": "flux_err"}, inplace=True)
+    phot_df = phot_df.rename(columns={"FLUXCAL": "flux", "FLUXCALERR": "flux_err"})
     keep = ~np.isnan(phot_df["flux"].values) & ~np.isnan(phot_df["flux_err"].values)
     phot_df = phot_df.iloc[keep].reset_index(drop=True)
     sn_idx = sn_idx[keep]
