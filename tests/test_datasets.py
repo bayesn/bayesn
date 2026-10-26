@@ -1078,6 +1078,7 @@ class TestFactoryMethods:
         path = TEST_DIR / "training_data/BAYESN_test_fits/BAYESN_test_fits_HEAD.FITS"
         test_ds = SNDataset.from_snana_fits(path, peakmjd_key="PEAKMJD")
         sn_dict, obs_df = io.read_snana_fits(path)
+        sn_dict = clean_peakmjd_key(sn_dict, "PEAKMJD")
         sn_dict = clean_sn_dict(sn_dict)
         ref_ds = make_dataset(sn_dict, obs_df, sim=True)
         ref_ds.fill_out_redshifts()
@@ -1109,7 +1110,7 @@ class TestDataProducts:
         ]
         npt.assert_equal(list(fitres_table.columns), cols)
         npt.assert_equal(all_table["IDSURVEY"].values, 1)
-        npt.assert_equal(all_table["DROP"].values, "")
+        npt.assert_equal(all_table["DROP"].to_numpy(), "")
         pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
 
     def test_make_fitres_table_version_photometry(self, dataset_two_sne):
@@ -1123,7 +1124,7 @@ class TestDataProducts:
             "SEARCH_PEAKMJD", "NEPOCH", "TRESTMIN", "TRESTMAX",
         ]
         npt.assert_equal(list(fitres_table.columns), cols)
-        npt.assert_equal(all_table["DROP"].values, "")
+        npt.assert_equal(all_table["DROP"].to_numpy(), "")
         pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
 
     def test_make_fitres_table_sim(self, dataset_sim):
@@ -1140,7 +1141,7 @@ class TestDataProducts:
             "SNRMAX1", "SNRMAX2", "SNRMAX3", *fitres_snana_names,
         ]
         npt.assert_equal(list(fitres_table.columns), cols)
-        npt.assert_equal(all_table["DROP"].values, "")
+        npt.assert_equal(all_table["DROP"].to_numpy(), "")
         pdt.assert_frame_equal(fitres_table.to_pandas(), all_table[list(fitres_table.columns)])
 
     def test_cut_fitres_table(self, dataset_two_sne):

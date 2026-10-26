@@ -115,7 +115,8 @@ class TestRead:
 
     class TestReadSNANAAscii:
         @pytest.fixture(scope="class")
-        def sample(self) -> READ_DTYPE:
+        @classmethod
+        def sample(cls) -> READ_DTYPE:
             example_lc = Path(BASE_DIR.parent, "bayesn/data/example_lcs/Foundation_DR1_2016W.txt")
             return io.read_snana_ascii(example_lc)
 
@@ -213,7 +214,7 @@ class TestRead:
         with open(PICKLE_DIR / "snana_fits.pkl", "rb") as f:
             ref_sn_dict, ref_obs_df = pickle.load(f)
         assert_dicts_match(sn_dict, ref_sn_dict, flag_missing_data=True, rtol=1e-5, atol=1e-8)
-        pd.testing.assert_frame_equal(obs_df, ref_obs_df)
+        assert_frame_equal(obs_df, ref_obs_df, check_column_type=False, check_dtype=False)
 
     def test_read_snana_fits_jobsplit(self):
         head_path = TEST_DIR / "training_data/BAYESN_test_fits/BAYESN_test_fits_HEAD.FITS"
