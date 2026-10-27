@@ -26,7 +26,7 @@ in parallel as large tensor operations which each handle all separate SNe, phase
 it is important to note that GPUs will show the most benefit running large scale jobs. If you want to fit samples of
 hundreds of SNe, the fit time per object will be considerably shorter than fitting just a handful. For very small
 samples you are likely better off running on CPU and fitting objects serially rather than doing one big parallel fit
-(see :ref:`filters` for details of how to do this).
+(see :ref:`fitting` for details of how to do this).
 
 Depending on the GPUs you have access to and the cadence of your light curves, you should be able to fit thousands of
 SNe in parallel. In testing using 4 A100 GPUs, fits have successfully run upwards of 15,000 *griz*
@@ -50,6 +50,6 @@ multivariate Gaussian, as presented in Uzsoy+2024 (MNRAS 535, 2306). Using VI, f
 Redshift requirement
 ----------------------
 
-At the present time, BayeSN is designed for use with spectroscopic redshifts, which are kept fixed during inference.
-However, fitting with redshift as a free parameter based on a photometric redshift prior is feasible and planned in
-future.
+By default, BayeSN is designed for use with spectroscopic redshifts, which are kept fixed during inference.
+However, fitting with redshift as a free parameter using a photometric redshift prior (via Gaussian uncertainties
+or quantiles) is also supported by setting ``photoz=True``.

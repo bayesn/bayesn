@@ -1,0 +1,3 @@
+[submodule "tests/test_files/training_data/Foundation_DR1"]
+	path = tests/test_files/training_data/Foundation_DR1
+	url = https://github.com/djones1040/Foundation_DR1
