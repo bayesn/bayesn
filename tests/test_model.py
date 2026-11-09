@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from bayesn.bayesn_model import SEDmodel, default_kwargs
+from bayesn.extinction_relations import DustExtRel
 from bayesn import io
 from bayesn.utils import get_model_params_from_chains
 
@@ -53,9 +54,8 @@ def initial_args() -> dict:
 
 @pytest.fixture(scope="module")
 def model(initial_args: dict) -> SEDmodel:
-    model = SEDmodel(load_model=initial_args["load_model"], load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
+    model = SEDmodel(load_model=initial_args["load_model"], load_ext_rel="default", filter_yaml=None)
     return model
-
 
 @pytest.fixture(scope="module")
 def custom_model(initial_args: dict, model: SEDmodel) -> SEDmodel:
@@ -66,12 +66,13 @@ def custom_model(initial_args: dict, model: SEDmodel) -> SEDmodel:
 
     def mock_load_ext_rel(self, *args, **kwargs):
         self.mw_ext = model.mw_ext
-        self.ext_rel = model.ext_rel
+        self.ext_rel = deepcopy(model.ext_rel)
+        self.ext_rel.name = args[0]
 
     with patch.object(SEDmodel, "_load_hsiao_template", mock_load_hsiao), \
          patch.object(SEDmodel, "load_ext_rel", mock_load_ext_rel), \
          patch.object(SEDmodel, "_load_dovekie_cov"):
-        custom_model = SEDmodel(load_model=TEST_DIR / "test_model.yaml", load_ext_rel=initial_args["load_ext_rel"], filter_yaml=None)
+        custom_model = SEDmodel(load_model=TEST_DIR / "test_model.yaml", load_ext_rel="CCM89", filter_yaml=None)
     return custom_model
 
 @pytest.fixture(scope="module")
@@ -134,18 +135,25 @@ class TestInit:
         with pytest.raises(FileNotFoundError):
             model = SEDmodel(load_model="T21_model", shift_file=NON_EXISTENT_PATH)
 
-    def test_custom_model_file(self, initial_args: dict, model: SEDmodel, custom_model: SEDmodel):
+    def test_custom_model_init(self, initial_args: dict, model: SEDmodel, custom_model: SEDmodel):
         for attr in ("l_knots", "L_Sigma", "tau_knots", "W0", "W1"):
             assert (getattr(custom_model, attr) == getattr(model, attr)).all()
         for attr in ("M0", "sigma0", "tauA"):  # skipping RV because the custom model uses MUR
             assert getattr(custom_model, attr) == getattr(model, attr)
-
-    def test_pop_rv_init(self, initial_args: dict, custom_model: SEDmodel):
         assert not custom_model.shared_RV
         assert custom_model.RV is None
         assert custom_model.mu_R == 2.61
         assert custom_model.sigma_R == 0.5
+        assert custom_model.ext_rel.name == "CCM89"
 
+    def test_default_ext_rel(self, initial_args: dict, model: SEDmodel):
+        with open(BASE_DIR / f"bayesn/model_files/{model.model_name}/BAYESN.YAML", "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            if line.startswith("EXT_REL"):
+                ext_rel_name = line.split()[1]
+                break
+        assert model.ext_rel.name == ext_rel_name
 
     @pytest.mark.parametrize("attr_name,value", expected_constants)
     def test_init_constants(self, model: SEDmodel, attr_name: str, value: int | float):
@@ -1023,7 +1031,13 @@ class TestPostprocess:
 
         model.postprocess(samples, run_args)
         assert (tmp_path / "initial_chains.pkl").exists()
-        assert (tmp_path / "bayesn.yaml").exists()
+        assert (tmp_path / "BAYESN.YAML").exists()
+        with open(tmp_path / "BAYESN.YAML", "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            if line.startswith("EXT_REL"):
+                assert line.split()[1] == model.ext_rel.name
+                break
 
     def test_fix_W1_theta_sign_degen(self, model: SEDmodel):
         theta = np.array([-1.0, 2.0])[None, None, :]

@@ -470,7 +470,7 @@ class SEDmodel(object):
         load_model: str = "T21_model",
         filter_yaml: Path | str | None = None,
         fiducial_cosmology: dict[str, float] = {"H0": 73.24, "Om0": 0.28},
-        load_ext_rel: str = "G23",
+        load_ext_rel: str = "default",
         apply_dovekie_mag_shifts: bool = True,
         shift_file: str | None = None,
         apply_mag_shifts: bool = False,
@@ -535,6 +535,7 @@ class SEDmodel(object):
         load_ext_rel
             Name of dust extinction relation to load. Available choices:
 
+            * 'default' : The extinction relation used to train the model
             * 'CCM89' : Cardelli, Clayton & Mathis (1989)
             * 'C94' : Cardelli (1994)
             * 'O94' : O'Donnell (1994)
@@ -680,6 +681,8 @@ class SEDmodel(object):
         self.J_l_T = device_put(spline_coeffs(self.model_wave, self.l_knots, KD_l))
         self.KD_t = device_put(invKD(self.tau_knots))
 
+        if load_ext_rel == "default":
+            load_ext_rel = params["EXT_REL"]
         self.load_ext_rel(load_ext_rel)
         self._init_band_weights()
         self._load_dovekie_cov()
@@ -4358,7 +4361,7 @@ class SEDmodel(object):
         self,
         samples: dict,
         args: dict,
-        outfile: str | Path = "bayesn.yaml"
+        outfile: str | Path = "BAYESN.YAML"
     ):
         """Save best fit global params to files for easy inspection and reading in.
         """
@@ -4370,6 +4373,7 @@ class SEDmodel(object):
             np.mean(samples["L_Omega"], axis=[0, 1]),
         )
         yaml_data = {
+            "EXT_REL": self.ext_rel.name,
             "M0": float(self.M0),
             "TAU_KNOTS": self.tau_knots.tolist(),
             "L_KNOTS": self.l_knots.tolist(),
