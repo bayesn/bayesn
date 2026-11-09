@@ -21,7 +21,6 @@ import pandas as pd
 import pytest
 
 from bayesn.bayesn_model import SEDmodel, default_kwargs
-from bayesn.extinction_relations import DustExtRel
 from bayesn import io
 from bayesn.utils import get_model_params_from_chains
 
