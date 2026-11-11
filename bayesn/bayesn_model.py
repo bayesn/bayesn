@@ -2225,16 +2225,12 @@ class SEDmodel(object):
         args['num_nobs_bins'] = args.get('num_nobs_bins', 1)
         args['min_bin_gain'] = args.get('min_bin_gain', 0.05)
         args['systematics'] = bool(args.get('systematics_variations'))  # on iff something is declared
-        args['syst_format'] = args.get('syst_format', 'npz')
-        if args['syst_format'] not in ('npz', 'txt', 'both'):
-            raise ValueError(f"syst_format must be npz, txt or both, not {args['syst_format']}")
         args['initialisation'] = args.get('initialisation', 'median')
         args['l_knots'] = args.get('l_knots', self.l_knots.tolist())
         args['tau_knots'] = args.get('tau_knots', self.tau_knots.tolist())
         args['map'] = args.get('map', {})
         args['drop_bands'] = args.get('drop_bands', [])
         args['outputdir'] = args.get('outputdir', os.path.join(os.getcwd()))
-        args['outfile_prefix'] = args.get('outfile_prefix', 'output')
         args['jobid'] = args.get('jobid', False)
         pdp = args.get('private_data_path', [])
         args['private_data_path'] = [pdp] if isinstance(pdp, str) else pdp
@@ -2921,12 +2917,19 @@ class SEDmodel(object):
         if self._syst is not None:  # propagate training-posterior systematics from this fit's VI outputs, and save
             zmode = {k[6:]: samples.pop(k) for k in list(samples) if k.startswith('zmode_')}
             delta_mu = self._systematic_dmu(zmode)
-            write_systematics(os.path.join(args['outputdir'], args['outfile_prefix']), delta_mu, self.sn_list,
-                              self._syst['col_labels'], args['syst_format'])
-            exts = ['npz', 'txt'] if args['syst_format'] == 'both' else [args['syst_format']]
-            written = ', '.join(f'{args["outfile_prefix"]}.SYST.{"NPZ" if e == "npz" else "TEXT"}' for e in exts)
-            print(f'Systematics: per-SN Delta-mu over {delta_mu.shape[1]} columns written to {written}; '
-                  f'merge jobs with --merge_systematics, then construct covariance with --make_covariance')
+            written = []
+            if args.get('textfile_prefix'):
+                write_systematics(os.path.join(args['outputdir'], args['textfile_prefix']), delta_mu,
+                                  self.sn_list, self._syst['col_labels'], 'txt')
+                written.append(f'{args["textfile_prefix"]}.SYST.TEXT')
+            if args.get('npzfile_prefix'):
+                write_systematics(os.path.join(args['outputdir'], args['npzfile_prefix']), delta_mu,
+                                  self.sn_list, self._syst['col_labels'], 'npz')
+                written.append(f'{args["npzfile_prefix"]}.SYST.NPZ')
+            if written:
+                print(f'Systematics: per-SN Delta-mu over {delta_mu.shape[1]} columns written to '
+                      f'{", ".join(written)}; merge jobs with --merge_systematics, '
+                      f'then construct covariance with --make_covariance')
         self.postprocess(samples, args)
 
     def fit_from_file(self, path, filt_map={}, peak_mjd_key='SEARCH_PEAKMJD', print_summary=True, file_prefix=None,
@@ -3275,6 +3278,8 @@ class SEDmodel(object):
             # Compute FITPROB (must be before LCPLOT generation which corrupts self.band_weights)
             fitprob, fitchi2, ndof = self.compute_fitprob(samples, batch_size=args.get('batch_size'))
 
+            textfile_prefix = args.get('textfile_prefix')
+
             # Create lcplot file
             t = np.arange(self.tau_knots[0], self.tau_knots[-1], 2)
 
@@ -3283,7 +3288,7 @@ class SEDmodel(object):
             else:
                 num_lcplot = args['num_lcplot']
 
-            if args['num_lcplot'] > 0:
+            if textfile_prefix and num_lcplot > 0:
                 bands_by_cid = self.lcplot_data.groupby('CID')['FLT'].unique().to_dict()
                 bands = [list(bands_by_cid.get(sn, [])) for sn in self.sn_list]
                 f = self.get_flux_from_chains(t, bands, samples, self.data[-5, 0, :], self.data[-2, 0, :],
@@ -3306,22 +3311,26 @@ class SEDmodel(object):
                 self.lcplot_data = pd.concat([self.lcplot_data] + fit_dfs, ignore_index=True)
 
                 self.lcplot_data = self.lcplot_data.sort_values(by=['CID', 'DATA_FLAG', 'MJD'])
-                self.lcplot_data.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCPLOT.TEXT'),
-                                        index=False)
+                lcplot_table = self.lcplot_data.copy()
+                lcplot_table.insert(0, 'VARNAMES:', 'SN:')
+                sncosmo.write_lc(lcplot_table,
+                                os.path.join(args['outputdir'], f'{textfile_prefix}.LCPLOT.TEXT'),
+                                format='ascii', metachar='')
 
             # Create FITRES file
-            # if args['snana']:
-            # fetch snana version that includes tag + commit;
-            # e.g., v11_05-4-gd033611.
-            # Use same git command as in Makefile for C code
+            # Record the tag and commit from each code checkout.
             SNANA_DIR = os.environ.get('SNANA_DIR', 'NULL')
             if SNANA_DIR != 'NULL':
-                cmd = f'cd {SNANA_DIR}; git describe --always --tags'
-                ret = subprocess.run([cmd], cwd=os.getcwd(), shell=True, capture_output=True, text=True)
-                snana_version = ret.stdout.replace('\n', '')
+                ret = subprocess.run(['git', 'describe', '--always', '--tags', '--long'],
+                                     cwd=SNANA_DIR, capture_output=True, text=True)
+                snana_version = ret.stdout.strip()
             else:
                 snana_version = 'NULL'
+            ret = subprocess.run(['git', 'describe', '--always', '--tags', '--long'],
+                                 cwd=os.path.dirname(__file__), capture_output=True, text=True, check=True)
+            bayesn_version = ret.stdout.strip()
             self.fitres_table.meta = {'#\n# SNANA_VERSION:': snana_version,
+                                      '# BAYESN_VERSION:': bayesn_version,
                                       '# VERSION_PHOTOMETRY:': args.get('version_photometry', args.get('data_table')),
                                       '# TABLE NAME:': 'FITRES\n#'}
 
@@ -3332,7 +3341,8 @@ class SEDmodel(object):
                     del samples[key]
             if args['save_summary']:
                 summary = arviz.summary(samples)
-                summary.to_csv(os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.SUMMARY.TEXT'))
+                if textfile_prefix:
+                    summary.to_csv(os.path.join(args['outputdir'], f'{textfile_prefix}.SUMMARY.TEXT'))
                 summary_subset = summary[~summary.index.str.contains('tform')]
                 rhat = summary_subset.r_hat.values
                 sn_rhat = np.array([rhat[i::n_sn] for i in range(n_sn)])
@@ -3360,16 +3370,24 @@ class SEDmodel(object):
                        [col for col in self.fitres_table.columns if 'SIM' in col]
             self.fitres_table = self.fitres_table[new_cols]
 
-            sncosmo.write_lc(self.fitres_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.FITRES.TEXT'), fmt="snana", metachar="")
-            if hasattr(self, 'all_table'):
-                sncosmo.write_lc(self.all_table, os.path.join(args['outputdir'], f'{args["outfile_prefix"]}.LCSUMMARY.TEXT'), fmt="snana", metachar="")
+            if textfile_prefix:
+                sncosmo.write_lc(self.fitres_table,
+                                os.path.join(args['outputdir'], f'{textfile_prefix}.FITRES.TEXT'),
+                                fmt="snana", metachar="")
+                if hasattr(self, 'all_table'):
+                    sncosmo.write_lc(self.all_table,
+                                    os.path.join(args['outputdir'], f'{textfile_prefix}.LCSUMMARY.TEXT'),
+                                    fmt="snana", metachar="")
 
 
-        if args['snana']:
+        yaml_prefix = args.get('textfile_prefix') or args.get('npzfile_prefix')
+        if args['snana'] and yaml_prefix:
             self.end_time = time.time()
             cpu_time = self.end_time - self.start_time
             # Output yaml
             out_dict = {
+                'SNANA_VERSION': snana_version,
+                'BAYESN_VERSION': bayesn_version,
                 'ABORT_IF_ZERO': 1,
                 'SURVEY': self.survey,
                 'IDSURVEY': int(self.survey_id),
@@ -3379,7 +3397,7 @@ class SEDmodel(object):
                 'CPU_MINUTES': round(cpu_time / 60, 2),
                 'SYSTEMATICS': self._syst is not None,
             }
-            with open(f'{args["outfile_prefix"]}.YAML', 'w') as file:
+            with open(f'{yaml_prefix}.YAML', 'w') as file:
                 yaml.dump(out_dict, file)
 
         if not (args['mode'] == 'fitting' and args['snana']):

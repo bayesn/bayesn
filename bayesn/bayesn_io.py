@@ -12,7 +12,7 @@ import time
 def write_systematics(stem, delta_mu, sn_list, labels, fmt):
     """
     Write a fit's per-SN delta_mu table as {stem}.SYST.NPZ and/or {stem}.SYST.TEXT. The text form is a
-    header row of column labels (first entry CID) followed by one row per SN; both carry the same arrays.
+    SNANA table with a VARNAMES: header and SN: rows; both carry the same arrays.
     """
     if len(labels) != delta_mu.shape[1]:
         raise ValueError(f'{len(labels)} column labels for {delta_mu.shape[1]} columns of delta_mu')
@@ -21,9 +21,9 @@ def write_systematics(stem, delta_mu, sn_list, labels, fmt):
             np.savez(f, delta_mu=delta_mu, sn_list=np.array(sn_list, dtype=str), labels=np.array(labels, dtype=str))
     if fmt in ('txt', 'both'):
         with open(f'{stem}.SYST.TEXT', 'w') as f:
-            f.write(' '.join(['CID'] + list(labels)) + '\n')
+            f.write(' '.join(['VARNAMES:', 'CID'] + list(labels)) + '\n')
             for sn, row in zip(sn_list, delta_mu):
-                f.write(' '.join([str(sn)] + [f'{v:.10e}' for v in row]) + '\n')
+                f.write(' '.join(['SN:', str(sn)] + [f'{v:.10e}' for v in row]) + '\n')
 
 
 def read_systematics(path):
@@ -32,7 +32,7 @@ def read_systematics(path):
         with np.load(path) as d:
             return d['delta_mu'], d['sn_list'], d['labels']
     rows = np.loadtxt(path, dtype=str, ndmin=2)
-    return rows[1:, 1:].astype(float), rows[1:, 0], rows[0, 1:]
+    return rows[1:, 2:].astype(float), rows[1:, 1], rows[0, 2:]
 
 
 def write_snana_lcfile(output_dir, snname, mjd, flt, mag, magerr, tmax, z_helio, z_cmb, z_cmb_err, ebv_mw, ra=None,
